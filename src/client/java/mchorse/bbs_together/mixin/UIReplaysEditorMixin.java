@@ -35,7 +35,7 @@ implements ITogetherReplaysEditor {
         return this.together_allSheetIds;
     }
 
-    @ModifyVariable(method={"updateChannelsList"}, at=@At(value="INVOKE", target="Ljava/util/List;removeIf(Ljava/util/function/Predicate;)Z", remap=false), ordinal=0, remap=false)
+    @ModifyVariable(method={"updateChannelsList"}, at=@At(value="INVOKE", target="Ljava/util/List;removeIf(Ljava/util/function/Predicate;)Z", remap=false), ordinal=1, remap=false)
     private List<UIKeyframeSheet> captureAllSheets(List<UIKeyframeSheet> list) {
         this.together_allSheetIds.clear();
         for (UIKeyframeSheet uIKeyframeSheet : list) {

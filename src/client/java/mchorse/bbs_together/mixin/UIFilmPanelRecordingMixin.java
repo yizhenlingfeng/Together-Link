@@ -7,6 +7,7 @@ import java.util.Map;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.Recorder;
 import mchorse.bbs_mod.film.replays.Replay;
+import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.utils.CollectionUtils;
@@ -47,11 +48,11 @@ public class UIFilmPanelRecordingMixin {
         }
         if (replay.properties != null && replay.properties.tracks != null) {
             List<String> propBase = Arrays.asList("replays", idxStr, "properties");
-            for (Map.Entry entry : replay.properties.tracks.entrySet()) {
-                KeyframeChannel ch = (KeyframeChannel)entry.getValue();
+            for (Map.Entry<TrackId, KeyframeChannel> entry : replay.properties.tracks.entrySet()) {
+                KeyframeChannel ch = entry.getValue();
                 if (ch.isEmpty()) continue;
                 ArrayList<String> path = new ArrayList<String>(propBase);
-                path.add((String)entry.getKey());
+                path.add(entry.getKey().toKey());
                 TogetherClientNetwork.sendSyncDataWithPath(filmId, path, (BaseValue)ch);
             }
         }
