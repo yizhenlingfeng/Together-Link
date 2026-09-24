@@ -1,0 +1,7 @@
+{
+  "bbs_together.utility.sync.title": "Синхронизация BBS Together",
+  "bbs_together.utility.sync.download": "Загрузить ресурсы с сервера",
+  "bbs_together.utility.sync.upload": "Отправить ресурсы на сервер",
+  "bbs_together.utility.sync.receive": "Получить отправленные ресурсы",
+  "bbs_together.notification.synced": "Фильм синхронизирован от"
+}

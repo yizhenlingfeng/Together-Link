@@ -1,0 +1,7 @@
+{
+  "bbs_together.utility.sync.title": "BBS Together Senkronizasyonu",
+  "bbs_together.utility.sync.download": "Sunucudan varlıkları indir",
+  "bbs_together.utility.sync.upload": "Sunucuya varlıkları yükle",
+  "bbs_together.utility.sync.receive": "Gönderilen varlıkları al",
+  "bbs_together.notification.synced": "Film şuradan senkronize edildi:"
+}

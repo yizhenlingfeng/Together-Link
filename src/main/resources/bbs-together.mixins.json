@@ -1,0 +1,16 @@
+{
+    "required":  true,
+    "package":  "mchorse.bbs_together.mixin",
+    "compatibilityLevel":  "JAVA_17",
+    "mixins":  [
+                   "BBSCommandsMixin",
+                   "TogetherServerNetworkFix28Mixin",
+                   "BBSTogetherFix28ServerActiveMixin"
+               ],
+    "injectors":  {
+                      "defaultRequire":  1
+                  },
+    "overwrites":  {
+                       "requireAnnotations":  true
+                   }
+}

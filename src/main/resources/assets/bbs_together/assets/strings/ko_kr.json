@@ -1,0 +1,7 @@
+{
+  "bbs_together.utility.sync.title": "BBS Together 동기화",
+  "bbs_together.utility.sync.download": "서버에서 에셋 다운로드",
+  "bbs_together.utility.sync.upload": "서버에 에셋 업로드",
+  "bbs_together.utility.sync.receive": "전송된 에셋 수신",
+  "bbs_together.notification.synced": "필름 동기화됨:"
+}

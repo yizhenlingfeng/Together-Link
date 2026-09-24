@@ -1,0 +1,7 @@
+{
+  "bbs_together.utility.sync.title": "BBS Together Szinkronizálás",
+  "bbs_together.utility.sync.download": "Erőforrások letöltése a szerverről",
+  "bbs_together.utility.sync.upload": "Erőforrások feltöltése a szerverre",
+  "bbs_together.utility.sync.receive": "Küldött erőforrások fogadása",
+  "bbs_together.notification.synced": "Film szinkronizálva ettől:"
+}

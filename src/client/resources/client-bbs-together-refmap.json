@@ -1,0 +1,14 @@
+{
+  "mappings": {
+    "mchorse/bbs_together/mixin/UIKeyframeDopeSheetMixin": {
+      "Lnet/minecraft/client/render/BufferBuilder;begin(Lnet/minecraft/client/render/VertexFormat$DrawMode;Lnet/minecraft/client/render/VertexFormat;)V": "Lnet/minecraft/class_287;method_1328(Lnet/minecraft/class_293$class_5596;Lnet/minecraft/class_293;)V"
+    }
+  },
+  "data": {
+    "named:intermediary": {
+      "mchorse/bbs_together/mixin/UIKeyframeDopeSheetMixin": {
+        "Lnet/minecraft/client/render/BufferBuilder;begin(Lnet/minecraft/client/render/VertexFormat$DrawMode;Lnet/minecraft/client/render/VertexFormat;)V": "Lnet/minecraft/class_287;method_1328(Lnet/minecraft/class_293$class_5596;Lnet/minecraft/class_293;)V"
+      }
+    }
+  }
+}

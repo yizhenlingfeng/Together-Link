@@ -1,0 +1,55 @@
+# gradle
+
+.gradle/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# fabric
+
+run/
+run_2/
+run_server/
+
+# java
+
+logs/
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr
+
+ik_test/*
+.claude/settings.local.json
+OrthoCamera-1.20.1
+temp_change_log.md
+
+# 归档的旧版 jar（dist/ 目录）
+dist/*.jar
+
+# BBS 子项目源码构建产物
+lib/**/.gradle/
+lib/**/build/

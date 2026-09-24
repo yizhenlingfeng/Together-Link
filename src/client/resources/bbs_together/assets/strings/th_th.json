@@ -1,0 +1,7 @@
+{
+  "bbs_together.utility.sync.title": "การซิงค์ BBS Together",
+  "bbs_together.utility.sync.download": "ดาวน์โหลดสินทรัพย์จากเซิร์ฟเวอร์",
+  "bbs_together.utility.sync.upload": "อัปโหลดสินทรัพย์ไปยังเซิร์ฟเวอร์",
+  "bbs_together.utility.sync.receive": "รับสินทรัพย์ที่ส่งมา",
+  "bbs_together.notification.synced": "ซิงค์ฟิล์มจาก"
+}

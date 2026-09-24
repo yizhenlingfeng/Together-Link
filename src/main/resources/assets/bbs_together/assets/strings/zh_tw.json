@@ -1,0 +1,11 @@
+{
+    "bbs_together.utility.sync.title":  "BBS Together 同步",
+    "bbs_together.utility.sync.download":  "從伺服器下載資源",
+    "bbs_together.utility.sync.upload":  "上傳資源到伺服器",
+    "bbs_together.utility.sync.receive":  "接收推送的資源",
+    "bbs_together.notification.synced":  "影片已從以下同步：",
+    "bbs_together.config.keyframes.default_interpolation_enabled":  "啟用預設關鍵影格插值",
+    "bbs_together.config.keyframes.default_interpolation_enabled-comment":  "開啟後，新建關鍵影格會使用下方選擇的預設插值；關閉時保留 BBSFS 根據軌道或前一個關鍵影格自動決定插值的原始邏輯。",
+    "bbs_together.config.keyframes.default_shape-comment":  "新建關鍵影格使用的預設形狀。點擊右側圖示可選擇形狀。",
+    "bbs_together.config.keyframes.default_interpolation-comment":  "啟用預設關鍵影格插值後，新建關鍵影格會使用這裡選擇的插值。"
+}

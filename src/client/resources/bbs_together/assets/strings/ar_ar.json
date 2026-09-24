@@ -1,0 +1,7 @@
+{
+  "bbs_together.utility.sync.title": "مزامنة BBS Together",
+  "bbs_together.utility.sync.download": "تنزيل الأصول من الخادم",
+  "bbs_together.utility.sync.upload": "رفع الأصول إلى الخادم",
+  "bbs_together.utility.sync.receive": "استقبال الأصول المُرسلة",
+  "bbs_together.notification.synced": "تمت المزامنة من"
+}

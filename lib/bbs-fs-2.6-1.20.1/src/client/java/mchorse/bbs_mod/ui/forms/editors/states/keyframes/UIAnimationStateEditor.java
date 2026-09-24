@@ -1,0 +1,484 @@
+package mchorse.bbs_mod.ui.forms.editors.states.keyframes;
+
+import mchorse.bbs_mod.BBSSettings;
+import mchorse.bbs_mod.cubic.ModelInstance;
+import mchorse.bbs_mod.film.replays.tracks.TrackCatalog;
+import mchorse.bbs_mod.film.replays.tracks.TrackDescriptor;
+import mchorse.bbs_mod.forms.FormUtils;
+import mchorse.bbs_mod.forms.FormUtilsClient;
+import mchorse.bbs_mod.forms.entities.IEntity;
+import mchorse.bbs_mod.forms.forms.Form;
+import mchorse.bbs_mod.graphics.window.Window;
+import mchorse.bbs_mod.forms.forms.ModelForm;
+import mchorse.bbs_mod.forms.renderers.ModelFormRenderer;
+import mchorse.bbs_mod.forms.renderers.utils.MatrixCache;
+import mchorse.bbs_mod.forms.states.AnimationState;
+import mchorse.bbs_mod.ui.UIKeys;
+import mchorse.bbs_mod.ui.film.replays.UIReplaysEditor;
+import mchorse.bbs_mod.ui.film.replays.UIReplaysEditorUtils;
+import mchorse.bbs_mod.ui.film.replays.overlays.UIAnimationToPoseOverlayPanel;
+import mchorse.bbs_mod.ui.film.replays.overlays.UIKeyframeSheetFilterOverlayPanel;
+import mchorse.bbs_mod.ui.forms.editors.UIFormEditor;
+import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.framework.elements.UIElement;
+import mchorse.bbs_mod.ui.framework.elements.input.UIPropTransform;
+import mchorse.bbs_mod.ui.framework.elements.input.items.FoldState;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeEditor;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframes;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.UIKeyframeDopeSheet;
+import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
+import mchorse.bbs_mod.ui.framework.elements.utils.UIDraggable;
+import mchorse.bbs_mod.ui.utils.Gizmo;
+import mchorse.bbs_mod.ui.utils.GizmoDrag;
+import mchorse.bbs_mod.ui.utils.StencilFormFramebuffer;
+import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_mod.utils.MatrixStackUtils;
+import mchorse.bbs_mod.ui.framework.elements.input.drag.TransformSpace;
+import mchorse.bbs_mod.utils.Pair;
+import mchorse.bbs_mod.utils.colors.Colors;
+import mchorse.bbs_mod.utils.joml.Matrices;
+import org.joml.Matrix4f;
+import org.joml.Vector2i;
+import org.lwjgl.glfw.GLFW;
+import org.joml.Vector3f;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+public class UIAnimationStateEditor extends UIElement
+{
+    public UIKeyframeEditor keyframeEditor;
+
+    public UIFormEditor editor;
+    public UIElement editArea;
+
+    private AnimationState state;
+    private Set<String> keys = new LinkedHashSet<>();
+
+    /** Track rows the user has unfolded right now; handed to the dope sheet, which folds them in place. */
+    private final FoldState<String> expandedTabs = new FoldState<>();
+
+    public UIAnimationStateEditor(UIFormEditor editor)
+    {
+        this.editor = editor;
+
+        this.editArea = new UIElement();
+        this.editArea.relative(this)
+            .x(BBSSettings.editorLayoutSettings.getStateEditorSizeH())
+            .wTo(this.area, 1F)
+            .h(1F);
+
+        UIDraggable draggable = new UIDraggable((context) ->
+        {
+            float fx = (context.mouseX - this.area.x) / (float) this.area.w;
+            float fy = -(context.mouseY - this.getParent().area.ey()) / (float) this.getParent().area.h;
+
+            BBSSettings.editorLayoutSettings.setStateEditorSizeV(fy);
+            BBSSettings.editorLayoutSettings.setStateEditorSizeH(fx);
+
+            this.h(BBSSettings.editorLayoutSettings.getStateEditorSizeV());
+            this.editArea.x(BBSSettings.editorLayoutSettings.getStateEditorSizeH());
+            this.getParent().resize();
+        });
+        draggable.cursors(GLFW.GLFW_CROSSHAIR_CURSOR, GLFW.GLFW_CROSSHAIR_CURSOR);
+
+        draggable.reference(() -> new Vector2i(this.editArea.area.x, this.area.y));
+        draggable.rendering((context) ->
+        {
+            int size = 5;
+            int x = this.editArea.area.x + 3;
+            int y = this.editArea.area.y + 3;
+
+            context.batcher.box(x, y, x + 1, y + size, Colors.WHITE);
+            context.batcher.box(x, y - 1, x + size, y, Colors.WHITE);
+
+            x = this.editArea.area.x - 3;
+            y = this.editArea.area.y + 3;
+
+            context.batcher.box(x - 1, y, x, y + size, Colors.WHITE);
+            context.batcher.box(x - size, y - 1, x, y, Colors.WHITE);
+        });
+
+        draggable.hoverOnly().relative(this.editArea).w(40).h(6).anchorX(0.5F);
+
+        this.add(this.editArea, draggable);
+    }
+
+    public AnimationState getState()
+    {
+        return this.state;
+    }
+
+    public void setState(AnimationState state)
+    {
+        UIKeyframes lastEditor = null;
+
+        if (this.keyframeEditor != null)
+        {
+            lastEditor = this.keyframeEditor.view;
+
+            this.keyframeEditor.removeFromParent();
+            this.keyframeEditor = null;
+        }
+
+        this.state = state;
+
+        if (this.state == null)
+        {
+            return;
+        }
+
+        List<UIKeyframeSheet> sheets = new ArrayList<>();
+
+        /* A state lays a form's own values over it; the solver tracks only mean anything inside a
+         * film, where something clears them again every frame. */
+        List<TrackDescriptor> catalog = new ArrayList<>();
+
+        for (TrackDescriptor track : TrackCatalog.ordered(TrackCatalog.of(this.editor.form, this.state.properties)))
+        {
+            if (!track.kind().isSolver())
+            {
+                catalog.add(track);
+            }
+        }
+
+        UIReplaysEditorUtils.buildSheets(catalog, sheets);
+
+        this.keys.clear();
+
+        for (UIKeyframeSheet sheet : sheets)
+        {
+            this.keys.add(UIReplaysEditor.getSheetFilterKey(sheet));
+        }
+
+        sheets.removeIf((v) -> v.id.equals("anchor"));
+
+        /* The state isn't empty by itself - so if the filter empties it, the timeline has to stay (see below). */
+        boolean hadTracks = !sheets.isEmpty();
+
+        sheets.removeIf((v) ->
+        {
+            String filterKey = UIReplaysEditor.getSheetFilterKey(v);
+
+            for (String s : BBSSettings.disabledSheets.get())
+            {
+                if (filterKey.equals(s) || v.id.equals(s) || v.id.endsWith("/" + s))
+                {
+                    return true;
+                }
+            }
+
+            Form owner = UIReplaysEditor.getSheetForm(v);
+
+            if (owner != null)
+            {
+                Set<String> ownerDisabled = owner.disabledTracks.get();
+
+                return ownerDisabled.contains(Form.DISABLED_ALL) || ownerDisabled.contains(filterKey);
+            }
+
+            return false;
+        });
+
+        UIReplaysEditorUtils.pruneTree(sheets);
+
+        /*
+         * Filtering every track off used to drop the timeline itself, and the track filter lives in its
+         * context menu - so «disable all» locked the user out of the only way back. Keep the (empty)
+         * timeline whenever the state had tracks before the filter ran; the dope sheet says why it's blank.
+         */
+        if (!sheets.isEmpty() || hadTracks)
+        {
+            this.keyframeEditor = new UIKeyframeEditor((consumer) -> new UIAnimationStateKeyframes(this.editor, consumer)).target(this.editArea);
+            this.keyframeEditor.relative(this).h(1F).wTo(this.editArea.area);
+            this.keyframeEditor.setUndoId("form_animation_state_keyframe_editor");
+            this.keyframeEditor.view.getDopeSheet().setEmptyState(UIKeys.KEYFRAMES_EMPTY_FILTERED, UIKeys.KEYFRAMES_EMPTY_FILTERED_HINT);
+
+            /* Reset */
+            if (lastEditor != null)
+            {
+                this.keyframeEditor.view.copyViewport(lastEditor);
+            }
+
+            this.keyframeEditor.view.duration(() -> this.state.duration.get());
+            this.keyframeEditor.view.context((menu) ->
+            {
+                int mouseY = this.getContext().mouseY;
+                UIKeyframeSheet sheet = this.keyframeEditor.view.getGraph().getSheet(mouseY);
+
+                ModelForm poseModelForm = sheet == null ? null : sheet.getPoseForm();
+
+                if (poseModelForm != null)
+                {
+                    menu.action(Icons.POSE, UIKeys.FILM_REPLAY_CONTEXT_ANIMATION_TO_KEYFRAMES, () ->
+                    {
+                        ModelInstance model = ModelFormRenderer.getModel(poseModelForm);
+
+                        if (model != null)
+                        {
+                            UIOverlay.addOverlay(this.getContext(), new UIAnimationToPoseOverlayPanel((animationKey, onlyKeyframes, length, step) ->
+                            {
+                                int current = this.editor.getCursor();
+                                IEntity entity = this.editor.renderer.getTargetEntity();
+
+                                UIReplaysEditorUtils.animationToPoseKeyframes(this.keyframeEditor, sheet, poseModelForm, entity, current, animationKey, onlyKeyframes, length, step);
+                            }, poseModelForm, sheet), 200, 197);
+                        }
+                    });
+                }
+
+                if (this.keyframeEditor.view.getGraph() instanceof UIKeyframeDopeSheet)
+                {
+                    menu.action(Icons.FILTER, UIKeys.FILM_REPLAY_FILTER_SHEETS, () ->
+                    {
+                        UIKeyframeSheetFilterOverlayPanel panel = new UIKeyframeSheetFilterOverlayPanel(BBSSettings.disabledSheets.get(), this.keys);
+
+                        UIOverlay.addOverlay(this.getContext(), panel, 240, 0.9F);
+
+                        panel.onClose((e) ->
+                        {
+                            this.setState(this.state);
+                            BBSSettings.disabledSheets.set(BBSSettings.disabledSheets.get());
+                        });
+                    });
+                }
+            });
+
+            for (UIKeyframeSheet sheet : sheets)
+            {
+                this.keyframeEditor.view.addSheet(sheet);
+            }
+
+            /* The tracks that fold under another one fold here too: a model form contributes dozens of
+             * bone and material rows, and unfolded they bury the form's own properties. */
+            this.keyframeEditor.view.getDopeSheet().setExpanded(this.expandedTabs);
+
+            this.addAfter(this.editArea, this.keyframeEditor);
+        }
+
+        this.resize();
+
+        if (this.keyframeEditor != null && lastEditor == null)
+        {
+            this.keyframeEditor.view.resetView();
+        }
+    }
+
+    public boolean clickViewport(UIContext context, StencilFormFramebuffer stencil)
+    {
+        if (stencil.hasPicked() && this.state != null)
+        {
+            Pair<Form, String> pair = stencil.getPicked();
+
+            if (pair != null)
+            {
+                return UIReplaysEditorUtils.pickFormWithOffers(context, pair, (form, bone, insert) ->
+                    UIReplaysEditorUtils.pickForm(this.keyframeEditor, this.editor, form, bone, insert));
+            }
+        }
+
+        return false;
+    }
+
+    public boolean startGizmo(UIContext context, int stencilIndex)
+    {
+        UIPropTransform transform = UIReplaysEditorUtils.getEditableTransform(this.keyframeEditor);
+        GizmoDrag drag = this.buildGizmoDrag(transform, context.getTransition());
+
+        return Gizmo.INSTANCE.start(stencilIndex, context.mouseX, context.mouseY, transform, drag);
+    }
+
+    public void pickForm(Form form, String bone)
+    {
+        UIReplaysEditorUtils.pickForm(this.keyframeEditor, this.editor, form, bone, false);
+    }
+
+    /**
+     * Bone selection for the renderer's deferred sphere pick (a click that didn't turn into a
+     * trackball drag). Mirrors the left-click branch of {@link #clickViewport}.
+     */
+    public void pickFormFromRenderer(Pair<Form, String> pair)
+    {
+        if (Window.isCtrlPressed()) UIReplaysEditorUtils.offerAdjacent(this.getContext(), pair.a, pair.b, (bone) -> this.pickForm(pair.a, bone));
+        else if (Window.isShiftPressed()) UIReplaysEditorUtils.offerHierarchy(this.getContext(), pair.a, pair.b, (bone) -> this.pickForm(pair.a, bone));
+        else this.pickForm(pair.a, pair.b);
+    }
+
+    private GizmoDrag buildGizmoDrag(UIPropTransform transform, float transition)
+    {
+        if (transform == null || transform.getTransform() == null)
+        {
+            return null;
+        }
+
+        GizmoDrag drag = GizmoDrag.fromRenderedGizmo(this.editor.renderer.camera, this.editor.renderer.area);
+
+        if (drag != null)
+        {
+            float tick = this.editor.getSamplingTick();
+
+            /* The frame GLOBAL is drawn in — the preview's scene axes (see
+             * UIPickableFormRenderer#renderAxes); identity unless the form is
+             * being edited inside a rotated model block. */
+            drag.setGlobalAxes(this.editor.renderer.getSceneAxes());
+
+            /* The bone matrices come from the previewed form, which only reflects a keyframe edit
+             * once the animation state is re-applied. computeRotateAxes / computeTranslateJacobian
+             * perturb the keyframe transform, so re-pose the form before each sample (mirroring the
+             * film's buildFilmGizmoDrag); otherwise the perturbation leaves no trace and the gizmo
+             * axes collapse to identity, breaking the trackball and view rotation. */
+            drag.setJacobian(GizmoDrag.computeTranslateJacobian(
+                transform.getTransform(),
+                () ->
+                {
+                    this.editor.applyStateForSampling(tick);
+
+                    Matrix4f origin = this.getOrigin(transition);
+
+                    /* Into the frame the preview is drawn in, like UIFormEditor's
+                     * drag: the gizmo's own origin/axes come from the render
+                     * matrix and already carry the renderer's transform. */
+                    return origin == null ? new Vector3f() : this.editor.renderer.toSceneMatrix(origin).getTranslation(new Vector3f());
+                }
+            ));
+            drag.setRotateAxes(GizmoDrag.computeRotateAxes(
+                transform.getTransform(),
+                () ->
+                {
+                    this.editor.applyStateForSampling(tick);
+
+                    /* Always sample the rotation-bearing matrix; the GLOBAL
+                     * keyframe variant would otherwise return an origin
+                     * matrix without rotation and the axis sampling would
+                     * collapse to identity. */
+                    Matrix4f origin = this.getOriginMatrix(transition);
+
+                    return origin == null ? new Matrix4f() : MatrixStackUtils.stripScale(this.editor.renderer.toSceneMatrix(origin));
+                }
+            ));
+
+            /* Both bone frames, so a gesture walked into the other one mid-edit gets its
+             * real axes instead of the ones the handles were drawn on. Sampled after the
+             * pose is restored below? No — the compute* helpers have already reverted the
+             * perturbed transform, so re-posing once here is enough for both reads. */
+            this.editor.applyStateForSampling(tick);
+
+            drag.setFrameAxes(
+                this.editor.renderer.toSceneMatrix(this.getOriginMatrix(transition)),
+                this.editor.renderer.toSceneMatrix(this.getParentOriginMatrix(transition))
+            );
+
+            /* Restore the previewed form to the unperturbed pose: the compute* helpers above have
+             * already reverted the transform, so re-applying now poses it with the original values. */
+            this.editor.applyStateForSampling(tick);
+        }
+
+        return drag;
+    }
+
+    public Matrix4f getOrigin(float transition)
+    {
+        return this.getOriginInternal(transition, false);
+    }
+
+    /** The frame the states gizmo is drawn in: the active keyframe transform's own, like
+     *  the film and the form editor's pose panel read it. 🔴 Never hardcode LOCAL here —
+     *  the gizmo would be drawn on the bone's axes while the drag ran in the picked frame. */
+    public TransformSpace getGizmoSpace()
+    {
+        return this.keyframeEditor == null ? TransformSpace.LOCAL : this.keyframeEditor.getBoneSpace();
+    }
+
+    /**
+     * Same as {@link #getOrigin(float)} but always returns the rotation-bearing
+     * matrix regardless of the keyframe's GLOBAL flag. Required for the
+     * sampling-based rotation-axis helper in {@link GizmoDrag}.
+     */
+    public Matrix4f getOriginMatrix(float transition)
+    {
+        return this.getOriginInternal(transition, true);
+    }
+
+    /**
+     * The twin of {@link #getOriginMatrix}: always the origin flavour — the frame
+     * before the bone's own rotation, i.e. its parent's. The pair feeds the drag
+     * snapshot's two bone frames ({@code GizmoDrag#setFrameAxes}), which is what lets
+     * a gesture be walked from LOCAL into PARENT (or back) mid-edit.
+     */
+    public Matrix4f getParentOriginMatrix(float transition)
+    {
+        return this.getOriginFlavour(transition, TransformSpace.PARENT.placesOnOwnFrame());
+    }
+
+    private Matrix4f getOriginInternal(float transition, boolean forceMatrix)
+    {
+        if (this.keyframeEditor == null)
+        {
+            return Matrices.EMPTY_4F;
+        }
+
+        Pair<String, TransformSpace> bone = this.keyframeEditor.getBone();
+
+        if (bone == null)
+        {
+            return Matrices.EMPTY_4F;
+        }
+
+        /* Placement flavour, THE shared convention (film's renderAxes, the form
+         * editor's pose and body-part paths): LOCAL sits on the bone's own frame
+         * (its full matrix), every other space on the origin flavour — the frame
+         * BEFORE the bone's own rotation, i.e. the parent frame, which PARENT
+         * keeps as-is and GLOBAL/VIEW reorient away from. This editor had the two
+         * swapped, so its LOCAL gizmo drew the parent's axes. forceMatrix keeps
+         * the rotation-bearing matrix for the axis sampler regardless. */
+        return this.getOriginFlavour(transition, forceMatrix || bone.b.placesOnOwnFrame());
+    }
+
+    /** One of the bone's two frames: its own ({@code ownFrame}) or its parent's. */
+    private Matrix4f getOriginFlavour(float transition, boolean ownFrame)
+    {
+        if (this.keyframeEditor == null)
+        {
+            return Matrices.EMPTY_4F;
+        }
+
+        Pair<String, TransformSpace> bone = this.keyframeEditor.getBone();
+
+        if (bone == null)
+        {
+            return Matrices.EMPTY_4F;
+        }
+
+        Form root = FormUtils.getRoot(this.editor.form);
+        MatrixCache map = FormUtilsClient.getRenderer(root).collectMatrices(this.editor.renderer.getTargetEntity(), transition);
+        Matrix4f matrix = ownFrame ? map.get(bone.a).matrix() : map.get(bone.a).origin();
+
+        return matrix == null ? Matrices.EMPTY_4F : matrix;
+    }
+
+    @Override
+    public void render(UIContext context)
+    {
+        if (this.keyframeEditor != null)
+        {
+            UIPropTransform transform = UIReplaysEditorUtils.getEditableTransform(this.keyframeEditor);
+
+            if (transform != null)
+            {
+                transform.hotkeyDrag(() ->
+                {
+                    UIContext current = this.getContext();
+
+                    return this.buildGizmoDrag(transform, current == null ? 0F : current.getTransition());
+                });
+            }
+
+            this.editArea.area.render(context.batcher, Colors.A75);
+        }
+
+        super.render(context);
+    }
+}
