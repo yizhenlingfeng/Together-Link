@@ -153,26 +153,33 @@ public class TogetherServerNetwork {
      * WARNING - Removed try catching itself - possible behaviour change.
      */
     public static void clearPlayerState(ServerPlayerEntity player, MinecraftServer server) {
-        UUID uuid = player.getUuid();
-        LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
-        synchronized (linkedHashMap) {
-            playerReplaySelections.remove(uuid);
+        try {
+            UUID uuid = player.getUuid();
+            LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
+            synchronized (linkedHashMap) {
+                playerReplaySelections.remove(uuid);
+            }
+            FormLockData formLock = playerFormLocks.remove(uuid);
+            recordingPlayers.remove(uuid);
+            playerEditingFilm.remove(uuid);
+            playerColors.remove(uuid);
+            playerCursors.remove(uuid);
+            playerCrushers.remove(uuid);
+            playerInFilmScreen.remove(uuid);
+            LinkedBlockingQueue<AssetSendTask> pendingAssets = assetSendQueues.remove(uuid);
+            if (pendingAssets != null) {
+                pendingAssets.clear();
+            }
+            assetDrainActive.remove(uuid);
+            if (!server.isStopping() && !server.isStopped()) {
+                TogetherServerNetwork.broadcastReplaySelections(server, "");
+                if (formLock != null) {
+                    TogetherServerNetwork.broadcastReplayFormLocks(server, formLock.filmId);
+                }
+            }
         }
-        FormLockData formLock = playerFormLocks.remove(uuid);
-        recordingPlayers.remove(uuid);
-        playerEditingFilm.remove(uuid);
-        playerColors.remove(uuid);
-        playerCursors.remove(uuid);
-        playerCrushers.remove(uuid);
-        playerInFilmScreen.remove(uuid);
-        LinkedBlockingQueue<AssetSendTask> pendingAssets = assetSendQueues.remove(uuid);
-        if (pendingAssets != null) {
-            pendingAssets.clear();
-        }
-        assetDrainActive.remove(uuid);
-        TogetherServerNetwork.broadcastReplaySelections(server, "");
-        if (formLock != null) {
-            TogetherServerNetwork.broadcastReplayFormLocks(server, formLock.filmId);
+        catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -389,6 +396,27 @@ public class TogetherServerNetwork {
         thread.start();
     }
 
+    public static void sendInitialFilmSync(MinecraftServer server, ServerPlayerEntity player) {
+        try {
+            Collection<String> keys = BBSMod.getFilms().getKeys();
+            for (String filmId : keys) {
+                Film film = (Film)BBSMod.getFilms().load(filmId);
+                if (film == null) continue;
+                MapType filmData = (MapType)film.toData();
+                TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_FILM_SAVED_SYNC, (BaseType)filmData, outBuf -> {
+                    outBuf.writeString(filmId);
+                    outBuf.writeString("[Server]");
+                });
+            }
+            TogetherServerNetwork.broadcastFilmSelections(server);
+            TogetherServerNetwork.broadcastReplaySelections(server, "");
+            TogetherServerNetwork.broadcastFilmScreens(server);
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private static void handleAssetRequest(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         int count = buf.readInt();
         ArrayList<String> paths = new ArrayList<String>();
@@ -598,7 +626,7 @@ public class TogetherServerNetwork {
                 if (stored == null) {
                     merged = incoming.asMap();
                 } else {
-                    Film incomingFilm = (Film)BBSMod.getFilms().load(filmId);
+                    Film incomingFilm = new Film();
                     incomingFilm.fromData((BaseType)incoming.asMap());
                     TogetherServerNetwork.mergeFilms(stored, incomingFilm);
                     merged = (MapType)stored.toData();

@@ -708,14 +708,14 @@ public class TogetherClientNetwork {
     }
 
     public static void sendFilmSaveSync(String filmId, Film film) {
-        if (!isBBSTogetherOnServer) {
+        if (!isBBSTogetherOnServer || film == null || filmId == null) {
             return;
         }
         crusher.send((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_SAVE_SYNC, film.toData(), buf -> buf.writeString(filmId));
     }
 
     public static void sendMasterRecordingDone(String filmId, Film film) {
-        if (!isBBSTogetherOnServer) {
+        if (!isBBSTogetherOnServer || film == null || filmId == null) {
             return;
         }
         crusher.send((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_MASTER_DONE, film.toData(), buf -> buf.writeString(filmId));

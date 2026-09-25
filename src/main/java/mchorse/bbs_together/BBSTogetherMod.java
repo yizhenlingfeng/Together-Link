@@ -15,9 +15,12 @@ implements ModInitializer {
         TogetherServerNetwork.setup();
         CommandRegistrationCallback.EVENT.register(TogetherCommands::register);
         ServerPlayConnectionEvents.JOIN.register((handler, packetSender, server) -> {
-            if (!"local".equals(handler.player.getIp())) {
-                TogetherServerNetwork.sendAssetManifest(server, handler.player);
-            }
+            server.execute(() -> {
+                if (!"local".equals(handler.player.getIp())) {
+                    TogetherServerNetwork.sendAssetManifest(server, handler.player);
+                }
+                TogetherServerNetwork.sendInitialFilmSync(server, handler.player);
+            });
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> TogetherServerNetwork.clearPlayerState(handler.player, server));
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> TogetherServerNetwork.reset());

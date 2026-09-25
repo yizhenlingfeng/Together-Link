@@ -5,7 +5,8 @@
     "mixins":  [
                    "BBSCommandsMixin",
                    "TogetherServerNetworkFix28Mixin",
-                   "BBSTogetherFix28ServerActiveMixin"
+                   "BBSTogetherFix28ServerActiveMixin",
+                   "ServerNetworkNullFilmFixMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1
