@@ -1,51 +1,89 @@
-# BBS Together - 反编译源码项目
+# BBS Together
 
-基于 BBS FS 2.6 为前置的 Minecraft 1.20.1 Fabric 模组源码项目。
+BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft）的多人协作模组，基于 Minecraft 1.20.1 Fabric。它让多名玩家在同一个 BBS 影片项目中实时协作编辑，同步光标、选中、关键帧、回放，并支持资产和影片数据的服务器端分发。
 
-## 项目信息
+- **模组 ID**：`bbs_together`
+- **当前版本**：1.7
+- **Minecraft**：1.20.1
+- **前置**：BBS FS >= 2.6、Fabric API、Fabric Loader >= 0.15.6
+- **Java**：17（编译目标）/ 21（运行 Gradle 9.2）
+- **许可**：MIT
 
-- **模组 ID**: bbs_together
-- **原版本**: 1.6.16-bbs2.4-wenxu
-- **Minecraft**: 1.20.1
-- **前置**: BBS FS >= 2.6, Fabric API, Fabric Loader >= 0.15.6
-- **Java**: 17（编译目标），JDK 21（运行 Gradle 9.2）
-- **Gradle**: 9.2.0
-- **Fabric Loom**: 1.15-SNAPSHOT
+---
 
-## 项目结构
+## 功能介绍
 
-```
-bbs-together/
-├── build.gradle              # Gradle 构建配置
-├── settings.gradle           # 项目设置（含国内镜像）
-├── gradle.properties         # 版本属性与内存配置
-├── gradlew / gradlew.bat     # Gradle Wrapper（腾讯云镜像）
-├── gradle/wrapper/           # Wrapper 文件
-├── lib/
-│   └── bbs-fs-2.6-1.20.1/   # BBS 2.6 源码子项目
-├── dist/                     # 归档的旧版 jar
-└── src/
-    ├── main/                 # 公共/服务端源集
-    └── client/               # 客户端源集
-```
+### 实时协作
+- **玩家颜色标识**：每名玩家自动分配一个颜色，在 BBS 界面中以彩色高亮显示其选中内容与光标位置。
+- **共享光标**：其他玩家的鼠标光标在当前编辑界面实时可见。
+- **选中同步**：表单、关键帧、回放片段的选中状态会广播给所有在线玩家。
+- **表单锁定**：一名玩家编辑某条回放的表单时，其他玩家看到锁定状态，避免冲突。
+- **回放交换**：玩家之间可以交换回放片段的顺序。
 
-## 国内镜像配置
+### 影片与回放同步
+- **影片选择同步**：谁在编辑哪个影片、停留在哪个影片屏幕，其他玩家可见。
+- **影片数据实时同步**：一名玩家保存关键帧/轨道修改后，影片数据自动推送给所有在线玩家，无需手动重传。
+- **影片列表/重命名/删除同步**：新增、重命名、删除影片时列表在所有客户端刷新。
+- **回放合并**：支持多人录制的回放片段合并到同一时间线。
 
-已配置以下国内镜像加速下载：
+### 录制同步
+- **一键录制开关**：服务器管理员可通过命令同时控制多名玩家开始/停止录制。
+- **主录制协调**：指定一名"主录制"玩家，其时间线作为基准，其他玩家的录制片段在主录制结束后自动对齐合并。
 
-| 组件 | 镜像源 |
-|------|--------|
-| Gradle Distribution | `mirrors.cloud.tencent.com/gradle/` |
-| Maven 仓库 | `maven.aliyun.com/repository/public` |
-| Maven Central | `maven.aliyun.com/repository/central` |
-| Gradle Plugin | `maven.aliyun.com/repository/gradle-plugin` |
+### 资产同步
+- **资产清单（Manifest）**：玩家进入服务器时，服务器把 `config/bbs/assets/` 下所有资产（纹理、模型、音频、粒子等）的 SHA-1 清单发给客户端。
+- **自动下载**：客户端发现本地缺失或不一致的资产时，自动从服务器请求下载。
+- **自动上传**：客户端本地新增或修改的资产自动上传到服务器，服务器落盘到 `config/bbs/assets/`，作为权威存储（last-write-wins）。
+- **大文件保护**：超过 1 MB 的文件（如视频）会被清单跳过，避免网络拥塞。
+
+### 关键帧默认样式
+- 可在 BBS 设置中为新建关键帧指定默认颜色、形状、插值方式，统一协作时的关键帧风格。
+
+### 服务器命令
+- `/bbstogether record <玩家>`：切换指定玩家的录制状态；若其中有人正在录制，则停止所有目标玩家的录制。
+
+---
+
+## 使用教程
+
+### 安装
+1. 安装 [Minecraft 1.20.1](https://www.minecraft.net/) 与 [Fabric Loader](https://fabricmc.net/use/)。
+2. 把以下 jar 放入 `mods/` 文件夹：
+   - Fabric API
+   - BBS FS >= 2.6
+   - `bbs-together-1.7-1.20.1.jar`
+3. 服务端与所有客户端都需要安装相同版本的 BBS FS 与 BBS Together。
+
+### 开启多人协作
+1. 启动服务端，玩家正常加入世界。
+2. 任意玩家按 BBS 快捷键打开 BBS 仪表盘，新建或打开一个影片。
+3. 其他玩家加入同一影片后，即可看到彼此的光标、选中颜色与实时修改。
+4. 服务器管理员输入 `/bbstogether record @a` 可让所有人开始/停止录制。
+
+### 配置
+在游戏内打开 BBS 设置（Mods 列表 → BBS Together → Config），可调整：
+
+| 配置项 | 说明 |
+|--------|------|
+| CDN 地址 / 访问令牌 | 预留的 CDN 同步接口，留空则使用内置服务器直连 |
+| 启用下载 | 开启后从服务器自动下载缺失资产 |
+| 启用上传 | 开启后把本地资产上传到服务器 |
+| 接收推送 | 开启后接收服务器推送的资产更新 |
+| 关键帧默认颜色/形状/插值 | 新建关键帧的默认样式 |
+
+配置文件位于 `config/bbs_together.json`。
+
+### 资产目录
+- 服务器权威资产目录：`<服务器目录>/config/bbs/assets/`
+- 玩家资产会自动同步到此目录，服务器重启后不丢失。
+
+---
 
 ## 构建说明
 
 ### 前置要求
-
-- JDK 17（编译 MC 1.20.1）或 JDK 21（运行 Gradle 9.2）
-- 系统已安装 JDK 21 于 `C:\Program Files\Java\jdk-21`
+- JDK 21（本项目使用 `C:\Program Files\Java\jdk-21`）
+- 已发布 BBS FS 2.6 到本地 Maven（首次构建时需要）
 
 ### 构建步骤
 
@@ -63,19 +101,51 @@ bbs-together/
    .\gradlew.bat build
    ```
 
-3. **运行客户端开发环境**：
-   ```powershell
-   .\gradlew.bat runClient
-   ```
+3. 产物位于 `build/libs/bbs-together-1.7-1.20.1.jar`。
 
-4. **运行服务端开发环境**：
-   ```powershell
-   .\gradlew.bat runServer
-   ```
+### 开发运行
+```powershell
+.\gradlew.bat runClient    # 启动开发客户端
+.\gradlew.bat runServer    # 启动开发服务端
+```
 
-### 注意事项
+### 项目结构
 
-- BBS 依赖通过 `mavenLocal()` 获取，需先执行 BBS 项目的 `publishToMavenLocal`
-- `transitive = false` 避免引入 BBS 的 Sodium/Iris 等传递依赖
-- `fabric.mod.json` 中 Java 版本要求为 `>=17`
-- 客户端运行内存已配置为 3G，服务端为 2G
+```
+bbs-together/
+├── src/main/            # 公共/服务端代码
+│   ├── java/mchorse/bbs_together/
+│   │   ├── network/     # 服务端网络层（资产、影片、录制同步）
+│   │   ├── mixin/       # 服务端 mixin
+│   │   ├── BBSTogether.java          # BBS addon 入口
+│   │   ├── BBSTogetherMod.java       # Fabric 入口
+│   │   ├── TogetherCommands.java      # /bbstogether 命令
+│   │   ├── TogetherSettings.java      # 配置项
+│   │   └── TogetherSourcePack.java    # 内置资源包
+│   └── resources/
+│       ├── assets/bbs_together/assets/strings/   # 多语言
+│       └── fabric.mod.json
+├── src/client/          # 客户端代码与 mixin
+├── lib/bbs-fs-2.6-1.20.1/  # BBS 2.6 源码子项目
+└── build.gradle
+```
+
+### 国内镜像
+已配置腾讯云 Gradle 镜像与阿里云 Maven 镜像，开箱即用。
+
+---
+
+## 更新日志
+
+### v1.7
+- 版本号从 1.6.16 升至 1.7
+- 新增配置界面语言键 `bbs_together.config.title` / `bbs_together.config.tooltip`
+- 服务器端资产落盘：玩家上传的资产自动写入 `config/bbs/assets/`，作为权威存储
+- 资产清单（manifest）与文件传输绕过 crusher 分片组，避免大包卡死连接
+- 超过 1 MB 的大文件（如视频）自动跳过，防止网络拥塞
+- 资产上传/下载在后台线程执行，不再阻塞客户端主线程
+
+### v1.6.16（历史版本）
+- 基于 BBS FS 2.4 的初始反编译版本
+- 已适配 BBS FS 2.6 addon API
+- 多人光标、选中、影片同步、录制协调等核心功能
