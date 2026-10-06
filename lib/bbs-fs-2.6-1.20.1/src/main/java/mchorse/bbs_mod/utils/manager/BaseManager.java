@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.text.SimpleDateFormat;
 import java.util.Comparator;
@@ -137,7 +138,6 @@ public abstract class BaseManager <T extends ValueGroup> extends FolderManager<T
         {
             if (this.backUps)
             {
-                String path = file.getParentFile().getAbsolutePath();
                 Date date = new Date();
                 String backupFileName = new SimpleDateFormat("yyyy_MM_dd_HH").format(date);
 
@@ -150,19 +150,42 @@ public abstract class BaseManager <T extends ValueGroup> extends FolderManager<T
                 }
 
                 String filename = StringUtils.fileName(id);
-                File backupFile = new File(path, "_" + filename + "/" + filename + "." + backupFileName + this.getExtension());
 
-                backupFile.getParentFile().mkdirs();
+                /* Normalize both paths so any "." segments inherited from the world folder
+                 * (e.g. "<world>/.\\bbs\\films") are resolved before we hand them to Win32.
+                 * JDK 21 returns short absolute paths to CreateFile/DeleteFile verbatim, and a
+                 * leftover ".\" can make the internal delete-then-copy in Files.copy(REPLACE_EXISTING)
+                 * race the filesystem and throw NoSuchFileException even though the target exists. */
+                Path sourcePath = file.toPath().normalize();
+                Path backupDir = sourcePath.getParent().resolve("_" + filename);
+                Path backupPath = backupDir.resolve(filename + "." + backupFileName + this.getExtension());
 
-                if (file.exists())
+                Files.createDirectories(backupDir);
+
+                if (Files.exists(sourcePath))
                 {
-                    Files.copy(file.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    /* Best-effort pre-delete: if the old backup can't be removed (transient lock,
+                     * AV, etc.) we don't want the whole backup to blow up — just fall through and
+                     * let CopyFileEx overwrite it, or skip the copy entirely. */
+                    try
+                    {
+                        Files.deleteIfExists(backupPath);
+                    }
+                    catch (Exception ignored)
+                    {
+                        /* backup file is locked or momentarily inaccessible; REPLACE_EXISTING below
+                         * will get another shot at it, and if that fails too the outer catch handles it. */
+                    }
+
+                    Files.copy(sourcePath, backupPath, StandardCopyOption.REPLACE_EXISTING);
                 }
             }
         }
         catch (Exception e)
         {
-            LOGGER.error("Failed to back up \"" + id + "\" before saving!", e);
+            /* Backups are best-effort: the real save below still runs. Warn rather than error so a
+             * transient filesystem hiccup doesn't look like data loss. */
+            LOGGER.warn("Could not back up \"" + id + "\" before saving (non-fatal): " + e.getMessage());
         }
 
         try

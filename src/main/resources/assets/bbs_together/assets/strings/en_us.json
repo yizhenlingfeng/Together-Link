@@ -1,4 +1,6 @@
 {
+    "bbs_together.config.title":  "BBS Together",
+    "bbs_together.config.tooltip":  "BBS Together multiplayer collaboration settings",
     "bbs_together.utility.sync.title":  "BBS Together Sync",
     "bbs_together.utility.sync.download":  "Download assets from server",
     "bbs_together.utility.sync.upload":  "Upload assets to server",

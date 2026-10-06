@@ -82,23 +82,44 @@ public final class BBSTogetherFix28Server {
         RECORDING_BASELINE_ACCEPTED_AT.clear();
     }
 
+    private static boolean isServerAlive(MinecraftServer server) {
+        return server != null && !server.isStopping() && !server.isStopped();
+    }
+
+    private static void safeSaveFilm(String filmId, MapType data) {
+        try {
+            BBSMod.getFilms().save(filmId, data);
+        }
+        catch (Exception e) {
+            // BBS 2.6 backup may fail for new films; ignore
+        }
+    }
+
     private static void handleJoinRequest(MinecraftServer minecraftServer, ServerPlayerEntity class_32222, String string2) {
-        UUID uUID = class_32222.getUuid();
-        BBSTogetherFix28Server.removeFromAllEntryOrders(uUID);
-        if (string2 == null || string2.isEmpty()) {
-            ACTIVE_FILM_EDITORS.remove(uUID);
-            BBSTogetherFix28Server.pruneOffline(minecraftServer);
+        if (!isServerAlive(minecraftServer) || class_32222 == null) {
             return;
         }
-        BBSTogetherFix28Server.pruneOffline(minecraftServer);
-        ServerPlayerEntity class_32223 = BBSTogetherFix28Server.chooseSnapshotSource(minecraftServer, uUID, string2);
-        ACTIVE_FILM_EDITORS.put(uUID, string2);
-        FILM_ENTRY_ORDER.computeIfAbsent(string2, string -> new LinkedHashSet()).add(uUID);
-        if (class_32223 != null) {
-            PacketByteBuf class_25402 = PacketByteBufs.create();
-            class_25402.writeUuid(uUID);
-            class_25402.writeString(string2);
-            ServerPlayNetworking.send((ServerPlayerEntity)class_32223, (Identifier)BBSTogetherFix28.CLIENT_FILM_JOIN_SOURCE_REQUEST, (PacketByteBuf)class_25402);
+        try {
+            UUID uUID = class_32222.getUuid();
+            BBSTogetherFix28Server.removeFromAllEntryOrders(uUID);
+            if (string2 == null || string2.isEmpty()) {
+                ACTIVE_FILM_EDITORS.remove(uUID);
+                BBSTogetherFix28Server.pruneOffline(minecraftServer);
+                return;
+            }
+            BBSTogetherFix28Server.pruneOffline(minecraftServer);
+            ServerPlayerEntity class_32223 = BBSTogetherFix28Server.chooseSnapshotSource(minecraftServer, uUID, string2);
+            ACTIVE_FILM_EDITORS.put(uUID, string2);
+            FILM_ENTRY_ORDER.computeIfAbsent(string2, string -> new LinkedHashSet()).add(uUID);
+            if (class_32223 != null) {
+                PacketByteBuf class_25402 = PacketByteBufs.create();
+                class_25402.writeUuid(uUID);
+                class_25402.writeString(string2);
+                ServerPlayNetworking.send((ServerPlayerEntity)class_32223, (Identifier)BBSTogetherFix28.CLIENT_FILM_JOIN_SOURCE_REQUEST, (PacketByteBuf)class_25402);
+            }
+        }
+        catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -143,18 +164,23 @@ public final class BBSTogetherFix28Server {
     }
 
     private static void handleJoinSnapshot(MinecraftServer minecraftServer, UUID uUID, String string, byte[] byArray) {
-        if (uUID == null || string == null || string.isEmpty() || byArray == null) {
+        if (!isServerAlive(minecraftServer) || uUID == null || string == null || string.isEmpty() || byArray == null) {
             return;
         }
-        BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
-        if (baseType == null || !baseType.isMap()) {
-            return;
+        try {
+            BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
+            if (baseType == null || !baseType.isMap()) {
+                return;
+            }
+            MapType mapType = baseType.asMap();
+            safeSaveFilm(string, mapType);
+            ServerPlayerEntity class_32222 = minecraftServer.getPlayerManager().getPlayer(uUID);
+            if (class_32222 != null) {
+                TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
+            }
         }
-        MapType mapType = baseType.asMap();
-        BBSMod.getFilms().save(string, mapType);
-        ServerPlayerEntity class_32222 = minecraftServer.getPlayerManager().getPlayer(uUID);
-        if (class_32222 != null) {
-            TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
+        catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -163,38 +189,51 @@ public final class BBSTogetherFix28Server {
             return;
         }
         ACTIVE_FILM_EDITORS.remove(class_32222.getUuid(), string);
-        BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
-        if (baseType == null || !baseType.isMap()) {
+        if (!isServerAlive(minecraftServer)) {
             return;
         }
-        MapType mapType = baseType.asMap();
-        BBSMod.getFilms().save(string, mapType);
-        if (BBSTogetherFix28Server.hasOtherEditor(class_32222.getUuid(), string)) {
-            return;
+        try {
+            BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
+            if (baseType == null || !baseType.isMap()) {
+                return;
+            }
+            MapType mapType = baseType.asMap();
+            safeSaveFilm(string, mapType);
+            if (BBSTogetherFix28Server.hasOtherEditor(class_32222.getUuid(), string)) {
+                return;
+            }
+            for (ServerPlayerEntity class_32223 : minecraftServer.getPlayerManager().getPlayerList()) {
+                TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32223, string, mapType);
+            }
         }
-        for (ServerPlayerEntity class_32223 : minecraftServer.getPlayerManager().getPlayerList()) {
-            TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32223, string, mapType);
+        catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
     private static void handleStructureSnapshot(MinecraftServer minecraftServer, String string, byte[] byArray) {
-        if (string == null || string.isEmpty() || byArray == null) {
+        if (!isServerAlive(minecraftServer) || string == null || string.isEmpty() || byArray == null) {
             return;
         }
-        BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
-        if (baseType == null || !baseType.isMap()) {
-            return;
+        try {
+            BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
+            if (baseType == null || !baseType.isMap()) {
+                return;
+            }
+            MapType mapType = baseType.asMap();
+            Film film = (Film)BBSMod.getFilms().load(string);
+            Film film2 = new Film();
+            film2.fromData((BaseType)mapType);
+            BBSTogetherFix28Server.remapReplaySelections(string, film, film2);
+            safeSaveFilm(string, mapType);
+            for (ServerPlayerEntity class_32222 : minecraftServer.getPlayerManager().getPlayerList()) {
+                TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
+            }
+            TogetherServerNetwork.broadcastReplaySelections(minecraftServer, string);
         }
-        MapType mapType = baseType.asMap();
-        Film film = (Film)BBSMod.getFilms().load(string);
-        Film film2 = new Film();
-        film2.fromData((BaseType)mapType);
-        BBSTogetherFix28Server.remapReplaySelections(string, film, film2);
-        BBSMod.getFilms().save(string, mapType);
-        for (ServerPlayerEntity class_32222 : minecraftServer.getPlayerManager().getPlayerList()) {
-            TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
+        catch (Exception e) {
+            e.printStackTrace();
         }
-        TogetherServerNetwork.broadcastReplaySelections(minecraftServer, string);
     }
 
     private static void handleRecordingBaselineSnapshot(String string, byte[] byArray) {
@@ -211,7 +250,7 @@ public final class BBSTogetherFix28Server {
             return;
         }
         RECORDING_BASELINE_ACCEPTED_AT.put(string, l);
-        BBSMod.getFilms().save(string, baseType.asMap());
+        safeSaveFilm(string, baseType.asMap());
     }
 
     private static boolean hasOtherEditor(UUID uUID, String string) {

@@ -1,4 +1,6 @@
 {
+    "bbs_together.config.title":  "BBS Together",
+    "bbs_together.config.tooltip":  "BBS Together 多人协作设置",
     "bbs_together.utility.sync.title":  "BBS Together 同步",
     "bbs_together.utility.sync.download":  "从服务器下载资源",
     "bbs_together.utility.sync.upload":  "上传资源到服务器",
