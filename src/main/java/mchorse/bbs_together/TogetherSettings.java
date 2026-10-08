@@ -18,6 +18,9 @@ public class TogetherSettings {
     public static ValueBoolean assetSyncDownload;
     public static ValueBoolean assetSyncUpload;
     public static ValueBoolean assetSyncReceive;
+    public static ValueBoolean assetSyncProgressBar;
+    public static ValueBoolean assetSyncProgressBarAlways;
+    public static ValueInt assetMaxSizeMb;
     public static ValueKeyframeShape defaultKeyframeShape;
     public static ValueBoolean defaultKeyframeInterpolationEnabled;
     public static ValueKeyframeInterpolation defaultKeyframeInterpolation;
@@ -31,6 +34,10 @@ public class TogetherSettings {
         assetSyncDownload = settingsBuilder.getBoolean("download", true);
         assetSyncUpload = settingsBuilder.getBoolean("upload", true);
         assetSyncReceive = settingsBuilder.getBoolean("receive", false);
+        assetSyncProgressBar = settingsBuilder.getBoolean("progress_bar", true);
+        assetSyncProgressBarAlways = settingsBuilder.getBoolean("progress_bar_always", false);
+        settingsBuilder.category("server");
+        assetMaxSizeMb = settingsBuilder.getInt("asset_max_size_mb", 1024, 16, 2048);
         settingsBuilder.category("keyframes");
         defaultKeyframeShape = new ValueKeyframeShape("default_shape", KeyframeShape.SQUARE);
         settingsBuilder.register((BaseValue)defaultKeyframeShape);

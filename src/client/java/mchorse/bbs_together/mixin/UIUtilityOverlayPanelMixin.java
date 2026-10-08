@@ -37,7 +37,11 @@ extends UIOverlayPanel {
         syncUpload.setValue(((Boolean)TogetherSettings.assetSyncUpload.get()).booleanValue());
         UIToggle syncReceive = new UIToggle(L10n.lang((String)"bbs_together.utility.sync.receive"), b -> TogetherSettings.assetSyncReceive.set((Boolean)b.getValue()));
         syncReceive.setValue(((Boolean)TogetherSettings.assetSyncReceive.get()).booleanValue());
-        this.view.add(new IUIElement[]{UI.label((IKey)L10n.lang((String)"bbs_together.utility.sync.title")), UI.column((UIElement[])new UIElement[]{syncDownload, syncUpload, syncReceive}).marginBottom(8)});
+        UIToggle syncProgress = new UIToggle(L10n.lang((String)"bbs_together.utility.sync.progress"), b -> TogetherSettings.assetSyncProgressBar.set((Boolean)b.getValue()));
+        syncProgress.setValue(((Boolean)TogetherSettings.assetSyncProgressBar.get()).booleanValue());
+        UIToggle syncProgressAlways = new UIToggle(L10n.lang((String)"bbs_together.utility.sync.progress_always"), b -> TogetherSettings.assetSyncProgressBarAlways.set((Boolean)b.getValue()));
+        syncProgressAlways.setValue(((Boolean)TogetherSettings.assetSyncProgressBarAlways.get()).booleanValue());
+        this.view.add(new IUIElement[]{UI.label((IKey)L10n.lang((String)"bbs_together.utility.sync.title")), UI.column((UIElement[])new UIElement[]{syncDownload, syncUpload, syncReceive, syncProgress, syncProgressAlways}).marginBottom(8)});
     }
 }
 

@@ -28,7 +28,10 @@
                    "UIClipsMixin",
                    "TogetherClientNetworkMixin",
                    "TogetherClientNetworkFix28Mixin",
-                   "BBSClientInitFix66Mixin"
+                   "BBSClientInitFix66Mixin",
+                   "UITextureGridMixin",
+                   "UIFormCategoryModelSizeMixin",
+                   "FormCellRendererTooLargeMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1

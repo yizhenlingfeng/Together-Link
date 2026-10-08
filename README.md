@@ -51,7 +51,7 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 2. 把以下 jar 放入 `mods/` 文件夹：
    - Fabric API
    - BBS FS >= 2.6
-   - `bbs-together-1.7-1.20.1.jar`
+   - `bbs-together-泠改-1.7-1.20.1.jar`
 3. 服务端与所有客户端都需要安装相同版本的 BBS FS 与 BBS Together。
 
 ### 开启多人协作
@@ -76,62 +76,6 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 ### 资产目录
 - 服务器权威资产目录：`<服务器目录>/config/bbs/assets/`
 - 玩家资产会自动同步到此目录，服务器重启后不丢失。
-
----
-
-## 构建说明
-
-### 前置要求
-- JDK 21（本项目使用 `C:\Program Files\Java\jdk-21`）
-- 已发布 BBS FS 2.6 到本地 Maven（首次构建时需要）
-
-### 构建步骤
-
-1. **发布 BBS 到本地 Maven**（首次或 BBS 更新后）：
-   ```powershell
-   $env:JAVA_HOME = "C:\Program Files\Java\jdk-21"
-   cd lib\bbs-fs-2.6-1.20.1
-   .\gradlew.bat publishToMavenLocal
-   ```
-
-2. **构建 bbs-together**：
-   ```powershell
-   $env:JAVA_HOME = "C:\Program Files\Java\jdk-21"
-   cd ..\..
-   .\gradlew.bat build
-   ```
-
-3. 产物位于 `build/libs/bbs-together-1.7-1.20.1.jar`。
-
-### 开发运行
-```powershell
-.\gradlew.bat runClient    # 启动开发客户端
-.\gradlew.bat runServer    # 启动开发服务端
-```
-
-### 项目结构
-
-```
-bbs-together/
-├── src/main/            # 公共/服务端代码
-│   ├── java/mchorse/bbs_together/
-│   │   ├── network/     # 服务端网络层（资产、影片、录制同步）
-│   │   ├── mixin/       # 服务端 mixin
-│   │   ├── BBSTogether.java          # BBS addon 入口
-│   │   ├── BBSTogetherMod.java       # Fabric 入口
-│   │   ├── TogetherCommands.java      # /bbstogether 命令
-│   │   ├── TogetherSettings.java      # 配置项
-│   │   └── TogetherSourcePack.java    # 内置资源包
-│   └── resources/
-│       ├── assets/bbs_together/assets/strings/   # 多语言
-│       └── fabric.mod.json
-├── src/client/          # 客户端代码与 mixin
-├── lib/bbs-fs-2.6-1.20.1/  # BBS 2.6 源码子项目
-└── build.gradle
-```
-
-### 国内镜像
-已配置腾讯云 Gradle 镜像与阿里云 Maven 镜像，开箱即用。
 
 ---
 

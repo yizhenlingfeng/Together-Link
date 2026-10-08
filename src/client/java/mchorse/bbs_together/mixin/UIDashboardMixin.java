@@ -5,6 +5,7 @@ import mchorse.bbs_mod.ui.framework.UIBaseMenu;
 import mchorse.bbs_mod.ui.framework.UIRenderingContext;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.sync.SyncBarRenderer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -37,14 +38,15 @@ public class UIDashboardMixin {
 
     @Inject(method={"preRenderMenu"}, at={@At(value="TAIL")}, remap=false)
     private void onPreRenderMenu(UIRenderingContext context, CallbackInfo ci) {
-        int padding;
         if (!TogetherClientNetwork.isConnected()) {
             return;
         }
+        UIDashboard self = (UIDashboard)(Object)this;
+        SyncBarRenderer.render(context, self);
         if (TogetherClientNetwork.playersInFilmScreen.isEmpty()) {
             return;
         }
-        UIDashboard self = (UIDashboard)(Object)this;
+        int padding;
         int x = padding = 8;
         int y = self.height - Icons.LOCKED.h - padding;
         context.batcher.box((float)(x - 3), (float)(y - 3), (float)(x + Icons.LOCKED.w + 3), (float)(y + Icons.LOCKED.h + 3), 0x55000000);

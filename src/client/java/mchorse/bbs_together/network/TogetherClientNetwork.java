@@ -17,8 +17,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
+import java.util.Iterator;import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -56,6 +55,7 @@ import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.utils.pose.Pose;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherServerNetwork;
+import mchorse.bbs_together.sync.AssetSyncTracker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -90,6 +90,8 @@ public class TogetherClientNetwork {
     public static volatile String pendingSwapFilmId = null;
     public static volatile int pendingSwapFrom = -1;
     public static volatile int pendingSwapTo = -1;
+    /** Model IDs whose folder contained at least one file too large to download; shown red in the picker. */
+    public static final ConcurrentHashMap.KeySetView<String, Boolean> tooLargeModels = ConcurrentHashMap.newKeySet();
     private static final int MAX_SELECTION_PACKET = 512;
 
     public static void setup() {
@@ -114,6 +116,7 @@ public class TogetherClientNetwork {
 
     public static void reset() {
         crusher.reset();
+        AssetSyncTracker.reset();
         playerColors.clear();
         playerCursors.clear();
         filmSelections.clear();
@@ -129,6 +132,7 @@ public class TogetherClientNetwork {
         assetUploadTotal = 0;
         assetUploadFinishedAt = 0L;
         assetDownloadFinishedAt = 0L;
+        tooLargeModels.clear();
         damageControlActive = false;
         pendingSwapFilmId = null;
         pendingSwapFrom = -1;
@@ -419,27 +423,63 @@ public class TogetherClientNetwork {
                     File assetsFolder = BBSMod.getAssetsFolder();
                     Path assetsPath = assetsFolder.toPath();
                     HashMap<String, String> serverSha1Map = new HashMap<String, String>();
+                    HashMap<String, Long> serverSizeMap = new HashMap<String, Long>();
                     for (String key : manifest.keys()) {
-                        serverSha1Map.put(key, manifest.get(key).asString());
+                        String raw = manifest.get(key).asString();
+                        int colon = raw.indexOf(':');
+                        if (colon > 0) {
+                            serverSha1Map.put(key, raw.substring(0, colon));
+                            try { serverSizeMap.put(key, Long.parseLong(raw.substring(colon + 1))); }
+                            catch (NumberFormatException ignored) {}
+                        } else {
+                            serverSha1Map.put(key, raw);
+                        }
                     }
+                    long maxBytes = TogetherClientNetwork.clientMaxAssetBytes();
+                    HashMap<String, Long> modelTotalSize = new HashMap<String, Long>();
+                    for (Map.Entry<String, Long> e : serverSizeMap.entrySet()) {
+                        String modelId = together$extractModelId(e.getKey());
+                        if (modelId != null) modelTotalSize.merge(modelId, e.getValue(), Long::sum);
+                    }
+                    HashSet<String> oversizedModels = new HashSet<String>();
+                    for (Map.Entry<String, Long> e : modelTotalSize.entrySet()) {
+                        if (e.getValue() <= maxBytes) continue;
+                        String modelId = e.getKey();
+                        File localConfig = new File(assetsFolder, "models/" + modelId + "/config.json");
+                        if (localConfig.exists() && localConfig.isFile()) continue;
+                        oversizedModels.add(modelId);
+                        TogetherClientNetwork.tooLargeModels.add(modelId);
+                    }
+                    AssetSyncTracker.beginScan();
+                    boolean hadTasks = false;
                     if (doDownload) {
                         ArrayList<String> needed = new ArrayList<String>();
                         for (Map.Entry entry : serverSha1Map.entrySet()) {
-                            File localFile = new File(assetsFolder, ((String)entry.getKey()).replace("/", File.separator));
+                            String relPath = (String) entry.getKey();
+                            String modelId = together$extractModelId(relPath);
+                            if (modelId != null && oversizedModels.contains(modelId)) {
+                                if (!relPath.endsWith("/config.json")) continue;
+                                new File(assetsFolder, "models/" + modelId).mkdirs();
+                            }
+                            File localFile = new File(assetsFolder, relPath.replace("/", File.separator));
                             boolean needsDownload = true;
                             if (localFile.exists() && localFile.isFile()) {
                                 needsDownload = !((String)entry.getValue()).equalsIgnoreCase(TogetherClientNetwork.sha1OfLocalFile(localFile.toPath()));
                             }
                             if (!needsDownload) continue;
-                            needed.add((String)entry.getKey());
+                            needed.add(relPath);
                         }
                         if (!needed.isEmpty()) {
                             int downloadCount = needed.size();
+                            hadTasks = true;
                             client.execute(() -> {
                                 assetDownloadTotal = downloadCount;
                                 assetDownloadDone = 0;
                                 assetDownloadErrors = 0;
                                 assetDownloadFinishedAt = 0L;
+                                for (String n : needed) {
+                                    AssetSyncTracker.pending(n, AssetSyncTracker.Dir.DOWNLOAD);
+                                }
                                 sendAssetRequestChunks(needed);
                             });
                         }
@@ -451,7 +491,7 @@ public class TogetherClientNetwork {
                                 String relativePath = assetsPath.relativize((Path)localPath).toString().replace(File.separator, "/");
                                 String serverSha1 = (String)serverSha1Map.get(relativePath);
                                 String localSha1 = TogetherClientNetwork.sha1OfLocalFile(localPath);
-                                if (serverSha1 == null || !serverSha1.equalsIgnoreCase(localSha1)) {
+                                if ((serverSha1 == null || !serverSha1.equalsIgnoreCase(localSha1))) {
                                     toUpload.add(new AbstractMap.SimpleEntry<String, byte[]>(relativePath, Files.readAllBytes(localPath)));
                                 }
                             }
@@ -461,16 +501,21 @@ public class TogetherClientNetwork {
                         });
                         if (!toUpload.isEmpty()) {
                             int uploadCount = toUpload.size();
+                            hadTasks = true;
                             client.execute(() -> {
                                 assetUploadTotal = uploadCount;
                                 assetUploadDone = 0;
                                 assetUploadErrors = 0;
                                 assetUploadFinishedAt = 0L;
                                 for (Map.Entry<String, byte[]> entry : toUpload) {
+                                    AssetSyncTracker.pending((String)entry.getKey(), AssetSyncTracker.Dir.UPLOAD);
                                     TogetherClientNetwork.sendAssetUpload((String)entry.getKey(), (byte[])entry.getValue());
                                 }
                             });
                         }
+                    }
+                    if (!hadTasks) {
+                        AssetSyncTracker.abort();
                     }
                 }
                 catch (Exception e) {
@@ -500,10 +545,21 @@ public class TogetherClientNetwork {
                 Thread thread = new Thread(() -> {
                     block3: {
                         try {
+                            AssetSyncTracker.active(relativePath, isPush ? AssetSyncTracker.Dir.PUSH : AssetSyncTracker.Dir.DOWNLOAD);
+                            if (bytes.length > TogetherClientNetwork.clientMaxAssetBytes()) {
+                                String modelId = together$extractModelId(relativePath);
+                                if (modelId != null) TogetherClientNetwork.tooLargeModels.add(modelId);
+                                AssetSyncTracker.done(relativePath);
+                                if (!isPush && ++assetDownloadDone >= assetDownloadTotal && assetDownloadTotal > 0) {
+                                    assetDownloadFinishedAt = System.currentTimeMillis();
+                                }
+                                break block3;
+                            }
                             File dest = new File(BBSMod.getAssetsFolder(), relativePath.replace("/", File.separator));
                             dest.getParentFile().mkdirs();
                             Files.write(dest.toPath(), bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                             System.out.println("[BBS Assets] " + (isPush ? "Received push" : "Downloaded") + ": " + relativePath);
+                            AssetSyncTracker.done(relativePath);
                             if (!isPush && ++assetDownloadDone >= assetDownloadTotal && assetDownloadTotal > 0) {
                                 assetDownloadFinishedAt = System.currentTimeMillis();
                             }
@@ -512,6 +568,7 @@ public class TogetherClientNetwork {
                             e.printStackTrace();
                             if (isPush) break block3;
                             ++assetDownloadErrors;
+                            AssetSyncTracker.error(relativePath);
                         }
                     }
                 }, "BBSTogether-AssetWrite");
@@ -644,18 +701,40 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_SWAP, (PacketByteBuf)buf);
     }
 
+    public static long clientMaxAssetBytes() {
+        int mb = TogetherSettings.assetMaxSizeMb == null
+            ? 1024
+            : ((Number) TogetherSettings.assetMaxSizeMb.get()).intValue();
+        if (mb < 16) mb = 16;
+        if (mb > 2048) mb = 2048;
+        return (long) mb * 1024L * 1024L;
+    }
+
+    /** "models/foo/bar/textures/x.png" -> "foo/bar". Returns null for non-model paths. */
+    private static String together$extractModelId(String relativePath) {
+        if (relativePath == null || !relativePath.startsWith("models/")) {
+            return null;
+        }
+        String after = relativePath.substring("models/".length());
+        int slash = after.lastIndexOf('/');
+        return slash > 0 ? after.substring(0, slash) : null;
+    }
+
     public static void sendAssetUpload(String relativePath, byte[] fileBytes) {
         if (!isBBSTogetherOnServer) {
             return;
         }
         try {
+            AssetSyncTracker.active(relativePath, AssetSyncTracker.Dir.UPLOAD);
             crusher.send((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_ASSET_UPLOAD, fileBytes, buf -> buf.writeString(relativePath));
+            AssetSyncTracker.done(relativePath);
             if (++assetUploadDone >= assetUploadTotal && assetUploadTotal > 0) {
                 assetUploadFinishedAt = System.currentTimeMillis();
             }
         }
         catch (Exception e) {
             ++assetUploadErrors;
+            AssetSyncTracker.error(relativePath);
         }
     }
 
@@ -781,6 +860,8 @@ public class TogetherClientNetwork {
 
 
     private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName) {
+        AssetSyncTracker.active("film:" + filmId, AssetSyncTracker.Dir.DOWNLOAD);
+        AssetSyncTracker.done("film:" + filmId);
         UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         boolean filmIsOpen = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId);

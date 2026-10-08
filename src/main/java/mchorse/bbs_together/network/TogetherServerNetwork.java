@@ -57,6 +57,16 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_REPLAY_FORM_LOCKS = new Identifier("bbs_together", "c_replay_form_locks");
     public static final Identifier CLIENT_REPLAY_SWAP = new Identifier("bbs_together", "c_replay_swap");
     public static final Identifier CLIENT_TOGGLE_RECORDING = new Identifier("bbs_together", "c_toggle_recording");
+    /**
+     * Absolute server-side safety cap on a single synced asset (2 GB). Each client independently
+     * chooses its own upload/download ceiling via {@code TogetherSettings.assetMaxSizeMb}; this
+     * hard cap exists only so a misbehaving client can't buffer a multi-GB file and blow up the
+     * server heap.
+     */
+    public static long maxAssetBytes() {
+        return 2048L * 1024L * 1024L;
+    }
+
     public static final Identifier CLIENT_ASSET_MANIFEST = new Identifier("bbs_together", "c_asset_manifest");
     public static final Identifier CLIENT_ASSET_FILE = new Identifier("bbs_together", "c_asset_file");
     public static final Identifier CLIENT_FILM_SCREENS = new Identifier("bbs_together", "c_film_screens");
@@ -382,7 +392,9 @@ public class TogetherServerNetwork {
                             return FileVisitResult.CONTINUE;
                         }
                         String relativePath = assetsPath.relativize(file).toString().replace(File.separator, "/");
-                        manifest.putString(relativePath, TogetherServerNetwork.sha1OfPath(file));
+                        /* Manifest entries carry "<sha1>:<sizeBytes>" so clients can skip over-size
+                         * assets before requesting them. */
+                        manifest.putString(relativePath, TogetherServerNetwork.sha1OfPath(file) + ":" + file.toFile().length());
                         return FileVisitResult.CONTINUE;
                     }
                 });
@@ -428,6 +440,7 @@ public class TogetherServerNetwork {
             for (String relativePath : paths) {
                 File file;
                 if (relativePath.contains("..") || relativePath.startsWith("/") || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile()) continue;
+                if (file.length() > TogetherServerNetwork.maxAssetBytes()) continue;
                 try {
                     byte[] fileBytes = Files.readAllBytes(file.toPath());
                     TogetherServerNetwork.enqueueAssetSend(server, player, new AssetSendTask(relativePath, fileBytes, false));
@@ -446,6 +459,24 @@ public class TogetherServerNetwork {
             String relativePath = packetByteBuf.readString();
             if (relativePath.contains("..") || relativePath.startsWith("/")) {
                 return;
+            }
+            if (bytes.length > TogetherServerNetwork.maxAssetBytes()) {
+                return;
+            }
+            /* Persist the uploaded asset into the server's own assets folder. Without this the file
+             * is only relayed to other players and never lands on the server, so it also never shows
+             * up in later manifests. */
+            File assetsFolder = BBSMod.getAssetsFolder();
+            if (assetsFolder != null) {
+                try {
+                    Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
+                    if (target.getParent() != null) {
+                        Files.createDirectories(target.getParent());
+                    }
+                    Files.write(target, bytes);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
             server.execute(() -> {
                 for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
