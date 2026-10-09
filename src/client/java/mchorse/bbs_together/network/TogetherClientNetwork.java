@@ -93,8 +93,8 @@ public class TogetherClientNetwork {
     /** Model IDs whose folder contained at least one file too large to download; shown red in the picker. */
     public static final ConcurrentHashMap.KeySetView<String, Boolean> tooLargeModels = ConcurrentHashMap.newKeySet();
     private static final int MAX_SELECTION_PACKET = 512;
-    /** When true, the next manifest response forces re-download of every models/ entry regardless of local hash. */
-    private static volatile boolean forceDownloadModels = false;
+    /** 0 = normal (follow settings), 1 = download-only resync, 2 = upload-only resync. */
+    private static volatile int resyncMode = 0;
 
     public static void setup() {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COLORS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerColorsPacket(client, buf));
@@ -409,12 +409,16 @@ public class TogetherClientNetwork {
     }
     private static void handleAssetManifestPacket(MinecraftClient client, PacketByteBuf buf) {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
-            boolean doDownload = (Boolean)TogetherSettings.assetSyncDownload.get();
-            boolean bl = (Boolean)TogetherSettings.assetSyncUpload.get();
-            boolean doUpload = true;
-            if (!doDownload && !doUpload) {
+            boolean dl = (Boolean)TogetherSettings.assetSyncDownload.get();
+            boolean ul = true;
+            if (resyncMode == 1) { dl = true; ul = false; }
+            else if (resyncMode == 2) { dl = false; ul = true; }
+            resyncMode = 0;
+            if (!dl && !ul) {
                 return;
             }
+            final boolean doDownload = dl;
+            final boolean doUpload = ul;
             BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
             if (!(data instanceof MapType)) {
                 return;
@@ -455,16 +459,10 @@ public class TogetherClientNetwork {
                     }
                     AssetSyncTracker.beginScan();
                     boolean hadTasks = false;
-                    boolean forceDownload = forceDownloadModels;
-                    forceDownloadModels = false;
                     if (doDownload) {
                         ArrayList<String> needed = new ArrayList<String>();
                         for (Map.Entry entry : serverSha1Map.entrySet()) {
                             String relPath = (String) entry.getKey();
-                            if (forceDownload && !relPath.startsWith("models/")) continue;
-                            /* Skip any single file larger than the per-client size limit, regardless of
-                             * which directory it lives in (models/ aggregation already handles model
-                             * folders, but videos/audio/etc. outside models/ need this guard). */
                             Long fileSize = serverSizeMap.get(relPath);
                             if (fileSize != null && fileSize > maxBytes) {
                                 continue;
@@ -476,7 +474,7 @@ public class TogetherClientNetwork {
                             }
                             File localFile = new File(assetsFolder, relPath.replace("/", File.separator));
                             boolean needsDownload = true;
-                            if (!forceDownload && localFile.exists() && localFile.isFile()) {
+                            if (localFile.exists() && localFile.isFile()) {
                                 needsDownload = !((String)entry.getValue()).equalsIgnoreCase(TogetherClientNetwork.sha1OfLocalFile(localFile.toPath()));
                             }
                             if (!needsDownload) continue;
@@ -762,51 +760,22 @@ public class TogetherClientNetwork {
         }
     }
 
-    /** Ask the server to resend the asset manifest; the response will force re-download of every models/ entry. */
+    /** Ask the server to resend the manifest, then download only files that differ from local. */
     public static void requestModelResync() {
         if (!isBBSTogetherOnServer) return;
-        forceDownloadModels = true;
+        resyncMode = 1;
         AssetSyncTracker.beginScan();
         PacketByteBuf buf = PacketByteBufs.create();
         ClientPlayNetworking.send(TogetherServerNetwork.SERVER_ASSET_RESYNC, buf);
     }
 
-    /** Walk the local models/ folder and upload every file, regardless of server-side hash. */
+    /** Ask the server to resend the manifest, then upload only local files missing from the server. */
     public static void forceUploadModels() {
         if (!isBBSTogetherOnServer) return;
-        File assetsFolder = BBSMod.getAssetsFolder();
-        if (assetsFolder == null || !assetsFolder.exists()) return;
-        File modelsFolder = new File(assetsFolder, "models");
-        if (!modelsFolder.exists() || !modelsFolder.isDirectory()) return;
+        resyncMode = 2;
         AssetSyncTracker.beginScan();
-        long maxBytes = clientMaxAssetBytes();
-        new Thread(() -> {
-            try {
-                ArrayList<Path> paths = new ArrayList<>();
-                Files.walk(modelsFolder.toPath()).filter(Files::isRegularFile).forEach(paths::add);
-                int count = paths.size();
-                MinecraftClient.getInstance().execute(() -> {
-                    assetUploadTotal = count;
-                    assetUploadDone = 0;
-                    assetUploadErrors = 0;
-                    assetUploadFinishedAt = 0L;
-                });
-                for (Path p : paths) {
-                    if (!isBBSTogetherOnServer) break;
-                    try {
-                        if (Files.size(p) > maxBytes) continue;
-                        byte[] data = Files.readAllBytes(p);
-                        String rel = "models/" + modelsFolder.toPath().relativize(p).toString().replace(File.separator, "/");
-                        AssetSyncTracker.pending(rel, AssetSyncTracker.Dir.UPLOAD);
-                        final byte[] fdata = data;
-                        MinecraftClient.getInstance().execute(() -> sendAssetUpload(rel, fdata));
-                        Thread.sleep(200L);
-                    } catch (Exception ignored) {}
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }, "BBSTogether-ForceUploadModels").start();
+        PacketByteBuf buf = PacketByteBufs.create();
+        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_ASSET_RESYNC, buf);
     }
 
     public static void stripRecordingCommands(Replay replay) {
