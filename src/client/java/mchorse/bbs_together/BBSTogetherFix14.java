@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import mchorse.bbs_mod.api.client.editor.TrackCategory;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.ui.film.UIClips;
 import mchorse.bbs_mod.ui.film.UIClipsPanel;
@@ -54,17 +55,17 @@ public final class BBSTogetherFix14 {
         if (uIReplaysEditor == null) {
             return 1;
         }
-        UIReplaysEditor.ReplayCategory replayCategory = uIReplaysEditor.getCategory();
-        if (replayCategory == UIReplaysEditor.ReplayCategory.REPLAY || replayCategory == UIReplaysEditor.ReplayCategory.FORM) {
+        TrackCategory replayCategory = uIReplaysEditor.getCategory();
+        if (replayCategory == TrackCategory.REPLAY || replayCategory == TrackCategory.FORM) {
             return 12;
         }
-        if (replayCategory == UIReplaysEditor.ReplayCategory.POSE) {
+        if (replayCategory == TrackCategory.POSE) {
             return 13;
         }
-        if (replayCategory == UIReplaysEditor.ReplayCategory.IK) {
+        if (replayCategory == TrackCategory.IK) {
             return 16;
         }
-        if (replayCategory == UIReplaysEditor.ReplayCategory.PHYSICS) {
+        if (replayCategory == TrackCategory.PHYSICS) {
             return 17;
         }
         return 11;
