@@ -93,6 +93,8 @@ public class TogetherClientNetwork {
     /** Model IDs whose folder contained at least one file too large to download; shown red in the picker. */
     public static final ConcurrentHashMap.KeySetView<String, Boolean> tooLargeModels = ConcurrentHashMap.newKeySet();
     private static final int MAX_SELECTION_PACKET = 512;
+    /** When true, the next manifest response forces re-download of every models/ entry regardless of local hash. */
+    private static volatile boolean forceDownloadModels = false;
 
     public static void setup() {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COLORS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerColorsPacket(client, buf));
@@ -436,6 +438,7 @@ public class TogetherClientNetwork {
                         }
                     }
                     long maxBytes = TogetherClientNetwork.clientMaxAssetBytes();
+                    TogetherClientNetwork.tooLargeModels.clear();
                     HashMap<String, Long> modelTotalSize = new HashMap<String, Long>();
                     for (Map.Entry<String, Long> e : serverSizeMap.entrySet()) {
                         String modelId = together$extractModelId(e.getKey());
@@ -452,10 +455,20 @@ public class TogetherClientNetwork {
                     }
                     AssetSyncTracker.beginScan();
                     boolean hadTasks = false;
+                    boolean forceDownload = forceDownloadModels;
+                    forceDownloadModels = false;
                     if (doDownload) {
                         ArrayList<String> needed = new ArrayList<String>();
                         for (Map.Entry entry : serverSha1Map.entrySet()) {
                             String relPath = (String) entry.getKey();
+                            if (forceDownload && !relPath.startsWith("models/")) continue;
+                            /* Skip any single file larger than the per-client size limit, regardless of
+                             * which directory it lives in (models/ aggregation already handles model
+                             * folders, but videos/audio/etc. outside models/ need this guard). */
+                            Long fileSize = serverSizeMap.get(relPath);
+                            if (fileSize != null && fileSize > maxBytes) {
+                                continue;
+                            }
                             String modelId = together$extractModelId(relPath);
                             if (modelId != null && oversizedModels.contains(modelId)) {
                                 if (!relPath.endsWith("/config.json")) continue;
@@ -463,7 +476,7 @@ public class TogetherClientNetwork {
                             }
                             File localFile = new File(assetsFolder, relPath.replace("/", File.separator));
                             boolean needsDownload = true;
-                            if (localFile.exists() && localFile.isFile()) {
+                            if (!forceDownload && localFile.exists() && localFile.isFile()) {
                                 needsDownload = !((String)entry.getValue()).equalsIgnoreCase(TogetherClientNetwork.sha1OfLocalFile(localFile.toPath()));
                             }
                             if (!needsDownload) continue;
@@ -485,14 +498,15 @@ public class TogetherClientNetwork {
                         }
                     }
                     if (doUpload && assetsFolder.exists()) {
-                        ArrayList<Map.Entry<String, byte[]>> toUpload = new ArrayList<>();
+                        long upMaxBytes = clientMaxAssetBytes();
+                        ArrayList<String> toUpload = new ArrayList<>();
                         Files.walk(assetsPath, new FileVisitOption[0]).filter(x$0 -> Files.isRegularFile(x$0, new LinkOption[0])).forEach(localPath -> {
                             try {
                                 String relativePath = assetsPath.relativize((Path)localPath).toString().replace(File.separator, "/");
                                 String serverSha1 = (String)serverSha1Map.get(relativePath);
                                 String localSha1 = TogetherClientNetwork.sha1OfLocalFile(localPath);
                                 if ((serverSha1 == null || !serverSha1.equalsIgnoreCase(localSha1))) {
-                                    toUpload.add(new AbstractMap.SimpleEntry<String, byte[]>(relativePath, Files.readAllBytes(localPath)));
+                                    toUpload.add(relativePath);
                                 }
                             }
                             catch (Exception e) {
@@ -507,11 +521,21 @@ public class TogetherClientNetwork {
                                 assetUploadDone = 0;
                                 assetUploadErrors = 0;
                                 assetUploadFinishedAt = 0L;
-                                for (Map.Entry<String, byte[]> entry : toUpload) {
-                                    AssetSyncTracker.pending((String)entry.getKey(), AssetSyncTracker.Dir.UPLOAD);
-                                    TogetherClientNetwork.sendAssetUpload((String)entry.getKey(), (byte[])entry.getValue());
-                                }
                             });
+                            new Thread(() -> {
+                                for (String relPath : toUpload) {
+                                    if (!isBBSTogetherOnServer) break;
+                                    try {
+                                        File f = new File(assetsFolder, relPath.replace("/", File.separator));
+                                        if (!f.exists() || !f.isFile()) continue;
+                                        if (f.length() > upMaxBytes) continue;
+                                        byte[] fileData = Files.readAllBytes(f.toPath());
+                                        AssetSyncTracker.pending(relPath, AssetSyncTracker.Dir.UPLOAD);
+                                        MinecraftClient.getInstance().execute(() -> TogetherClientNetwork.sendAssetUpload(relPath, fileData));
+                                        Thread.sleep(200L);
+                                    } catch (Exception ignored) {}
+                                }
+                            }, "BBSTogether-AssetUpload").start();
                         }
                     }
                     if (!hadTasks) {
@@ -736,6 +760,53 @@ public class TogetherClientNetwork {
             ++assetUploadErrors;
             AssetSyncTracker.error(relativePath);
         }
+    }
+
+    /** Ask the server to resend the asset manifest; the response will force re-download of every models/ entry. */
+    public static void requestModelResync() {
+        if (!isBBSTogetherOnServer) return;
+        forceDownloadModels = true;
+        AssetSyncTracker.beginScan();
+        PacketByteBuf buf = PacketByteBufs.create();
+        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_ASSET_RESYNC, buf);
+    }
+
+    /** Walk the local models/ folder and upload every file, regardless of server-side hash. */
+    public static void forceUploadModels() {
+        if (!isBBSTogetherOnServer) return;
+        File assetsFolder = BBSMod.getAssetsFolder();
+        if (assetsFolder == null || !assetsFolder.exists()) return;
+        File modelsFolder = new File(assetsFolder, "models");
+        if (!modelsFolder.exists() || !modelsFolder.isDirectory()) return;
+        AssetSyncTracker.beginScan();
+        long maxBytes = clientMaxAssetBytes();
+        new Thread(() -> {
+            try {
+                ArrayList<Path> paths = new ArrayList<>();
+                Files.walk(modelsFolder.toPath()).filter(Files::isRegularFile).forEach(paths::add);
+                int count = paths.size();
+                MinecraftClient.getInstance().execute(() -> {
+                    assetUploadTotal = count;
+                    assetUploadDone = 0;
+                    assetUploadErrors = 0;
+                    assetUploadFinishedAt = 0L;
+                });
+                for (Path p : paths) {
+                    if (!isBBSTogetherOnServer) break;
+                    try {
+                        if (Files.size(p) > maxBytes) continue;
+                        byte[] data = Files.readAllBytes(p);
+                        String rel = "models/" + modelsFolder.toPath().relativize(p).toString().replace(File.separator, "/");
+                        AssetSyncTracker.pending(rel, AssetSyncTracker.Dir.UPLOAD);
+                        final byte[] fdata = data;
+                        MinecraftClient.getInstance().execute(() -> sendAssetUpload(rel, fdata));
+                        Thread.sleep(200L);
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }, "BBSTogether-ForceUploadModels").start();
     }
 
     public static void stripRecordingCommands(Replay replay) {

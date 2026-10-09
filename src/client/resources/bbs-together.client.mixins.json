@@ -29,7 +29,6 @@
                    "TogetherClientNetworkMixin",
                    "TogetherClientNetworkFix28Mixin",
                    "BBSClientInitFix66Mixin",
-                   "UITextureGridMixin",
                    "UIFormCategoryModelSizeMixin",
                    "FormCellRendererTooLargeMixin"
                ],

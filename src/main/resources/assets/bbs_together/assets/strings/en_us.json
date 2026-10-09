@@ -7,6 +7,8 @@
     "bbs_together.utility.sync.receive":  "Receive pushed assets",
     "bbs_together.utility.sync.progress":  "Asset progress bar",
     "bbs_together.utility.sync.progress_always":  "Always show progress bar",
+    "bbs_together.utility.sync.btn_download":  "Download All Models",
+    "bbs_together.utility.sync.btn_upload":  "Upload All Models",
     "bbs_together.notification.synced":  "Film synced from",
     "bbs_together.config.cdn.title":  "Asset Sync",
     "bbs_together.config.cdn.tooltip":  "BBS Together asset sync and CDN configuration",

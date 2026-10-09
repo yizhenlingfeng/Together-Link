@@ -5,11 +5,13 @@ import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.ui.framework.elements.IUIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIScrollView;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIToggle;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlayPanel;
 import mchorse.bbs_mod.ui.utility.UIUtilityOverlayPanel;
 import mchorse.bbs_mod.ui.utils.UI;
 import mchorse.bbs_together.TogetherSettings;
+import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -41,7 +43,15 @@ extends UIOverlayPanel {
         syncProgress.setValue(((Boolean)TogetherSettings.assetSyncProgressBar.get()).booleanValue());
         UIToggle syncProgressAlways = new UIToggle(L10n.lang((String)"bbs_together.utility.sync.progress_always"), b -> TogetherSettings.assetSyncProgressBarAlways.set((Boolean)b.getValue()));
         syncProgressAlways.setValue(((Boolean)TogetherSettings.assetSyncProgressBarAlways.get()).booleanValue());
-        this.view.add(new IUIElement[]{UI.label((IKey)L10n.lang((String)"bbs_together.utility.sync.title")), UI.column((UIElement[])new UIElement[]{syncDownload, syncUpload, syncReceive, syncProgress, syncProgressAlways}).marginBottom(8)});
+
+        UIButton btnDownload = new UIButton(L10n.lang((String)"bbs_together.utility.sync.btn_download"), b -> TogetherClientNetwork.requestModelResync());
+        UIButton btnUpload = new UIButton(L10n.lang((String)"bbs_together.utility.sync.btn_upload"), b -> TogetherClientNetwork.forceUploadModels());
+
+        this.view.add(new IUIElement[]{
+            UI.label((IKey)L10n.lang((String)"bbs_together.utility.sync.title")),
+            UI.row((UIElement[])new UIElement[]{btnDownload, btnUpload}).marginTop(0).marginBottom(4),
+            UI.column((UIElement[])new UIElement[]{syncDownload, syncUpload, syncReceive, syncProgress, syncProgressAlways}).marginBottom(8)
+        });
     }
 }
 

@@ -7,6 +7,8 @@
     "bbs_together.utility.sync.receive":  "接收推送的资源",
     "bbs_together.utility.sync.progress":  "资产进度条",
     "bbs_together.utility.sync.progress_always":  "始终显示进度条",
+    "bbs_together.utility.sync.btn_download":  "下载全部模型",
+    "bbs_together.utility.sync.btn_upload":  "上传全部模型",
     "bbs_together.notification.synced":  "电影已同步自",
     "bbs_together.config.cdn.title":  "资源同步",
     "bbs_together.config.cdn.tooltip":  "BBS Together 资源同步与 CDN 配置",

@@ -5,12 +5,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import mchorse.bbs_mod.ui.dashboard.list.UIDataPathList;
-import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.utils.DataPath;
-import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherClientNetwork;
-import mchorse.bbs_together.sync.AssetSyncTracker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.util.Identifier;
@@ -85,33 +82,6 @@ public class UIDataPathListMixin {
             context.batcher.texturedBox(glId, -1, (float)iconX, (float)iconY, (float)iconSize, (float)iconSize, 8.0f, 8.0f, 16.0f, 16.0f, 64, 64);
             context.batcher.texturedBox(glId, -1, (float)iconX, (float)iconY, (float)iconSize, (float)iconSize, 40.0f, 8.0f, 48.0f, 16.0f, 64, 64);
             offsetX += iconSize + spacing;
-        }
-
-        /* Per-asset sync strip along the bottom edge of the row. The list doesn't know which
-         * repository it belongs to, so probe film ids first, then models/particles document keys
-         * (with extension-agnostic prefix matching). */
-        if (!(Boolean) TogetherSettings.assetSyncProgressBar.get()) return;
-        String full = element.toString();
-        AssetSyncTracker.AssetState st = AssetSyncTracker.get("film:" + full);
-        if (st == null) {
-            st = AssetSyncTracker.findByDocumentKey("models/" + full, "particles/" + full);
-        }
-        if (st != null && st.state != AssetSyncTracker.State.PENDING) {
-            float rowBottom = y + self.scroll.scrollItemSize;
-            float bx1 = x + 12;
-            float bx2 = self.area.ex() - 2;
-            int primary = 0xFF000000 | (BBSSettings.primaryColor.get() & 0xFFFFFF);
-            if (st.state == AssetSyncTracker.State.ACTIVE) {
-                context.batcher.box(bx1, rowBottom - 1F, bx2, rowBottom, 0x33FFFFFF);
-                float cycle = (System.currentTimeMillis() % 1000L) / 1000F;
-                float prog = cycle < 0.5F ? cycle * 2F : (1F - cycle) * 2F;
-                float head = bx1 + (bx2 - bx1 - 6F) * prog;
-                context.batcher.box(head, rowBottom - 1F, head + 6F, rowBottom, 0xFFFFFFFF);
-            } else if (st.state == AssetSyncTracker.State.DONE) {
-                context.batcher.box(bx1, rowBottom - 1F, bx2, rowBottom, primary);
-            } else if (st.state == AssetSyncTracker.State.ERROR) {
-                context.batcher.box(bx1, rowBottom - 1F, bx2, rowBottom, 0xFFFF5555);
-            }
         }
     }
 }
