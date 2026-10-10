@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
+import mchorse.bbs_mod.data.types.ListType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
@@ -759,16 +760,11 @@ public class TogetherServerNetwork {
                     }
                 } else {
                     before = (MapType)stored.toData();
-                    /* Compare every incoming replay against its stored counterpart,
-                     * so the log can say which clips (replays) were actually touched */
-                    for (Replay replay : incomingFilm.replays.getList()) {
-                        Replay existing = stored.replays.getById(replay.getId());
-                        if (existing == null || !BaseType.equals(existing.toData(), replay.toData())) {
-                            changedReplays.add(replay.getId());
-                        }
-                    }
                     TogetherServerNetwork.mergeFilms(stored, incomingFilm);
                     merged = (MapType)stored.toData();
+                    /* Compare the replays of the merged film against the pre-merge one
+                     * (paired by stable id), so the log says which clips were touched */
+                    changedReplays = TogetherServerNetwork.collectChangedReplayIds(before, merged);
                 }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
@@ -795,6 +791,45 @@ public class TogetherServerNetwork {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    /**
+     * Replay ids that differ between the pre-merge and post-merge film: added,
+     * removed, or with any content change. Paired by the stable id each replay
+     * carries in its serialized form; replays without one fall back to pairing
+     * by position.
+     */
+    private static ArrayList<String> collectChangedReplayIds(MapType before, MapType merged) {
+        ArrayList<String> changed = new ArrayList<String>();
+        ListType oldList = before.getList("replays");
+        ListType newList = merged.getList("replays");
+        for (int i = 0; i < newList.size(); ++i) {
+            MapType next = newList.getMap(i);
+            String id = next.getString("id");
+            MapType prev = findReplayData(oldList, id, i);
+            if (prev == null || !BaseType.equals(prev, next)) {
+                changed.add(id);
+            }
+        }
+        for (int i = 0; i < oldList.size(); ++i) {
+            MapType prev = oldList.getMap(i);
+            if (findReplayData(newList, prev.getString("id"), i) == null) {
+                changed.add(prev.getString("id"));
+            }
+        }
+        return changed;
+    }
+
+    private static MapType findReplayData(ListType list, String id, int fallbackIndex) {
+        if (id != null && !id.isEmpty()) {
+            for (int i = 0; i < list.size(); ++i) {
+                if (list.getMap(i).getString("id").equals(id)) {
+                    return list.getMap(i);
+                }
+            }
+            return null;
+        }
+        return fallbackIndex < list.size() ? list.getMap(fallbackIndex) : null;
     }
 
     /** Aggregate the requested paths into model IDs and log one download entry.
