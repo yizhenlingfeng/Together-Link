@@ -1108,12 +1108,8 @@ public class TogetherClientNetwork {
                     return true;
                 }
             } else if (current instanceof Clips clips) {
-                /* Clips 是数字索引列表，fromData 只接受 ListType。当服务器同步的路径指向一个
-                 * 客户端还不存在的 clip（索引越界，比如服务器刚新增 clip 而客户端尚未收到）时，
-                 * 通用的 MapType 包装回灌会让 Clips.fromData 在 asList() 处直接 CCE。
-                 * 只有 data 本身就是完整 clip 的 MapType（带 type 字段）时，才能用工厂凭空
-                 * 造一个 clip 出来；否则（深层字段修改但 clip 尚未到达）无法确定类型，
-                 * 放弃这次补丁，等后续完整同步包到达，绝不崩。 */
+                /* Clips.fromData 只接受 ListType；本地还没有对应 clip 时，仅当 data 是带
+                 * type 的完整 clip MapType 才用工厂造一个，否则丢弃补丁，避免 MapType 回灌 CCE。 */
                 if (data.isMap()) {
                     MapType map = data.asMap();
                     if (!map.getString("type").isEmpty()) {
@@ -1123,9 +1119,7 @@ public class TogetherClientNetwork {
                                 clips.addClip(clip);
                                 return true;
                             }
-                        } catch (Exception e) {
-                            // 工厂创建失败（未知类型/数据损坏），落到下方 return false
-                        }
+                        } catch (Exception ignored) {}
                     }
                 }
                 return false;
