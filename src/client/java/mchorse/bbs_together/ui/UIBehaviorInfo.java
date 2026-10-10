@@ -140,12 +140,11 @@ public class UIBehaviorInfo extends UIElement
 
                 if (filmEntry)
                 {
-                    /* Film items are replay ids; show their labels when the film is local */
-                    this.linkLine(context, x, y, width, replayDisplay(entry.target, item), entry.target, item);
+                    this.linkLine(context, x, y, width, item, entry.target, item, null);
                 }
                 else
                 {
-                    this.linkLine(context, x, y, width, item, null, item);
+                    this.linkLine(context, x, y, width, item, null, null, item);
                 }
 
                 y += 10;
@@ -172,7 +171,7 @@ public class UIBehaviorInfo extends UIElement
     }
 
     /** A clickable model link, lit by the theme's primary color (bright when hovered). */
-    private void linkLine(UIContext context, int x, int y, int width, String value, String filmId, String modelId)
+    private void linkLine(UIContext context, int x, int y, int width, String value, String filmId, String clip, String modelId)
     {
         String text = crop(context, value, width);
         boolean hovered = context.mouseX >= x && context.mouseX < x + context.batcher.getFont().getWidth(text) && context.mouseY >= y && context.mouseY < y + 10;
@@ -187,6 +186,7 @@ public class UIBehaviorInfo extends UIElement
         zone.w = context.batcher.getFont().getWidth(text);
         zone.h = 10;
         zone.filmId = filmId;
+        zone.clip = clip;
         zone.modelId = modelId;
 
         this.zones.add(zone);
@@ -203,7 +203,7 @@ public class UIBehaviorInfo extends UIElement
                 {
                     if (zone.filmId != null)
                     {
-                        this.openReplay(zone.filmId, zone.modelId);
+                        this.openClip(zone.filmId, zone.clip);
                     }
                     else
                     {
@@ -218,38 +218,17 @@ public class UIBehaviorInfo extends UIElement
         return super.subMouseClicked(context);
     }
 
-    /** The replay's display label, looked up in the locally synced film; falls back to its id. */
-    private static String replayDisplay(String filmId, String replayId)
-    {
-        try
-        {
-            mchorse.bbs_mod.film.Film film = mchorse.bbs_mod.BBSMod.getFilms().load(filmId);
-
-            if (film != null)
-            {
-                mchorse.bbs_mod.film.replays.Replay replay = film.replays.getById(replayId);
-
-                if (replay != null && !replay.label.get().isEmpty())
-                {
-                    return replay.label.get();
-                }
-            }
-        }
-        catch (Exception ignored)
-        {}
-
-        return replayId;
-    }
-
     /**
-     * Jump to the film panel with this film open and the replay picked in its
-     * list, so a film entry's clips lead straight to their page.
+     * Jump to the film panel with this film open and the picked camera clip
+     * selected on its timeline, so a film entry's clips lead straight to
+     * their page. {@code label} is the clip's title, or {@code #index} for
+     * an untitled clip.
      */
-    private void openReplay(String filmId, String replayId)
+    private void openClip(String filmId, String label)
     {
         UIServerBehaviorsPanel panel = this.getParent(UIServerBehaviorsPanel.class);
 
-        if (panel == null || filmId == null || filmId.isEmpty() || replayId == null)
+        if (panel == null || filmId == null || filmId.isEmpty() || label == null || label.isEmpty())
         {
             return;
         }
@@ -275,9 +254,37 @@ public class UIBehaviorInfo extends UIElement
         try
         {
             mchorse.bbs_mod.film.Film film = mchorse.bbs_mod.BBSMod.getFilms().load(filmId);
-            mchorse.bbs_mod.film.replays.Replay replay = film == null ? null : film.replays.getById(replayId);
 
-            if (replay == null)
+            if (film == null)
+            {
+                return;
+            }
+
+            mchorse.bbs_mod.utils.clips.Clip target = null;
+
+            if (label.startsWith("#"))
+            {
+                int index = Integer.parseInt(label.substring(1));
+
+                if (index >= 0 && index < film.camera.get().size())
+                {
+                    target = film.camera.get().get(index);
+                }
+            }
+            else
+            {
+                for (mchorse.bbs_mod.utils.clips.Clip clip : film.camera.get())
+                {
+                    if (label.equals(clip.title.get()))
+                    {
+                        target = clip;
+
+                        break;
+                    }
+                }
+            }
+
+            if (target == null)
             {
                 return;
             }
@@ -291,7 +298,7 @@ public class UIBehaviorInfo extends UIElement
                 filmPanel.fill(film);
             }
 
-            filmPanel.replayEditor.replaysList.replays.scrollToReplay(replay);
+            filmPanel.cameraEditor.clips.pickClip(target);
         }
         catch (Exception ignored)
         {}
@@ -407,14 +414,17 @@ public class UIBehaviorInfo extends UIElement
         return value + "…";
     }
 
-    /** A clickable rect of the details pane, pointing at a model or a film replay. */
+    /** A clickable rect of the details pane, pointing at a model or a film camera clip. */
     private static class ClickZone
     {
         int x;
         int y;
         int w;
         int h;
+        /** Film id for camera clip zones. */
         String filmId;
+        /** Clip title, or {@code #index} for an untitled clip. */
+        String clip;
         String modelId;
     }
 }

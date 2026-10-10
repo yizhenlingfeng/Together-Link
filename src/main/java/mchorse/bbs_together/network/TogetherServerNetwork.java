@@ -762,9 +762,9 @@ public class TogetherServerNetwork {
                     before = (MapType)stored.toData();
                     TogetherServerNetwork.mergeFilms(stored, incomingFilm);
                     merged = (MapType)stored.toData();
-                    /* Compare the replays of the merged film against the pre-merge one
-                     * (paired by stable id), so the log says which clips were touched */
-                    changedReplays = TogetherServerNetwork.collectChangedReplayIds(before, merged);
+                    /* Compare the camera clips of the merged film against the pre-merge one,
+                     * so the log says which clips were touched */
+                    changedReplays = TogetherServerNetwork.collectChangedClips(before, merged);
                 }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
@@ -794,42 +794,34 @@ public class TogetherServerNetwork {
     }
 
     /**
-     * Replay ids that differ between the pre-merge and post-merge film: added,
-     * removed, or with any content change. Paired by the stable id each replay
-     * carries in its serialized form; replays without one fall back to pairing
-     * by position.
+     * Clip titles/indexes that differ between the pre-merge and post-merge
+     * film's camera timeline: added, removed, or with any content change.
+     * Clips carry no stable id, so they pair by position; a titled clip is
+     * logged by its title, an untitled one as {@code #index} for the client
+     * to jump back by position.
      */
-    private static ArrayList<String> collectChangedReplayIds(MapType before, MapType merged) {
+    private static ArrayList<String> collectChangedClips(MapType before, MapType merged) {
         ArrayList<String> changed = new ArrayList<String>();
-        ListType oldList = before.getList("replays");
-        ListType newList = merged.getList("replays");
-        for (int i = 0; i < newList.size(); ++i) {
-            MapType next = newList.getMap(i);
-            String id = next.getString("id");
-            MapType prev = findReplayData(oldList, id, i);
-            if (prev == null || !BaseType.equals(prev, next)) {
-                changed.add(id);
+        ListType oldClips = before.getList("camera");
+        ListType newClips = merged.getList("camera");
+        int shared = Math.min(oldClips.size(), newClips.size());
+        for (int i = 0; i < shared; ++i) {
+            if (!BaseType.equals(oldClips.getMap(i), newClips.getMap(i))) {
+                changed.add(clipLabel(newClips.getMap(i), i));
             }
         }
-        for (int i = 0; i < oldList.size(); ++i) {
-            MapType prev = oldList.getMap(i);
-            if (findReplayData(newList, prev.getString("id"), i) == null) {
-                changed.add(prev.getString("id"));
-            }
+        for (int i = shared; i < newClips.size(); ++i) {
+            changed.add(clipLabel(newClips.getMap(i), i));
+        }
+        for (int i = shared; i < oldClips.size(); ++i) {
+            changed.add(clipLabel(oldClips.getMap(i), i));
         }
         return changed;
     }
 
-    private static MapType findReplayData(ListType list, String id, int fallbackIndex) {
-        if (id != null && !id.isEmpty()) {
-            for (int i = 0; i < list.size(); ++i) {
-                if (list.getMap(i).getString("id").equals(id)) {
-                    return list.getMap(i);
-                }
-            }
-            return null;
-        }
-        return fallbackIndex < list.size() ? list.getMap(fallbackIndex) : null;
+    private static String clipLabel(MapType clip, int index) {
+        String title = clip.getString("title");
+        return title == null || title.isEmpty() ? "#" + index : title;
     }
 
     /** Aggregate the requested paths into model IDs and log one download entry.
