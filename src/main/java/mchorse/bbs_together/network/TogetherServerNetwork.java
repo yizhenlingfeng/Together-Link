@@ -109,6 +109,11 @@ public class TogetherServerNetwork {
     private static final ConcurrentHashMap<UUID, String> playerInFilmScreen = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Integer> playerColors = new ConcurrentHashMap();
     private static final Set<String> deletedFilmIds = Collections.synchronizedSet(new HashSet());
+    /** Last saved state per film, the baseline film saves diff against: edits reach the
+     * server through FILM_DATA_SYNC before (and besides) the full FILM_SAVE_SYNC, and in
+     * single player BBS's own save has already rewritten the file by the time the sync
+     * arrives — so the pre-save state can only come from this snapshot. */
+    private static final ConcurrentHashMap<String, MapType> lastSavedFilmSnapshots = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, CursorData> playerCursors = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, FormLockData> playerFormLocks = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Object> pendingStopPlayers = new ConcurrentHashMap();
@@ -161,6 +166,7 @@ public class TogetherServerNetwork {
         playerFormLocks.clear();
         playerInFilmScreen.clear();
         deletedFilmIds.clear();
+        lastSavedFilmSnapshots.clear();
         LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
         synchronized (linkedHashMap) {
             playerReplaySelections.clear();
@@ -759,7 +765,12 @@ public class TogetherServerNetwork {
                         changedReplays.add(replay.getId());
                     }
                 } else {
-                    before = (MapType)stored.toData();
+                    /* The baseline is the last known saved state, NOT the file on disk:
+                     * in single player BBS's own save has already rewritten it, and live
+                     * edits arrive here through FILM_DATA_SYNC before any save */
+                    before = lastSavedFilmSnapshots.containsKey(filmId)
+                        ? lastSavedFilmSnapshots.get(filmId)
+                        : (MapType)stored.toData();
                     TogetherServerNetwork.mergeFilms(stored, incomingFilm);
                     merged = (MapType)stored.toData();
                     /* Compare the camera clips of the merged film against the pre-merge one,
@@ -768,6 +779,7 @@ public class TogetherServerNetwork {
                 }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
+                lastSavedFilmSnapshots.put(filmId, merged);
                 /* Content comparison: a save whose merge changed nothing on an existing
                  * film isn't logged; new films always are */
                 if (before == null || !BaseType.equals(before, merged)) {
@@ -970,6 +982,7 @@ public class TogetherServerNetwork {
         String filmId = buf.readString();
         server.execute(() -> {
             deletedFilmIds.add(filmId);
+            lastSavedFilmSnapshots.remove(filmId);
             try {
                 BBSMod.getFilms().delete(filmId);
             }
@@ -994,6 +1007,7 @@ public class TogetherServerNetwork {
             catch (Exception exception) {
                 // empty catch block
             }
+            lastSavedFilmSnapshots.remove(oldId);
             for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
                 if (other.getUuid().equals(player.getUuid())) continue;
                 PacketByteBuf renameOut = PacketByteBufs.create();
@@ -1111,6 +1125,7 @@ public class TogetherServerNetwork {
                     ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_FILM_DATA_SYNC, (PacketByteBuf)outBuf);
                 }
                 if (path.size() >= 4 && "replays".equals(path.get(0)) && (film = (Film)BBSMod.getFilms().load(filmId)) != null) {
+                    lastSavedFilmSnapshots.computeIfAbsent(filmId, k -> (MapType)film.toData());
                     TogetherServerNetwork.applyPathToFilm(film, path, DataStorageUtils.readFromBytes((byte[])bytes));
                     BBSMod.getFilms().save(filmId, (MapType)film.toData());
                 }
