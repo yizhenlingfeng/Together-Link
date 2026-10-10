@@ -40,6 +40,9 @@ import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_together.BBSTogetherFix18;
+import mchorse.bbs_together.behaviors.BehaviorLogManager;
+import mchorse.bbs_together.behaviors.BehaviorType;
+import mchorse.bbs_together.utils.ModelPathUtils;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
@@ -93,6 +96,12 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_MASTER_DONE = new Identifier("bbs_together", "s_master_done");
     public static final Identifier SERVER_FILM_DATA_SYNC = new Identifier("bbs_together", "s_film_data_sync");
     public static final Identifier SERVER_FILM_SAVE_SYNC = new Identifier("bbs_together", "s_film_save_sync");
+    public static final Identifier SERVER_BEHAVIOR_REPORT = new Identifier("bbs_together", "s_behavior_report");
+    public static final Identifier SERVER_BEHAVIOR_QUERY = new Identifier("bbs_together", "s_behavior_query");
+    public static final Identifier SERVER_SET_OPERATOR = new Identifier("bbs_together", "s_set_operator");
+    public static final Identifier SERVER_REMOVE_PLAYER_LOGS = new Identifier("bbs_together", "s_remove_player_logs");
+    public static final Identifier CLIENT_BEHAVIOR_LIST = new Identifier("bbs_together", "c_behavior_list");
+    public static final Identifier CLIENT_PERMISSIONS = new Identifier("bbs_together", "c_permissions");
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> playerCrushers = new ConcurrentHashMap();
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
@@ -134,6 +143,10 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_LIST_CHANGED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmListChanged(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_DELETED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDeleted(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_RENAMED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmRenamed(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BEHAVIOR_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorReport(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BEHAVIOR_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorQuery(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SET_OPERATOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSetOperator(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REMOVE_PLAYER_LOGS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRemovePlayerLogs(server, player, buf));
     }
 
     /*
@@ -439,6 +452,7 @@ public class TogetherServerNetwork {
         for (int i = 0; i < count; ++i) {
             paths.add(buf.readString());
         }
+        recordDownloadBehavior(player, paths);
         Thread thread = new Thread(() -> {
             File assetsFolder = BBSMod.getAssetsFolder();
             for (String relativePath : paths) {
@@ -471,16 +485,24 @@ public class TogetherServerNetwork {
              * is only relayed to other players and never lands on the server, so it also never shows
              * up in later manifests. */
             File assetsFolder = BBSMod.getAssetsFolder();
+            boolean changed = true;
             if (assetsFolder != null) {
                 try {
                     Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
                     if (target.getParent() != null) {
                         Files.createDirectories(target.getParent());
                     }
+                    /* Content comparison: re-uploading identical bytes (a save that changed
+                     * nothing) isn't logged */
+                    byte[] existing = Files.exists(target) ? Files.readAllBytes(target) : null;
+                    changed = existing == null || !java.util.Arrays.equals(existing, bytes);
                     Files.write(target, bytes);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
+            }
+            if (changed) {
+                recordUploadBehavior(uploader, relativePath, (long)bytes.length);
             }
             server.execute(() -> {
                 for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
@@ -724,18 +746,37 @@ public class TogetherServerNetwork {
                 Film stored = (Film)BBSMod.getFilms().load(filmId);
                 Film incomingFilm = new Film();
                 incomingFilm.fromData((BaseType)incoming.asMap());
+                MapType before = null;
                 MapType merged = null;
+                ArrayList<String> changedReplays = new ArrayList<String>();
                 if (stored == null) {
                     if (deletedFilmIds.contains(filmId)) {
                         return;
                     }
                     merged = (MapType)incomingFilm.toData();
+                    for (Replay replay : incomingFilm.replays.getList()) {
+                        changedReplays.add(replay.getId());
+                    }
                 } else {
+                    before = (MapType)stored.toData();
+                    /* Compare every incoming replay against its stored counterpart,
+                     * so the log can say which clips (replays) were actually touched */
+                    for (Replay replay : incomingFilm.replays.getList()) {
+                        Replay existing = stored.replays.getById(replay.getId());
+                        if (existing == null || !BaseType.equals(existing.toData(), replay.toData())) {
+                            changedReplays.add(replay.getId());
+                        }
+                    }
                     TogetherServerNetwork.mergeFilms(stored, incomingFilm);
                     merged = (MapType)stored.toData();
                 }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
+                /* Content comparison: a save whose merge changed nothing on an existing
+                 * film isn't logged; new films always are */
+                if (before == null || !BaseType.equals(before, merged)) {
+                    BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, changedReplays, Map.of("replays", String.valueOf(mergedFilmReplays(merged))));
+                }
                 for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
                     TogetherServerNetwork.broadcastFilmSavedToAll(server, recipient, filmId, merged);
                 }
@@ -743,6 +784,159 @@ public class TogetherServerNetwork {
                 TogetherServerNetwork.broadcastReplaySelections(server, filmId);
             });
         });
+    }
+
+    /* Behavior log */
+
+    /** How many replays a serialized film carries, for the film edit summary. */
+    private static int mergedFilmReplays(MapType filmData) {
+        try {
+            return filmData.getList("replays").size();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Aggregate the requested paths into model IDs and log one download entry.
+     * Skins folders are filtered out, same as for uploads; the entry carries the
+     * total size of the requested (non-skin) files. */
+    private static void recordDownloadBehavior(ServerPlayerEntity player, List<String> paths) {
+        try {
+            ArrayList<String> modelIds = new ArrayList<String>();
+            long totalBytes = 0;
+            File assetsFolder = BBSMod.getAssetsFolder();
+            for (String path : paths) {
+                if (ModelPathUtils.isSkinPath(path)) {
+                    continue;
+                }
+                String modelId = ModelPathUtils.extractModelId(path);
+                if (modelId != null && !ModelPathUtils.isSkinPath("/" + modelId) && !modelIds.contains(modelId)) {
+                    modelIds.add(modelId);
+                }
+                if (assetsFolder != null) {
+                    try {
+                        File asset = new File(assetsFolder, path.replace("/", File.separator));
+                        if (asset.isFile()) {
+                            totalBytes += asset.length();
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+            if (modelIds.isEmpty()) {
+                return;
+            }
+            BehaviorLogManager.record(player, BehaviorType.DOWNLOAD.id, BehaviorType.SUB_DOWNLOAD_MODELS, modelIds.get(0), modelIds, Map.of(BehaviorLogManager.BYTES_KEY, String.valueOf(totalBytes)));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Log one upload entry, aggregated into model IDs only — paths that don't
+     * belong to a model (skins, fonts, archives, ...) aren't logged, and the
+     * pooled entry lists just the models, which the client can jump to. The
+     * pooled entry also accumulates the uploaded byte count.
+     */
+    private static void recordUploadBehavior(ServerPlayerEntity player, String relativePath, long bytes) {
+        try {
+            if (ModelPathUtils.isSkinPath(relativePath)) {
+                return;
+            }
+            String lower = relativePath.toLowerCase();
+            if (lower.endsWith(".zip") || lower.endsWith(".rar") || lower.endsWith(".7z")) {
+                return;
+            }
+            String modelId = ModelPathUtils.extractModelId(relativePath);
+            if (modelId == null || modelId.isEmpty()) {
+                return;
+            }
+            BehaviorLogManager.record(player, BehaviorType.UPLOAD.id, BehaviorType.SUB_UPLOAD_MODELS, "", Collections.singletonList(modelId), Map.of(BehaviorLogManager.BYTES_KEY, String.valueOf(bytes)));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * A client reports its own action (currently: model editor saves). The client
+     * can forge this — it's an audit hint, never a security input.
+     */
+    private static void handleBehaviorReport(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final int subType = buf.readInt();
+        final String target = buf.readString();
+        int itemCount = buf.readInt();
+        ArrayList<String> items = new ArrayList<String>();
+        for (int i = 0; i < Math.min(itemCount, 64); ++i) {
+            items.add(buf.readString());
+        }
+        final ArrayList<String> finalItems = items;
+        server.execute(() -> {
+            try {
+                BehaviorLogManager.record(player, BehaviorType.EDIT.id, subType, target, finalItems, null);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private static void handleBehaviorQuery(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final long afterId = buf.readLong();
+        final long clientVersion = buf.readLong();
+        server.execute(() -> {
+            try {
+                boolean isOp = BehaviorLogManager.isOperator(server, player);
+                MapType snapshot = BehaviorLogManager.query(server, afterId, clientVersion, isOp);
+                TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_BEHAVIOR_LIST, (BaseType)snapshot, null);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private static void handleSetOperator(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final UUID targetId = buf.readUuid();
+        final boolean op = buf.readBoolean();
+        server.execute(() -> {
+            try {
+                if (!BehaviorLogManager.isOperator(server, player)) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to " + (op ? "op" : "deop") + " someone without being an op");
+                    return;
+                }
+                boolean done = BehaviorLogManager.setOperator(server, targetId, op);
+                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (done ? (op ? " op'ed " : " deop'ed ") : " FAILED to change op status of ") + targetId);
+                TogetherServerNetwork.broadcastPermissions(server);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private static void handleRemovePlayerLogs(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final UUID targetId = buf.readUuid();
+        server.execute(() -> {
+            try {
+                if (!BehaviorLogManager.isOperator(server, player)) {
+                    return;
+                }
+                int removed = BehaviorLogManager.removePlayerLogs(targetId);
+                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " removed " + removed + " log entries of " + targetId);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** Tell a player whether they are an OP, so the panel can show the player list. */
+    public static void sendPermissions(MinecraftServer server, ServerPlayerEntity player) {
+        boolean isOp = BehaviorLogManager.isOperator(server, player);
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeBoolean(isOp);
+        ServerPlayNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_PERMISSIONS, (PacketByteBuf)out);
+    }
+
+    public static void broadcastPermissions(MinecraftServer server) {
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            TogetherServerNetwork.sendPermissions(server, p);
+        }
     }
 
     private static void handleFilmDeleted(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {

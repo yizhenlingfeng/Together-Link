@@ -26,6 +26,7 @@ public class TogetherSettings {
     public static ValueKeyframeInterpolation defaultKeyframeInterpolation;
     public static ValueBoolean defaultKeyframeColorEnabled;
     public static ValueInt defaultKeyframeColor;
+    public static ValueInt behaviorLogLimit;
 
     public static void register(SettingsBuilder settingsBuilder) {
         settingsBuilder.category("cdn");
@@ -46,6 +47,17 @@ public class TogetherSettings {
         settingsBuilder.register((BaseValue)defaultKeyframeInterpolation);
         defaultKeyframeColorEnabled = settingsBuilder.getBoolean("default_color_enabled", false);
         defaultKeyframeColor = settingsBuilder.getInt("default_color", -1).color();
+        settingsBuilder.category("behaviors");
+        behaviorLogLimit = settingsBuilder.getInt("behavior_log_limit", 1000, 100, 50000);
+    }
+
+    /**
+     * How many behavior entries the server keeps at most (oldest get evicted).
+     * Read on the server side; safe before settings load.
+     */
+    public static int getBehaviorLogLimit()
+    {
+        return behaviorLogLimit == null ? 1000 : Math.max(100, (Integer) behaviorLogLimit.get());
     }
 
     public static KeyframeShape getDefaultKeyframeShape() {

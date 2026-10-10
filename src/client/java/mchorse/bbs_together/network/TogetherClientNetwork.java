@@ -93,6 +93,13 @@ public class TogetherClientNetwork {
     public static volatile int pendingSwapTo = -1;
     /** Model IDs whose folder contained at least one file too large to download; shown red in the picker. */
     public static final ConcurrentHashMap.KeySetView<String, Boolean> tooLargeModels = ConcurrentHashMap.newKeySet();
+    /* Server behavior log (panel data), filled by CLIENT_BEHAVIOR_LIST */
+    public static volatile boolean isOperator = false;
+    public static final java.util.NavigableMap<Long, mchorse.bbs_together.behaviors.BehaviorEntry> behaviorEntries = new java.util.TreeMap<>();
+    public static final Map<UUID, mchorse.bbs_together.behaviors.PlayerRecord> behaviorPlayers = new java.util.concurrent.ConcurrentHashMap<>();
+    public static volatile long behaviorVersion = 0;
+    /** Bumped every time panel data changes, so the panel knows when to rebuild. */
+    public static volatile long behaviorDataStamp = 0;
     private static final int MAX_SELECTION_PACKET = 512;
     /** 0 = normal (follow settings), 1 = download-only resync, 2 = upload-only resync. */
     private static volatile int resyncMode = 0;
@@ -114,6 +121,8 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmDeletedPacket(client, buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmRenamedPacket(client, buf.readString(), buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MERGE_REPLAYS, (client, handler, buf, resp) -> TogetherClientNetwork.handleMergeReplaysPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BEHAVIOR_LIST, (client, handler, buf, resp) -> TogetherClientNetwork.handleBehaviorListPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
         isBBSTogetherOnServer = true;
     }
 
@@ -140,6 +149,11 @@ public class TogetherClientNetwork {
         pendingSwapFilmId = null;
         pendingSwapFrom = -1;
         pendingSwapTo = -1;
+        isOperator = false;
+        behaviorEntries.clear();
+        behaviorPlayers.clear();
+        behaviorVersion = 0;
+        behaviorDataStamp = 0;
         isBBSTogetherOnServer = false;
     }
 
@@ -735,12 +749,7 @@ public class TogetherClientNetwork {
 
     /** "models/foo/bar/textures/x.png" -> "foo/bar". Returns null for non-model paths. */
     private static String together$extractModelId(String relativePath) {
-        if (relativePath == null || !relativePath.startsWith("models/")) {
-            return null;
-        }
-        String after = relativePath.substring("models/".length());
-        int slash = after.lastIndexOf('/');
-        return slash > 0 ? after.substring(0, slash) : null;
+        return mchorse.bbs_together.utils.ModelPathUtils.extractModelId(relativePath);
     }
 
     public static void sendAssetUpload(String relativePath, byte[] fileBytes) {
@@ -1066,6 +1075,103 @@ public class TogetherClientNetwork {
             return;
         }
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
+    }
+
+    /* Server behavior log */
+
+    /** Ask the server for behavior entries newer than {@code afterId} (0 = full snapshot).
+     * The client's data version rides along: a lagging version gets a full snapshot back. */
+    public static void sendBehaviorQuery(long afterId) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeLong(afterId);
+        buf.writeLong(behaviorVersion);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BEHAVIOR_QUERY, (PacketByteBuf)buf);
+    }
+
+    /** Report a client-side action (model editor save) to the server log. */
+    public static void sendBehaviorReport(int subType, String target, List<String> items) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeInt(subType);
+        buf.writeString(target == null ? "" : target);
+        buf.writeInt(items == null ? 0 : Math.min(items.size(), 64));
+        if (items != null) {
+            for (int i = 0; i < Math.min(items.size(), 64); ++i) {
+                buf.writeString(items.get(i));
+            }
+        }
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BEHAVIOR_REPORT, (PacketByteBuf)buf);
+    }
+
+    /** Ask the server to (un)op a player; the server double checks the requester. */
+    public static void sendSetOperator(UUID targetId, boolean op) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeUuid(targetId);
+        buf.writeBoolean(op);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_SET_OPERATOR, (PacketByteBuf)buf);
+    }
+
+    /** Ask the server to wipe every log entry of a player (OP only, server re-checks). */
+    public static void sendRemovePlayerLogs(UUID targetId) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeUuid(targetId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REMOVE_PLAYER_LOGS, (PacketByteBuf)buf);
+    }
+
+    private static void handlePermissionsPacket(MinecraftClient client, PacketByteBuf buf) {
+        boolean op = buf.readBoolean();
+        client.execute(() -> isOperator = op);
+    }
+
+    private static void handleBehaviorListPacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            if (!data.isMap()) {
+                return;
+            }
+            MapType map = data.asMap();
+            client.execute(() -> {
+                isOperator = map.getBool("op");
+                long version = map.getLong("version");
+                /* A version mismatch means entries were removed, merged or evicted since
+                 * our last pull — replace everything, don't merge increments on top */
+                boolean full = version != behaviorVersion;
+                behaviorVersion = version;
+                if (full) {
+                    behaviorEntries.clear();
+                }
+                mchorse.bbs_mod.data.types.ListType behaviors = map.getList("behaviors");
+                for (int i = 0; i < behaviors.size(); ++i) {
+                    mchorse.bbs_together.behaviors.BehaviorEntry entry = mchorse.bbs_together.behaviors.BehaviorEntry.fromData(behaviors.getMap(i));
+                    behaviorEntries.put(entry.id, entry);
+                }
+                if (map.has("players")) {
+                    behaviorPlayers.clear();
+                    mchorse.bbs_mod.data.types.ListType players = map.getList("players");
+                    for (int i = 0; i < players.size(); ++i) {
+                        mchorse.bbs_mod.data.types.MapType playerData = players.getMap(i);
+                        mchorse.bbs_together.behaviors.PlayerRecord record = mchorse.bbs_together.behaviors.PlayerRecord.fromData(playerData);
+                        if (record.id != null) {
+                            record.op = playerData.getBool("isOp");
+                            record.offline = playerData.getBool("offline");
+                            behaviorPlayers.put(record.id, record);
+                        }
+                    }
+                }
+                behaviorDataStamp++;
+            });
+        });
     }
 
     private static UIDashboard getDashboardIfOpen() {

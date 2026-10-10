@@ -30,7 +30,8 @@
                    "TogetherClientNetworkFix28Mixin",
                    "BBSClientInitFix66Mixin",
                    "UIFormCategoryModelSizeMixin",
-                   "FormCellRendererTooLargeMixin"
+                   "FormCellRendererTooLargeMixin",
+                   "ModelManagerMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1

@@ -6,7 +6,9 @@
                    "BBSCommandsMixin",
                    "TogetherServerNetworkFix28Mixin",
                    "BBSTogetherFix28ServerActiveMixin",
-                   "ServerNetworkNullFilmFixMixin"
+                   "ServerNetworkNullFilmFixMixin",
+                   "ServerNetworkModelBlockMixin",
+                   "ModelBlockEntityMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1
