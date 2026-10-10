@@ -49,6 +49,7 @@ import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.UIKeyframeDo
 import mchorse.bbs_mod.utils.CollectionUtils;
 import mchorse.bbs_mod.utils.DataPath;
 import mchorse.bbs_mod.utils.clips.Clip;
+import mchorse.bbs_mod.utils.clips.Clips;
 import mchorse.bbs_mod.utils.keyframes.Keyframe;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_mod.film.replays.tracks.TrackId;
@@ -1106,6 +1107,28 @@ public class TogetherClientNetwork {
                     formProps.add((BaseValue)channel);
                     return true;
                 }
+            } else if (current instanceof Clips clips) {
+                /* Clips 是数字索引列表，fromData 只接受 ListType。当服务器同步的路径指向一个
+                 * 客户端还不存在的 clip（索引越界，比如服务器刚新增 clip 而客户端尚未收到）时，
+                 * 通用的 MapType 包装回灌会让 Clips.fromData 在 asList() 处直接 CCE。
+                 * 只有 data 本身就是完整 clip 的 MapType（带 type 字段）时，才能用工厂凭空
+                 * 造一个 clip 出来；否则（深层字段修改但 clip 尚未到达）无法确定类型，
+                 * 放弃这次补丁，等后续完整同步包到达，绝不崩。 */
+                if (data.isMap()) {
+                    MapType map = data.asMap();
+                    if (!map.getString("type").isEmpty()) {
+                        try {
+                            Clip clip = clips.getFactory().fromData(map);
+                            if (clip != null) {
+                                clips.addClip(clip);
+                                return true;
+                            }
+                        } catch (Exception e) {
+                            // 工厂创建失败（未知类型/数据损坏），落到下方 return false
+                        }
+                    }
+                }
+                return false;
             } else {
                 BaseType wrapped = data;
                 for (int j = path.size() - 1; j >= depth; --j) {

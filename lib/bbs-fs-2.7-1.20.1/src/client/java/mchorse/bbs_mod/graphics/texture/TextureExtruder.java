@@ -103,7 +103,10 @@ public class TextureExtruder
     {
         for (ModelVAO value : this.extruded.values())
         {
-            value.delete();
+            if (value != null)
+            {
+                value.delete();
+            }
         }
 
         this.extruded.clear();

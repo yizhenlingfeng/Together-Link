@@ -87,11 +87,25 @@ public final class BBSTogetherFix28Server {
     }
 
     private static void safeSaveFilm(String filmId, MapType data) {
-        try {
-            BBSMod.getFilms().save(filmId, data);
-        }
-        catch (Exception e) {
-            // BBS 2.6 backup may fail for new films; ignore
+        // Windows 上 .dat 偶尔被瞬时占用导致 save 失败，重试短间隔几次，避免电影数据丢盘
+        for (int i = 0; i < 3; ++i) {
+            try {
+                BBSMod.getFilms().save(filmId, data);
+                return;
+            }
+            catch (Exception e) {
+                if (i == 2) {
+                    // BBS 2.6 backup may fail for new films; ignore
+                    return;
+                }
+                try {
+                    Thread.sleep(100L * (i + 1));
+                }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
         }
     }
 

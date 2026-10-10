@@ -1,3 +1,8 @@
+    public final class mchorse.bbs_mod.api.client.compat.ClientVanillaAccess {
+    public static net.minecraft.client.gl.Framebuffer getFramebuffer(net.minecraft.client.MinecraftClient);
+    public static void setFramebuffer(net.minecraft.client.MinecraftClient, net.minecraft.client.gl.Framebuffer);
+}
+
 class mchorse.bbs_mod.api.client.editor.TrackCategories$1 {
 }
 
@@ -224,11 +229,6 @@ public final class mchorse.bbs_mod.api.FormPropertyAliases {
     public static void register(java.lang.String, java.lang.String);
 }
 
-public final class mchorse.bbs_mod.api.client.compat.ClientVanillaAccess {
-    public static net.minecraft.client.gl.Framebuffer getFramebuffer(net.minecraft.client.MinecraftClient);
-    public static void setFramebuffer(net.minecraft.client.MinecraftClient, net.minecraft.client.gl.Framebuffer);
-}
-
 public final class mchorse.bbs_mod.api.client.editor.TrackCategories {
     public static java.util.List<mchorse.bbs_mod.api.client.editor.TrackCategory> values();
     public static mchorse.bbs_mod.api.client.editor.TrackCategory categoryOf(mchorse.bbs_mod.film.replays.tracks.TrackId, boolean);
@@ -317,9 +317,6 @@ public final class mchorse.bbs_mod.api.compat.VanillaAccess {
     public static void setItemUseTimeLeft(net.minecraft.entity.LivingEntity, int);
     public static void setLivingFlag(net.minecraft.entity.LivingEntity, int, boolean);
     public static void setRiptideTicks(net.minecraft.entity.LivingEntity, int);
-}
-
-public interface mchorse.bbs_mod.api.BBSAddonMod {
 }
 
 public interface mchorse.bbs_mod.api.Experimental extends java.lang.annotation.Annotation {
