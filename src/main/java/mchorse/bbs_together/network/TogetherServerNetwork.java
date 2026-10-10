@@ -755,14 +755,14 @@ public class TogetherServerNetwork {
                 incomingFilm.fromData((BaseType)incoming.asMap());
                 MapType before = null;
                 MapType merged = null;
-                ArrayList<String> changedReplays = new ArrayList<String>();
+                ArrayList<String> changedClips = new ArrayList<String>();
                 if (stored == null) {
                     if (deletedFilmIds.contains(filmId)) {
                         return;
                     }
                     merged = (MapType)incomingFilm.toData();
                     for (Replay replay : incomingFilm.replays.getList()) {
-                        changedReplays.add(replay.getId());
+                        changedClips.add(replay.getId());
                     }
                 } else {
                     /* The baseline is the last known saved state, NOT the file on disk:
@@ -775,7 +775,7 @@ public class TogetherServerNetwork {
                     merged = (MapType)stored.toData();
                     /* Compare the camera clips of the merged film against the pre-merge one,
                      * so the log says which clips were touched */
-                    changedReplays = TogetherServerNetwork.collectChangedClips(before, merged);
+                    changedClips = TogetherServerNetwork.collectChangedClips(before, merged);
                 }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
@@ -783,7 +783,7 @@ public class TogetherServerNetwork {
                 /* Content comparison: a save whose merge changed nothing on an existing
                  * film isn't logged; new films always are */
                 if (before == null || !BaseType.equals(before, merged)) {
-                    BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, changedReplays, Map.of("replays", String.valueOf(mergedFilmReplays(merged))));
+                    BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, changedClips, Map.of("replays", String.valueOf(mergedFilmReplays(merged))));
                 }
                 for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
                     TogetherServerNetwork.broadcastFilmSavedToAll(server, recipient, filmId, merged);

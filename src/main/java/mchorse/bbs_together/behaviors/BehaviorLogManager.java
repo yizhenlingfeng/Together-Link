@@ -345,11 +345,6 @@ public class BehaviorLogManager
         return map;
     }
 
-    public static synchronized long getVersion()
-    {
-        return version;
-    }
-
     /* OP management */
 
     public static boolean isOperator(MinecraftServer server, ServerPlayerEntity player)
