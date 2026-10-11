@@ -99,6 +99,50 @@ public final class ReadOnlyOverlay
         }
     }
 
+    /**
+     * Attaches an overlay that keeps its own area locked to {@code boundTo}'s area. Needed for
+     * hosts laid out by flow containers (columns/splitters), where a plain 100%-sized child
+     * would just become another stacked row instead of covering the widgets.
+     */
+    public static void ensureBoundAttached(UIElement parent, UIElement[] slot, UIElement boundTo)
+    {
+        if (slot[0] == null)
+        {
+            slot[0] = new UIElement()
+            {
+                @Override
+                public void resize()
+                {
+                    super.resize();
+                    this.area.copy(boundTo.area);
+                }
+
+                @Override
+                public void render(UIContext context)
+                {
+                    if (BbsOpClientState.isReadOnly())
+                    {
+                        drawVeil(context, this.area);
+                    }
+                }
+
+                @Override
+                protected boolean subMouseClicked(UIContext context)
+                {
+                    return BbsOpClientState.isReadOnly() && this.area.isInside(context);
+                }
+
+                @Override
+                protected boolean subMouseScrolled(UIContext context)
+                {
+                    return BbsOpClientState.isReadOnly() && this.area.isInside(context);
+                }
+            };
+
+            parent.add(slot[0]);
+        }
+    }
+
     public static String label()
     {
         return L10n.lang("bbs_together.bbsop.view_only").get();

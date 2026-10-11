@@ -57,8 +57,8 @@ public class UIModelBlockPanelBbsOpMixin
             return;
         }
 
-        ReadOnlyOverlay.ensureAttached(self.editor, this.together$editorOverlay, false);
-        ReadOnlyOverlay.ensureAttached(self.bodySection, this.together$bodyOverlay, false);
-        ReadOnlyOverlay.ensureAttached(self.equipmentSection, this.together$equipmentOverlay, false);
+        ReadOnlyOverlay.ensureBoundAttached(self, this.together$editorOverlay, self.editor);
+        ReadOnlyOverlay.ensureBoundAttached(self, this.together$bodyOverlay, self.bodySection);
+        ReadOnlyOverlay.ensureBoundAttached(self, this.together$equipmentOverlay, self.equipmentSection);
     }
 }
