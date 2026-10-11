@@ -286,12 +286,13 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
         }
         else if (this.levelFilter >= 0)
         {
-            /* Every behavior of the players currently known to be in this level group. */
+            /* Every behavior of the players currently known to be in this level group.
+             * Entries of players whose identity was stripped (playerId == null) never match. */
             List<BehaviorEntry> filtered = new ArrayList<>();
 
             for (BehaviorEntry entry : entries)
             {
-                PlayerRecord player = TogetherClientNetwork.behaviorPlayers.get(entry.playerId);
+                PlayerRecord player = entry.playerId == null ? null : TogetherClientNetwork.behaviorPlayers.get(entry.playerId);
 
                 if (player != null && player.bbsLevel == this.levelFilter)
                 {

@@ -317,7 +317,9 @@ public class BehaviorLogManager
         {
             if (entry.id > cutoff)
             {
-                behaviors.add(entry.toData(requesterIsOp));
+                /* Managers (vanilla OP or BBS level 2) get identities, so the level group
+                 * filter can match entries to players; everyone else stays anonymous. */
+                behaviors.add(entry.toData(manager));
             }
         }
 

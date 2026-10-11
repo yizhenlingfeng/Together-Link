@@ -3,7 +3,7 @@
 BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft）的多人协作模组，基于 Minecraft 1.20.1 Fabric。它让多名玩家在同一个 BBS 影片项目中实时协作编辑，同步光标、选中、关键帧、回放，并支持资产和影片数据的服务器端分发。
 
 - **模组 ID**：`bbs_together`
-- **当前版本**：1.7.3
+- **当前版本**：1.7.4
 - **Minecraft**：1.20.1
 - **前置**：BBS FS >= 2.6、Fabric API、Fabric Loader >= 0.15.6
 - **Java**：17（编译目标）/ 21（运行 Gradle 9.2）
@@ -103,6 +103,10 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 ---
 
 ## 更新日志
+
+### v1.7.4
+- **修复**：点选等级分组标题过滤行为列表时崩溃（NPE）——非原版 OP 的 2 级管理者收到的行为条目不带玩家身份（playerId 为 null），现在服务端对所有"管理者"（原版 OP 或 2 级）下发身份字段，客户端对空 playerId 做了防护
+- 版本号从 1.7.3 升至 1.7.4
 
 ### v1.7.3
 - **新增：BBS 权限等级系统（bbsop）**，0～2 三级 + 八个可编辑功能域（详见功能介绍）
