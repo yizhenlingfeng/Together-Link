@@ -100,30 +100,22 @@ public final class ReadOnlyOverlay
     }
 
     /**
-     * Attaches an overlay that keeps its own area locked to {@code boundTo}'s area. Needed for
-     * hosts laid out by flow containers (columns/splitters), where a plain 100%-sized child
-     * would just become another stacked row instead of covering the widgets.
+     * Attaches an invisible click/scroll shield that keeps its own area locked to
+     * {@code boundTo}'s area — synced every frame in {@code render}, so it follows window
+     * resizes and layout changes immediately. Needed for hosts laid out by flow containers
+     * (columns/splitters), where a plain 100%-sized child would just become another stacked
+     * row instead of covering the widgets.
      */
-    public static void ensureBoundAttached(UIElement parent, UIElement[] slot, UIElement boundTo)
+    public static void ensureShieldAttached(UIElement parent, UIElement[] slot, UIElement boundTo)
     {
         if (slot[0] == null)
         {
             slot[0] = new UIElement()
             {
                 @Override
-                public void resize()
-                {
-                    super.resize();
-                    this.area.copy(boundTo.area);
-                }
-
-                @Override
                 public void render(UIContext context)
                 {
-                    if (BbsOpClientState.isReadOnly())
-                    {
-                        drawVeil(context, this.area);
-                    }
+                    this.area.copy(boundTo.area);
                 }
 
                 @Override

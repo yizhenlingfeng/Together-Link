@@ -1,6 +1,7 @@
 package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
+import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.model_blocks.UIModelBlockPanel;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
@@ -25,9 +26,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class UIModelBlockPanelBbsOpMixin
 {
     @Unique
-    private final UIElement[] together$editorOverlay = new UIElement[1];
-
-    @Unique
     private final UIElement[] together$bodyOverlay = new UIElement[1];
 
     @Unique
@@ -43,7 +41,7 @@ public class UIModelBlockPanelBbsOpMixin
     }
 
     @Inject(method = "render", at = @At("TAIL"), remap = false)
-    private void together$veilEditingSide(CallbackInfo ci)
+    private void together$veilEditingSide(UIContext context, CallbackInfo ci)
     {
         boolean readOnly = BbsOpClientState.isReadOnly();
         UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
@@ -57,8 +55,10 @@ public class UIModelBlockPanelBbsOpMixin
             return;
         }
 
-        ReadOnlyOverlay.ensureBoundAttached(self, this.together$editorOverlay, self.editor);
-        ReadOnlyOverlay.ensureBoundAttached(self, this.together$bodyOverlay, self.bodySection);
-        ReadOnlyOverlay.ensureBoundAttached(self, this.together$equipmentOverlay, self.equipmentSection);
+        /* One visible veil over the editing column (drawn at its live area, so it follows
+         * resizes); the body/equipment sections get invisible click/scroll shields only. */
+        ReadOnlyOverlay.drawVeil(context, self.editor.area);
+        ReadOnlyOverlay.ensureShieldAttached(self, this.together$bodyOverlay, self.bodySection);
+        ReadOnlyOverlay.ensureShieldAttached(self, this.together$equipmentOverlay, self.equipmentSection);
     }
 }
