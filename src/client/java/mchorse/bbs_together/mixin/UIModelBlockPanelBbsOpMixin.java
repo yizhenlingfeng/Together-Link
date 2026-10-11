@@ -45,12 +45,17 @@ public class UIModelBlockPanelBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$veilEditingSide(CallbackInfo ci)
     {
-        if (!BbsOpClientState.isReadOnly())
+        boolean readOnly = BbsOpClientState.isReadOnly();
+        UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
+
+        /* The pick button's callback dereferences this.modelBlock unconditionally; with fill
+         * cancelled it is null, so the button itself must be dead or clicking it NPEs. */
+        self.pickEdit.setEnabled(!readOnly);
+
+        if (!readOnly)
         {
             return;
         }
-
-        UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
 
         ReadOnlyOverlay.ensureAttached(self.editor, this.together$editorOverlay, false);
         ReadOnlyOverlay.ensureAttached(self.bodySection, this.together$bodyOverlay, false);
