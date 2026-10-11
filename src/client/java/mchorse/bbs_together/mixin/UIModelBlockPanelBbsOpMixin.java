@@ -27,6 +27,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class UIModelBlockPanelBbsOpMixin
 {
     @Unique
+    private final UIElement[] together$editorOverlay = new UIElement[1];
+
+    @Unique
     private final UIElement[] together$bodyOverlay = new UIElement[1];
 
     @Unique
@@ -72,6 +75,7 @@ public class UIModelBlockPanelBbsOpMixin
         veil.h = Math.max(0, ey - veil.y);
 
         ReadOnlyOverlay.drawVeil(context, veil);
+        ReadOnlyOverlay.ensureShieldAttached(self, this.together$editorOverlay, self.editor);
         ReadOnlyOverlay.ensureShieldAttached(self, this.together$bodyOverlay, self.bodySection);
         ReadOnlyOverlay.ensureShieldAttached(self, this.together$equipmentOverlay, self.equipmentSection);
     }
