@@ -121,16 +121,26 @@ public final class ReadOnlyOverlay
                 @Override
                 protected boolean subMouseClicked(UIContext context)
                 {
-                    return BbsOpClientState.isReadOnly() && this.area.isInside(context);
+                    return BbsOpClientState.isReadOnly() && this.syncArea().isInside(context);
                 }
 
                 @Override
                 protected boolean subMouseScrolled(UIContext context)
                 {
-                    return BbsOpClientState.isReadOnly() && this.area.isInside(context);
+                    return BbsOpClientState.isReadOnly() && this.syncArea().isInside(context);
+                }
+
+                /* The click path runs before (or instead of) render: sync here too, so the
+                 * hit test never reads a stale or never-initialized (0x0) area. */
+                private Area syncArea()
+                {
+                    this.area.copy(boundTo.area);
+
+                    return this.area;
                 }
             };
 
+            slot[0].noCulling();
             parent.add(slot[0]);
         }
     }
