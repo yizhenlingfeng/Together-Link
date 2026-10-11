@@ -5,7 +5,6 @@ import mchorse.bbs_mod.forms.forms.ModelForm;
 import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.cells.CellState;
-import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
@@ -19,10 +18,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * A model that exists locally but was never uploaded to the server (others can't see it) gets a
  * grey gradient fading up from the bottom of its cell and a "（仅本地）" suffix in its tooltip.
- *
- * <p>Read-only (level 0) lock: the category's right-click menu is all editing (edit, model
- * folder/editor, add/duplicate/delete/rename), so it is refused outright. Picking and
- * applying a disguise (left-click selection + the morphing panel's apply) stays untouched.</p>
+ * (The read-only block on the category's right-click menu lives in
+ * {@link UIElementContextMenuBbsOpMixin} — the subclasses each register their own menus.)
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = UIFormCategory.class, remap = false)
@@ -59,15 +56,6 @@ public class UIFormCategoryBbsOpMixin
         if (together$isLocalOnly(form))
         {
             cir.setReturnValue(cir.getReturnValue() + "（仅本地）");
-        }
-    }
-
-    @Inject(method = "buildContextMenu", at = @At("HEAD"), cancellable = true, remap = false)
-    private void together$blockContextMenu(ContextMenuManager menu, CallbackInfo ci)
-    {
-        if (BbsOpClientState.isReadOnly())
-        {
-            ci.cancel();
         }
     }
 }

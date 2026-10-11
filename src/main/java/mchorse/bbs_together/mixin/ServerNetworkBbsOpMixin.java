@@ -25,7 +25,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *
  * <p>These handlers already gate on {@code PermissionUtils.arePanelsAllowed} (global gamerule /
  * OP), but a level-0 player must be refused even when the gamerule opens editing to everyone.
- * We cancel at HEAD: model-block form/transform writes and the morph (player form) packet.</p>
+ * We cancel at HEAD: model-block form/transform writes. {@code handlePlayerFormPacket} is
+ * deliberately NOT blocked — it only sets the player's own morph (a browsing feature, the
+ * disguise list's "become this form" action), not any editable asset.</p>
  *
  * <p>{@code handleManagerDataPacket} is special-cased below: cancelling it outright would also
  * kill LOAD / KEYS / BACKUPS — the read operations a read-only player needs just to browse and
@@ -50,15 +52,6 @@ public class ServerNetworkBbsOpMixin
 
     @Inject(method = "handleModelBlockTransformsPacket", at = @At("HEAD"), cancellable = true, remap = false)
     private static void together$blockModelBlockTransforms(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
-    {
-        if (BbsOpManager.isReadOnly(player))
-        {
-            ci.cancel();
-        }
-    }
-
-    @Inject(method = "handlePlayerFormPacket", at = @At("HEAD"), cancellable = true, remap = false)
-    private static void together$blockPlayerForm(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
     {
         if (BbsOpManager.isReadOnly(player))
         {
