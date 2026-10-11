@@ -4,6 +4,7 @@ import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.model_blocks.UIModelBlockPanel;
+import mchorse.bbs_mod.ui.utils.Area;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.bbsop.ReadOnlyOverlay;
 import net.fabricmc.api.EnvType;
@@ -55,9 +56,22 @@ public class UIModelBlockPanelBbsOpMixin
             return;
         }
 
-        /* One visible veil over the editing column (drawn at its live area, so it follows
-         * resizes); the body/equipment sections get invisible click/scroll shields only. */
-        ReadOnlyOverlay.drawVeil(context, self.editor.area);
+        /* One visible veil spanning the editing column AND the body/equipment sections
+         * (union of their live areas, so folded rows are covered too and an unfolded
+         * section is swallowed by the growing veil); it follows resizes every frame. */
+        Area veil = new Area();
+        Area editor = self.editor.area;
+        Area body = self.bodySection.area;
+        Area equipment = self.equipmentSection.area;
+        int ex = Math.max(editor.ex(), Math.max(body.ex(), equipment.ex()));
+        int ey = Math.max(editor.ey(), Math.max(body.ey(), equipment.ey()));
+
+        veil.x = Math.min(editor.x, Math.min(body.x, equipment.x));
+        veil.y = Math.min(editor.y, Math.min(body.y, equipment.y));
+        veil.w = Math.max(0, ex - veil.x);
+        veil.h = Math.max(0, ey - veil.y);
+
+        ReadOnlyOverlay.drawVeil(context, veil);
         ReadOnlyOverlay.ensureShieldAttached(self, this.together$bodyOverlay, self.bodySection);
         ReadOnlyOverlay.ensureShieldAttached(self, this.together$equipmentOverlay, self.equipmentSection);
     }
