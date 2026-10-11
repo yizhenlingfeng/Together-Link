@@ -53,3 +53,5 @@ dist/*.jar
 # BBS 子项目源码构建产物
 lib/**/.gradle/
 lib/**/build/
+.workbuddy/
+.crash-report/

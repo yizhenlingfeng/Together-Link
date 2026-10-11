@@ -633,6 +633,12 @@ public class TogetherServerNetwork {
     }
 
     public static void sendToggleRecording(ServerPlayerEntity player, boolean start) {
+        /* Read-only (level 0) players can never be remotely started into a recording
+         * session — this packet bypasses every client-side UI lock, so the server is
+         * the only place the rule can be enforced (see /bbsop plan, B-7). */
+        if (start && BbsOpManager.isReadOnly(player)) {
+            return;
+        }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeBoolean(start);
         buf.writeInt(-1);
@@ -658,7 +664,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleRecordingFinished(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -682,7 +688,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleMasterRecordingDone(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -744,7 +750,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmSaveSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -1108,7 +1114,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmDataSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {

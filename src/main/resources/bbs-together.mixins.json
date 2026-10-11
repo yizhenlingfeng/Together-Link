@@ -9,6 +9,7 @@
                    "ServerNetworkNullFilmFixMixin",
                    "ServerNetworkModelBlockMixin",
                    "ServerNetworkBbsOpMixin",
+                   "PermissionUtilsBbsOpMixin",
                    "ModelBlockEntityMixin"
                ],
     "injectors":  {
