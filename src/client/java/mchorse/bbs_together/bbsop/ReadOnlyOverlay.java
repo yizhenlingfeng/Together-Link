@@ -13,6 +13,10 @@ import net.fabricmc.api.Environment;
  * The BBSFS-native look for a read-only surface: a translucent grey wash over the area,
  * a centred padlock and the localized "view only" caption — mirroring what
  * {@code UIElement.renderLockedArea} draws for individual disabled input fields.
+ *
+ * <p>Overlays are permission-aware at draw/click time: once attached they stay on their host
+ * for its whole lifetime and simply go inert when the player is no longer read-only, so a
+ * permission change takes effect on the very next frame without any extra syncing.</p>
  */
 @Environment(EnvType.CLIENT)
 public final class ReadOnlyOverlay
@@ -27,24 +31,27 @@ public final class ReadOnlyOverlay
             @Override
             public void render(UIContext context)
             {
-                drawVeil(context, this.area);
+                if (BbsOpClientState.isReadOnly())
+                {
+                    drawVeil(context, this.area);
+                }
             }
 
             @Override
             protected boolean subMouseClicked(UIContext context)
             {
                 /* Swallow every click so the widgets underneath never receive it — but ONLY
-                 * when the cursor is actually over the veil: BBS walks every child without
-                 * an area pre-check, so an unconditional "true" here would eat clicks meant
-                 * for unrelated elements (it broke the film editor's timeline scrubbing). */
-                return this.area.isInside(context);
+                 * when read-only and the cursor is actually over the veil: BBS walks every
+                 * child without an area pre-check, so an unconditional "true" here would eat
+                 * clicks meant for unrelated elements (it broke the timeline scrubbing). */
+                return BbsOpClientState.isReadOnly() && this.area.isInside(context);
             }
 
             @Override
             protected boolean subMouseScrolled(UIContext context)
             {
                 /* Scrolling a trackpad/spinbox edits values — swallow it too. */
-                return this.area.isInside(context);
+                return BbsOpClientState.isReadOnly() && this.area.isInside(context);
             }
         };
     }
@@ -61,13 +68,16 @@ public final class ReadOnlyOverlay
             @Override
             public void render(UIContext context)
             {
-                drawVeil(context, this.area);
+                if (BbsOpClientState.isReadOnly())
+                {
+                    drawVeil(context, this.area);
+                }
             }
 
             @Override
             protected boolean subMouseClicked(UIContext context)
             {
-                return context.mouseButton == 1 && this.area.isInside(context);
+                return BbsOpClientState.isReadOnly() && context.mouseButton == 1 && this.area.isInside(context);
             }
 
             @Override
@@ -78,22 +88,14 @@ public final class ReadOnlyOverlay
         };
     }
 
-    /** Attaches (or removes) the overlay on {@code host} depending on {@code readOnly}. */
-    public static void ensureAttached(UIElement host, UIElement[] slot, boolean readOnly, boolean clickThrough)
+    /** Attaches the overlay on {@code host} once; it then tracks the permission by itself. */
+    public static void ensureAttached(UIElement host, UIElement[] slot, boolean clickThrough)
     {
-        if (readOnly)
+        if (slot[0] == null)
         {
-            if (slot[0] == null)
-            {
-                slot[0] = clickThrough ? createClickThrough() : create();
-                slot[0].relative(host).x(0).y(0).w(1F).h(1F);
-                host.add(slot[0]);
-            }
-        }
-        else if (slot[0] != null)
-        {
-            host.remove(slot[0]);
-            slot[0] = null;
+            slot[0] = clickThrough ? createClickThrough() : create();
+            slot[0].relative(host).x(0).y(0).w(1F).h(1F);
+            host.add(slot[0]);
         }
     }
 

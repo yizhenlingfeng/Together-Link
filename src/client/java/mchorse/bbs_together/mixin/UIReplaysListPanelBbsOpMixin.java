@@ -17,9 +17,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Read-only (level 0) lock on the replay list toolbar: the "add replay" (+) button is
- * greyed out and the whole bar wears the grey "view only" veil. The veil is click-through
- * for left clicks and scrolling, so browsing and selecting replays still work; right
- * clicks (context menus) are swallowed.
+ * greyed out and the whole bar wears the grey "view only" veil. The veil is attached once
+ * and is click-through for left clicks and scrolling (browsing and selecting replays keep
+ * working), swallowing only right-click context menus — and it tracks the permission by
+ * itself, so a change from 0 to 1/2 turns it inert on the very next frame.
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = UIReplaysListPanel.class, remap = false)
@@ -34,12 +35,8 @@ public class UIReplaysListPanelBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$greyOutAddAndVeil(UIContext context, CallbackInfo ci)
     {
-        boolean readOnly = BbsOpClientState.isReadOnly();
+        this.addReplay.setEnabled(!BbsOpClientState.isReadOnly());
 
-        this.addReplay.setEnabled(!readOnly);
-
-        UIReplaysListPanel self = (UIReplaysListPanel) (Object) this;
-
-        ReadOnlyOverlay.ensureAttached(self, this.together$overlay, readOnly, true);
+        ReadOnlyOverlay.ensureAttached((UIReplaysListPanel) (Object) this, this.together$overlay, true);
     }
 }
