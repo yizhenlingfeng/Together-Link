@@ -41,6 +41,7 @@ import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_together.BBSTogetherFix18;
+import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
 import mchorse.bbs_together.utils.ModelPathUtils;
@@ -103,6 +104,8 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_REMOVE_PLAYER_LOGS = new Identifier("bbs_together", "s_remove_player_logs");
     public static final Identifier CLIENT_BEHAVIOR_LIST = new Identifier("bbs_together", "c_behavior_list");
     public static final Identifier CLIENT_PERMISSIONS = new Identifier("bbs_together", "c_permissions");
+    /** S2C: pushes the receiving player's own BBS edit level (0 read-only / 1-2 reserved). */
+    public static final Identifier CLIENT_BBSOP_SYNC = new Identifier("bbs_together", "c_bbsop_sync");
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> playerCrushers = new ConcurrentHashMap();
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
@@ -480,6 +483,10 @@ public class TogetherServerNetwork {
     }
 
     private static void handleAssetUpload(MinecraftServer server, ServerPlayerEntity uploader, PacketByteBuf buf) {
+        /* Read-only (level 0) players may never upload, even if the gamerule would allow panels. */
+        if (BbsOpManager.isReadOnly(uploader)) {
+            return;
+        }
         TogetherServerNetwork.crusherFor(uploader).receive(buf, (bytes, packetByteBuf) -> {
             String relativePath = packetByteBuf.readString();
             if (relativePath.contains("..") || relativePath.startsWith("/")) {
@@ -651,7 +658,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleRecordingFinished(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (!PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -675,7 +682,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleMasterRecordingDone(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (!PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -737,7 +744,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmSaveSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (!PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -979,6 +986,9 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmDeleted(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (BbsOpManager.isReadOnly(player)) {
+            return;
+        }
         String filmId = buf.readString();
         server.execute(() -> {
             deletedFilmIds.add(filmId);
@@ -998,6 +1008,9 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmRenamed(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (BbsOpManager.isReadOnly(player)) {
+            return;
+        }
         String oldId = buf.readString();
         String newId = buf.readString();
         server.execute(() -> {
@@ -1095,7 +1108,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmDataSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (!PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
+        if (BbsOpManager.isReadOnly(player) || !PermissionUtils.arePanelsAllowed((MinecraftServer)server, (ServerPlayerEntity)player)) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {

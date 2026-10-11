@@ -93,6 +93,8 @@ public class TogetherClientNetwork {
     public static volatile int pendingSwapTo = -1;
     /** Model IDs whose folder contained at least one file too large to download; shown red in the picker. */
     public static final ConcurrentHashMap.KeySetView<String, Boolean> tooLargeModels = ConcurrentHashMap.newKeySet();
+    /** Model IDs that exist locally but are NOT present in the server's asset manifest (never uploaded). */
+    public static final ConcurrentHashMap.KeySetView<String, Boolean> localOnlyModels = ConcurrentHashMap.newKeySet();
     /* Server behavior log (panel data), filled by CLIENT_BEHAVIOR_LIST */
     public static volatile boolean isOperator = false;
     public static final java.util.NavigableMap<Long, mchorse.bbs_together.behaviors.BehaviorEntry> behaviorEntries = new java.util.TreeMap<>();
@@ -123,6 +125,7 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MERGE_REPLAYS, (client, handler, buf, resp) -> TogetherClientNetwork.handleMergeReplaysPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BEHAVIOR_LIST, (client, handler, buf, resp) -> TogetherClientNetwork.handleBehaviorListPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
         isBBSTogetherOnServer = true;
     }
 
@@ -145,6 +148,7 @@ public class TogetherClientNetwork {
         assetUploadFinishedAt = 0L;
         assetDownloadFinishedAt = 0L;
         tooLargeModels.clear();
+        localOnlyModels.clear();
         damageControlActive = false;
         pendingSwapFilmId = null;
         pendingSwapFrom = -1;
@@ -154,6 +158,7 @@ public class TogetherClientNetwork {
         behaviorPlayers.clear();
         behaviorVersion = 0;
         behaviorDataStamp = 0;
+        mchorse.bbs_together.bbsop.BbsOpClientState.reset();
         isBBSTogetherOnServer = false;
     }
 
@@ -458,6 +463,34 @@ public class TogetherClientNetwork {
                     }
                     long maxBytes = TogetherClientNetwork.clientMaxAssetBytes();
                     TogetherClientNetwork.tooLargeModels.clear();
+                    /* Models present locally but absent from the server manifest were never uploaded.
+                       Only compute this when a non-empty manifest was received, or an un-synced server
+                       would wrongly mark every local model as local-only. */
+                    localOnlyModels.clear();
+                    if (!serverSha1Map.isEmpty())
+                    {
+                        java.util.Set<String> serverModelIds = new java.util.HashSet<>();
+                        for (String key : serverSha1Map.keySet())
+                        {
+                            String mid = together$extractModelId(key);
+                            if (mid != null)
+                            {
+                                serverModelIds.add(mid);
+                            }
+                        }
+                        File modelsDir = new File(assetsFolder, "models");
+                        File[] children = modelsDir.listFiles();
+                        if (children != null)
+                        {
+                            for (File child : children)
+                            {
+                                if (child.isDirectory() && !serverModelIds.contains(child.getName()))
+                                {
+                                    localOnlyModels.add(child.getName());
+                                }
+                            }
+                        }
+                    }
                     HashMap<String, Long> modelTotalSize = new HashMap<String, Long>();
                     for (Map.Entry<String, Long> e : serverSizeMap.entrySet()) {
                         String modelId = together$extractModelId(e.getKey());
@@ -1132,6 +1165,11 @@ public class TogetherClientNetwork {
     private static void handlePermissionsPacket(MinecraftClient client, PacketByteBuf buf) {
         boolean op = buf.readBoolean();
         client.execute(() -> isOperator = op);
+    }
+
+    private static void handleBbsopSyncPacket(MinecraftClient client, PacketByteBuf buf) {
+        int newLevel = buf.readInt();
+        client.execute(() -> mchorse.bbs_together.bbsop.BbsOpClientState.setLevel(newLevel));
     }
 
     private static void handleBehaviorListPacket(MinecraftClient client, PacketByteBuf buf) {

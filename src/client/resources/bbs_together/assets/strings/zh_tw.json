@@ -45,4 +45,8 @@
     "bbs_together.behaviors.context.remove_logs_cancel": "取消",
     "bbs_together.behaviors.details.clips": "剪輯（%s）",
     "bbs_together.behaviors.details.size": "大小"
+,
+    "bbs_together.bbsop.query": "%s's BBS permission level: %d (0 = view only)",
+    "bbs_together.bbsop.set": "Set %s's BBS permission level to %d",
+    "bbs_together.bbsop.view_only": "View only"
 }
