@@ -97,6 +97,8 @@ public class TogetherClientNetwork {
     public static final ConcurrentHashMap.KeySetView<String, Boolean> localOnlyModels = ConcurrentHashMap.newKeySet();
     /* Server behavior log (panel data), filled by CLIENT_BEHAVIOR_LIST */
     public static volatile boolean isOperator = false;
+    /** Vanilla OP <em>or</em> BBS level-2 admin: may see the player list and manage BBS levels. */
+    public static volatile boolean isManager = false;
     public static final java.util.NavigableMap<Long, mchorse.bbs_together.behaviors.BehaviorEntry> behaviorEntries = new java.util.TreeMap<>();
     public static final Map<UUID, mchorse.bbs_together.behaviors.PlayerRecord> behaviorPlayers = new java.util.concurrent.ConcurrentHashMap<>();
     public static volatile long behaviorVersion = 0;
@@ -154,6 +156,7 @@ public class TogetherClientNetwork {
         pendingSwapFrom = -1;
         pendingSwapTo = -1;
         isOperator = false;
+        isManager = false;
         behaviorEntries.clear();
         behaviorPlayers.clear();
         behaviorVersion = 0;
@@ -1162,14 +1165,51 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REMOVE_PLAYER_LOGS, (PacketByteBuf)buf);
     }
 
+    /** Ask the server to set a player's BBS permission level (manager only, server re-checks). */
+    public static void sendSetBbsOp(UUID targetId, int level) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeUuid(targetId);
+        buf.writeInt(level);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_SET, (PacketByteBuf)buf);
+    }
+
+    /** Allow or deny one editable domain for a (level-1) player (manager only, server re-checks). */
+    public static void sendSetBbsGrant(UUID targetId, String domainId, boolean allowed) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeUuid(targetId);
+        buf.writeString(domainId);
+        buf.writeBoolean(allowed);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_GRANT, (PacketByteBuf)buf);
+    }
+
     private static void handlePermissionsPacket(MinecraftClient client, PacketByteBuf buf) {
         boolean op = buf.readBoolean();
-        client.execute(() -> isOperator = op);
+        boolean manager = buf.readBoolean();
+        client.execute(() -> {
+            isOperator = op;
+            isManager = manager;
+        });
     }
 
     private static void handleBbsopSyncPacket(MinecraftClient client, PacketByteBuf buf) {
         int newLevel = buf.readInt();
-        client.execute(() -> mchorse.bbs_together.bbsop.BbsOpClientState.setLevel(newLevel));
+        /* Level + optional domain whitelist (restricted level-1 editors). */
+        java.util.List<String> whitelist = null;
+        if (buf.readBoolean()) {
+            int count = buf.readInt();
+            whitelist = new java.util.ArrayList<>(count);
+            for (int i = 0; i < count; ++i) {
+                whitelist.add(buf.readString());
+            }
+        }
+        java.util.List<String> finalWhitelist = whitelist;
+        client.execute(() -> mchorse.bbs_together.bbsop.BbsOpClientState.sync(newLevel, finalWhitelist));
     }
 
     private static void handleBehaviorListPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -1181,6 +1221,7 @@ public class TogetherClientNetwork {
             MapType map = data.asMap();
             client.execute(() -> {
                 isOperator = map.getBool("op");
+                isManager = map.getBool("manager");
                 long version = map.getLong("version");
                 /* A version mismatch means entries were removed, merged or evicted since
                  * our last pull — replace everything, don't merge increments on top */
@@ -1203,6 +1244,10 @@ public class TogetherClientNetwork {
                         if (record.id != null) {
                             record.op = playerData.getBool("isOp");
                             record.offline = playerData.getBool("offline");
+                            record.bbsLevel = playerData.getInt("bbsop");
+                            /* Key present (even empty string = every domain denied) means the
+                             * level-1 editor is whitelist-restricted; key absent = unrestricted. */
+                            record.bbsGrants = playerData.has("bbsopGrants") ? playerData.getString("bbsopGrants") : null;
                             behaviorPlayers.put(record.id, record);
                         }
                     }

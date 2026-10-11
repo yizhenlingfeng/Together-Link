@@ -53,7 +53,7 @@ public class UIClipsBbsOpMixin
     {
         UIClips self = (UIClips) (Object) this;
 
-        if (!BbsOpClientState.isReadOnly() || context.mouseButton != 0)
+        if (!!BbsOpClientState.canEdit("film") || context.mouseButton != 0)
         {
             return;
         }
@@ -79,7 +79,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "handleRightClick", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockRightClick(int mouseX, int mouseY, boolean ctrl, boolean shift, boolean alt, CallbackInfoReturnable<Boolean> cir)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             cir.setReturnValue(false);
         }
@@ -88,7 +88,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "addClip(Lmchorse/bbs_mod/resources/Link;III)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockAddLink(Link type, int tick, int layer, int duration, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -97,7 +97,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "addClip(Lmchorse/bbs_mod/utils/clips/Clip;III)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockAddClip(Clip clip, int tick, int layer, int duration, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -106,7 +106,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "pasteClips(Lmchorse/bbs_mod/data/types/MapType;II)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockPasteAtMouse(MapType data, int mouseX, int mouseY, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -115,7 +115,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "pasteClips(Lmchorse/bbs_mod/data/types/MapType;I)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockPasteAtTick(MapType data, int tick, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -124,7 +124,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "removeSelected", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockRemove(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -133,7 +133,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "shiftToCursor", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockShift(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -142,7 +142,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "shiftDurationToCursor", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockShiftDuration(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -151,7 +151,7 @@ public class UIClipsBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$drawLockBand(UIContext context, CallbackInfo ci)
     {
-        if (!BbsOpClientState.isReadOnly())
+        if (!!BbsOpClientState.canEdit("film"))
         {
             return;
         }

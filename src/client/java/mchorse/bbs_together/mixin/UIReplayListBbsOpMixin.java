@@ -30,54 +30,54 @@ public class UIReplayListBbsOpMixin
     @Inject(method = "addReplay(Lorg/joml/Vector3d;FF)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockAdd(Vector3d pos, float yaw, float pitch, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "dupeReplay", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockDupe(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "removeReplay", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockRemove(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "pasteReplay", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockPaste(MapType data, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "fromCamera", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockFromCamera(int index, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "fromModelBlock(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockFromModelBlock(ModelBlockEntity be, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "applyReplayCategory", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockApplyCategory(List<Replay> replays, String category, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "removeReplayCategory", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockRemoveCategory(String category, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 
     @Inject(method = "openFormEditor", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockFormEditor(ValueForm form, boolean expanded, Consumer<?> consumer, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 }

@@ -19,7 +19,7 @@ public class UIFilmControllerBbsOpMixin
     @Inject(method = "toggleControl", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockToggleControl(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -28,7 +28,7 @@ public class UIFilmControllerBbsOpMixin
     @Inject(method = "pickRecording", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockPickRecording(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }

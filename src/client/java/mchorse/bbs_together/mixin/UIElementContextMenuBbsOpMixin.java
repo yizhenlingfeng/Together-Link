@@ -24,7 +24,7 @@ public class UIElementContextMenuBbsOpMixin
     @Inject(method = "createContextMenu", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockFormCategoryMenus(UIContext context, CallbackInfoReturnable<UIContextMenu> cir)
     {
-        if ((Object) this instanceof UIFormCategory && BbsOpClientState.isReadOnly())
+        if ((Object) this instanceof UIFormCategory && !BbsOpClientState.canEdit("morph"))
         {
             cir.setReturnValue(null);
         }

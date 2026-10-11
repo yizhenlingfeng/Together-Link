@@ -2,6 +2,7 @@ package mchorse.bbs_together.mixin;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.ui.dashboard.panels.UIDashboardPanel;
@@ -22,40 +23,51 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Read-only lock on the bottom navigation: while the local player is level 0, the particle /
- * model-editor / texture / audio panel buttons are disabled and get a small padlock badge.
+ * Domain-aware lock on the bottom navigation: the particle / model-editor / texture / audio
+ * panel buttons are disabled (with a small padlock badge) unless the local player may edit
+ * their respective {@code BbsOpDomain} — level 0 never can, a restricted level-1 editor
+ * only when the domain is granted, level 2 always.
  */
-@Environment(EnvType.CLIENT)
+@Environment(value = EnvType.CLIENT)
 @Mixin(value = UIDashboardPanels.class, remap = false)
 public class UIDashboardPanelsBbsOpMixin
 {
-    private static final List<String> together$lockedPanels = List.of(
-        "mchorse.bbs_mod.ui.particles.UIParticleSchemePanel",
-        "mchorse.bbs_mod.ui.model_editor.UIModelEditorPanel",
-        "mchorse.bbs_mod.ui.dashboard.textures.UITextureManagerPanel",
-        "mchorse.bbs_mod.ui.utility.audio.UIAudioEditorPanel");
+    /** Panel class name -> the editable domain that panel belongs to. */
+    private static final Map<String, String> together$panelDomains = Map.of(
+        "mchorse.bbs_mod.ui.particles.UIParticleSchemePanel", "particles",
+        "mchorse.bbs_mod.ui.model_editor.UIModelEditorPanel", "model_editor",
+        "mchorse.bbs_mod.ui.dashboard.textures.UITextureManagerPanel", "textures",
+        "mchorse.bbs_mod.ui.utility.audio.UIAudioEditorPanel", "audio");
 
     private final List<UIIcon> together$lockedIcons = new ArrayList<>();
+    private final List<String> together$iconDomains = new ArrayList<>();
 
     @Inject(method = "registerPanel", at = @At("TAIL"), remap = false)
     private void together$collectLockedIcon(UIDashboardPanel panel, IKey tooltip, Icon icon, CallbackInfoReturnable<UIIcon> cir)
     {
-        if (panel != null && together$lockedPanels.contains(panel.getClass().getName()))
+        if (panel != null)
         {
-            this.together$lockedIcons.add(cir.getReturnValue());
+            String domain = together$panelDomains.get(panel.getClass().getName());
+
+            if (domain != null)
+            {
+                this.together$lockedIcons.add(cir.getReturnValue());
+                this.together$iconDomains.add(domain);
+            }
         }
     }
 
     @Inject(method = "renderBackground", at = @At("TAIL"), remap = false)
     private void together$applyLock(UIContext context, CallbackInfo ci)
     {
-        boolean readOnly = BbsOpClientState.isReadOnly();
-
-        for (UIIcon button : this.together$lockedIcons)
+        for (int i = 0; i < this.together$lockedIcons.size(); i++)
         {
-            button.setEnabled(!readOnly);
+            UIIcon button = this.together$lockedIcons.get(i);
+            boolean locked = !BbsOpClientState.canEdit(this.together$iconDomains.get(i));
 
-            if (readOnly)
+            button.setEnabled(!locked);
+
+            if (locked)
             {
                 Area a = button.area;
 

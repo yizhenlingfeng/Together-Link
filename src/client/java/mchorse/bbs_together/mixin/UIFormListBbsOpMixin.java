@@ -27,6 +27,6 @@ public class UIFormListBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$greyOutEdit(UIContext context, CallbackInfo ci)
     {
-        this.edit.setEnabled(!BbsOpClientState.isReadOnly());
+        this.edit.setEnabled(!!BbsOpClientState.canEdit("morph"));
     }
 }

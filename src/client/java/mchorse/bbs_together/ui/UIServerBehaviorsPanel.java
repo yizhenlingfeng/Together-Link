@@ -56,7 +56,9 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
 
     /** Whether the left column currently holds the player list (OP) or the notice. */
     private boolean opState = false;
+    /** Behavior filter: one exact player, or every player of one BBS level group (-1 = all). */
     private UUID playerFilter;
+    private int levelFilter = -1;
     private BehaviorSort sortMode = BehaviorSort.TIME;
     private long lastQueryAt;
     private long lastStamp;
@@ -78,7 +80,24 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
 
         this.players = new UIPlayerBehaviorList((record) ->
         {
-            this.playerFilter = record == null || record.id == null ? null : record.id;
+            /* A player row filters to that player; a level group caption filters to every
+             * player of that level; "all players" (and nothing) clears the filter. */
+            if (record != null && record.id != null)
+            {
+                this.playerFilter = record.id;
+                this.levelFilter = -1;
+            }
+            else if (record != null && record.groupHeader && record.bbsLevel >= 0 && record.bbsLevel <= 2)
+            {
+                this.playerFilter = null;
+                this.levelFilter = record.bbsLevel;
+            }
+            else
+            {
+                this.playerFilter = null;
+                this.levelFilter = -1;
+            }
+
             this.rebuildBehaviors(true);
         });
         this.behaviors = new UIBehaviorList((list) -> this.info.set(list.isEmpty() ? null : list.get(0)));
@@ -160,8 +179,8 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
     {
         super.update();
 
-        /* React to OP flag flips (getting opped mid-game) */
-        if (this.opState != TogetherClientNetwork.isOperator)
+        /* React to permission flips (getting opped or granted BBS level 2 mid-game) */
+        if (this.opState != (TogetherClientNetwork.isOperator || TogetherClientNetwork.isManager))
         {
             this.applyOpState();
         }
@@ -200,14 +219,15 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
 
     private void applyOpState()
     {
-        this.opState = TogetherClientNetwork.isOperator;
+        this.opState = TogetherClientNetwork.isOperator || TogetherClientNetwork.isManager;
 
-        this.behaviors.showIdentity = this.opState;
-        this.info.setShowIdentity(this.opState);
+        this.behaviors.showIdentity = TogetherClientNetwork.isOperator;
+        this.info.setShowIdentity(TogetherClientNetwork.isOperator);
 
         if (!this.opState)
         {
             this.playerFilter = null;
+            this.levelFilter = -1;
         }
 
         this.rebuildPlayers();
@@ -225,7 +245,23 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
             records.sort(UIPlayerBehaviorList::compare);
 
             this.players.add(UIPlayerBehaviorList.all());
-            this.players.add(records);
+
+            /* Interleave: each group caption sits directly above its own members —
+             * 2 (admin) on top, then 1, then 0. Appending all captions first and the
+             * players after them would visually dump every player into the last group. */
+            for (int level = 2; level >= 0; level--)
+            {
+                this.players.add(UIPlayerBehaviorList.header(level, "bbs_together.bbsop.group." + level));
+
+                for (PlayerRecord record : records)
+                {
+                    if (record.bbsLevel == level)
+                    {
+                        this.players.add(record);
+                    }
+                }
+            }
+
             this.players.update();
         }
     }
@@ -241,6 +277,23 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
             for (BehaviorEntry entry : entries)
             {
                 if (this.playerFilter.equals(entry.playerId))
+                {
+                    filtered.add(entry);
+                }
+            }
+
+            entries = filtered;
+        }
+        else if (this.levelFilter >= 0)
+        {
+            /* Every behavior of the players currently known to be in this level group. */
+            List<BehaviorEntry> filtered = new ArrayList<>();
+
+            for (BehaviorEntry entry : entries)
+            {
+                PlayerRecord player = TogetherClientNetwork.behaviorPlayers.get(entry.playerId);
+
+                if (player != null && player.bbsLevel == this.levelFilter)
                 {
                     filtered.add(entry);
                 }

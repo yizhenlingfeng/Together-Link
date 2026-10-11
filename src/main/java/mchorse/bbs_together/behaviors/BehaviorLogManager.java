@@ -5,6 +5,7 @@ import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.ListType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_together.TogetherSettings;
+import mchorse.bbs_together.bbsop.BbsOpManager;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.UserCache;
@@ -293,17 +294,20 @@ public class BehaviorLogManager
     /**
      * Build a snapshot for a client: every entry newer than {@code afterId}
      * (identity fields only when the requester is an OP), plus the player
-     * records of players currently on the server (OP only — non-OPs get no
-     * identities at all). A client whose reported version lags behind the
-     * server's (entries were removed, merged or evicted elsewhere) gets the
-     * full list instead of an increment.
+     * records of players currently on the server (managers only — a manager is
+     * a vanilla OP or a BBS level-2 admin). A client whose reported version
+     * lags behind the server's (entries were removed, merged or evicted
+     * elsewhere) gets the full list instead of an increment.
      */
-    public static synchronized MapType query(MinecraftServer server, long afterId, long clientVersion, boolean requesterIsOp)
+    public static synchronized MapType query(MinecraftServer server, UUID requesterId, long afterId, long clientVersion, boolean requesterIsOp)
     {
         MapType map = new MapType();
 
+        boolean manager = requesterIsOp || BbsOpManager.get(requesterId) >= BbsOpManager.LEVEL_ADMIN;
+
         map.putLong("version", version);
         map.putBool("op", requesterIsOp);
+        map.putBool("manager", manager);
 
         boolean full = clientVersion != version;
         long cutoff = full ? 0L : afterId;
@@ -319,7 +323,7 @@ public class BehaviorLogManager
 
         map.put("behaviors", behaviors);
 
-        if (requesterIsOp)
+        if (manager)
         {
             ListType playerList = new ListType();
 
@@ -336,6 +340,17 @@ public class BehaviorLogManager
                 playerData.putBool("isOp", isOperator(server, record.id));
                 /* Offline-mode accounts have name-derived UUIDs (version 3), premium ones v4 */
                 playerData.putBool("offline", record.id.version() != 4);
+                /* BBS permission level and (when restricted) the level-1 domain whitelist,
+                 * so the player list can group players and managers can edit the grants. */
+                playerData.putInt("bbsop", BbsOpManager.get(record.id));
+
+                java.util.Set<String> whitelist = BbsOpManager.getGrants(record.id);
+
+                if (whitelist != null)
+                {
+                    playerData.putString("bbsopGrants", String.join(",", whitelist));
+                }
+
                 playerList.add(playerData);
             }
 

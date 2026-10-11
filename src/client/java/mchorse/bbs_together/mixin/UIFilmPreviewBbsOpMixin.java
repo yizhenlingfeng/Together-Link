@@ -24,7 +24,7 @@ public class UIFilmPreviewBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$disableEditingButtons(UIContext context, CallbackInfo ci)
     {
-        boolean readOnly = BbsOpClientState.isReadOnly();
+        boolean readOnly = !BbsOpClientState.canEdit("film");
         UIFilmPreview self = (UIFilmPreview) (Object) this;
 
         self.control.setEnabled(!readOnly);

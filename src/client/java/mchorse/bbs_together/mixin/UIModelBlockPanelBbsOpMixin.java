@@ -32,7 +32,7 @@ public class UIModelBlockPanelBbsOpMixin
     @Inject(method = "fill(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;Z)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockFill(ModelBlockEntity modelBlock, boolean select, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("model_blocks"))
         {
             ci.cancel();
         }
@@ -41,7 +41,7 @@ public class UIModelBlockPanelBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$veilEditingSide(UIContext context, CallbackInfo ci)
     {
-        boolean readOnly = BbsOpClientState.isReadOnly();
+        boolean readOnly = !BbsOpClientState.canEdit("model_blocks");
         UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
 
         /* The pick button's callback dereferences this.modelBlock unconditionally; with fill
@@ -79,6 +79,6 @@ public class UIModelBlockPanelBbsOpMixin
         }
 
         ReadOnlyOverlay.drawVeil(context, veil);
-        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields, covered);
+        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields, "model_blocks", covered);
     }
 }

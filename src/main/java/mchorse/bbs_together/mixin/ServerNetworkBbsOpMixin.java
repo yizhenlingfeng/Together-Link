@@ -10,6 +10,7 @@ import mchorse.bbs_mod.network.ServerNetwork;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
 import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.repos.RepositoryOperation;
+import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
@@ -44,7 +45,7 @@ public class ServerNetworkBbsOpMixin
     @Inject(method = "handleModelBlockFormPacket", at = @At("HEAD"), cancellable = true, remap = false)
     private static void together$blockModelBlockForm(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
     {
-        if (BbsOpManager.isReadOnly(player))
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.MODEL_BLOCKS))
         {
             ci.cancel();
         }
@@ -53,20 +54,21 @@ public class ServerNetworkBbsOpMixin
     @Inject(method = "handleModelBlockTransformsPacket", at = @At("HEAD"), cancellable = true, remap = false)
     private static void together$blockModelBlockTransforms(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
     {
-        if (BbsOpManager.isReadOnly(player))
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.MODEL_BLOCKS))
         {
             ci.cancel();
         }
     }
 
     /**
-     * Level-0 players keep read access (browse + download films) but every write operation
+     * Players who may not edit films (level 0, or a level-1 editor whose film domain was
+     * denied) keep read access (browse + download films) but every write operation
      * is silently refused. Read operations are answered exactly like the original handler.
      */
     @Inject(method = "handleManagerDataPacket", at = @At("HEAD"), cancellable = true, remap = false)
     private static void together$gateManagerData(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
     {
-        if (!BbsOpManager.isReadOnly(player))
+        if (BbsOpManager.isAllowed(player, BbsOpDomain.FILM))
         {
             return;
         }

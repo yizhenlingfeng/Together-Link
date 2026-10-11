@@ -194,3 +194,15 @@
 | `bbstogether record` 远端开录 | ✅ B-7 补录（服务端过滤） |
 | 客户端 UI（伪装/影片/回放/时间轴/模型方块/四页） | ✅ C 阶段覆盖 |
 | `TogetherClientNetwork` 下载侧（assetSyncDownload） | ➖ 不动，沿用现有开关 |
+
+---
+
+## 九、二期实施记录（2026-10-12：1/2 级权限落地）
+
+- **等级语义**：0=仅浏览；1=编辑者（默认可编辑全部内容）；2=管理员（可编辑全部 + 管理他人等级/域）。
+- **功能域**（`BbsOpDomain`）：morph / film / model_blocks / particles / model_editor / textures / audio / upload。
+- **1 级域白名单**（`BbsOpManager.grants`）：黑名单制——首次"禁止"某域即进入白名单模式（其余全开）；白名单随 `bbsop.json` 持久化（新格式 `{levels, grants}`，兼容旧扁平格式）。`/bbsop <player> grant <domain> <allow|deny|reset>` 可在控制台配置。
+- **管理入口**：行为面板玩家列表右键——"设置 BBS 等级 0/1/2"+（对 1 级玩家）八个域的允许/禁止开关；原版 OP 与 2 级玩家可用（服务端 `canManage` 复核）。
+- **玩家列表三分类**：2 级（最上）→ 1 级 → 0 级，各带分组标题行，"所有玩家"仍置顶；等级持久化，玩家每次进服自动归入原分组。
+- **网络**：新增 C2S `s_bbsop_set` / `s_bbsop_grant`；`c_bbsop_sync` 扩展携带白名单；玩家快照附带 `bbsop` 等级与 `bbsopGrants`。
+- **拦截点全部改为按域判定**：服务端上传=UPLOAD、影片写包/远端录制=FILM、模型方块=MODEL_BLOCKS（`ServerNetworkBbsOpMixin` 同步）；客户端各 BbsOp Mixin 按 morph/film/model_blocks/四页各自域 + UPLOAD 判定。

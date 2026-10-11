@@ -41,6 +41,7 @@ import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_together.BBSTogetherFix18;
+import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
@@ -106,6 +107,10 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_PERMISSIONS = new Identifier("bbs_together", "c_permissions");
     /** S2C: pushes the receiving player's own BBS edit level (0 read-only / 1-2 reserved). */
     public static final Identifier CLIENT_BBSOP_SYNC = new Identifier("bbs_together", "c_bbsop_sync");
+    /** C2S: a level-2/vanilla-OP player sets another player's BBS permission level. */
+    public static final Identifier SERVER_BBSOP_SET = new Identifier("bbs_together", "s_bbsop_set");
+    /** C2S: a level-2/vanilla-OP player allows/denies one editable domain for a level-1 player. */
+    public static final Identifier SERVER_BBSOP_GRANT = new Identifier("bbs_together", "s_bbsop_grant");
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> playerCrushers = new ConcurrentHashMap();
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
@@ -156,6 +161,8 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BEHAVIOR_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorQuery(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SET_OPERATOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSetOperator(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REMOVE_PLAYER_LOGS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRemovePlayerLogs(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
     }
 
     /*
@@ -484,7 +491,7 @@ public class TogetherServerNetwork {
 
     private static void handleAssetUpload(MinecraftServer server, ServerPlayerEntity uploader, PacketByteBuf buf) {
         /* Read-only (level 0) players may never upload, even if the gamerule would allow panels. */
-        if (BbsOpManager.isReadOnly(uploader)) {
+        if (!BbsOpManager.isAllowed(uploader, BbsOpDomain.UPLOAD)) {
             return;
         }
         TogetherServerNetwork.crusherFor(uploader).receive(buf, (bytes, packetByteBuf) -> {
@@ -636,7 +643,7 @@ public class TogetherServerNetwork {
         /* Read-only (level 0) players can never be remotely started into a recording
          * session — this packet bypasses every client-side UI lock, so the server is
          * the only place the rule can be enforced (see /bbsop plan, B-7). */
-        if (start && BbsOpManager.isReadOnly(player)) {
+        if (start && !BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
             return;
         }
         PacketByteBuf buf = PacketByteBufs.create();
@@ -664,7 +671,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleRecordingFinished(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -688,7 +695,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleMasterRecordingDone(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -750,7 +757,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmSaveSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
@@ -936,7 +943,7 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             try {
                 boolean isOp = BehaviorLogManager.isOperator(server, player);
-                MapType snapshot = BehaviorLogManager.query(server, afterId, clientVersion, isOp);
+                MapType snapshot = BehaviorLogManager.query(server, player.getUuid(), afterId, clientVersion, isOp);
                 TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_BEHAVIOR_LIST, (BaseType)snapshot, null);
             } catch (Exception e) {
                 e.printStackTrace();
@@ -962,6 +969,58 @@ public class TogetherServerNetwork {
         });
     }
 
+    /**
+     * A manager (vanilla OP or BBS level 2) sets another player's BBS permission level.
+     * Persists on the spot; every client is re-synced so both the target's UI and every
+     * player list reflect the change immediately.
+     */
+    private static void handleBbsopSet(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final UUID targetId = buf.readUuid();
+        final int level = Math.max(BbsOpManager.LEVEL_READ_ONLY, Math.min(BbsOpManager.LEVEL_ADMIN, buf.readInt()));
+        server.execute(() -> {
+            try {
+                if (!BbsOpManager.canManage(player)) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to set a BBS op level without permission");
+                    return;
+                }
+                boolean changed = BbsOpManager.set(targetId, level);
+                ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetId);
+                String targetName = target == null ? String.valueOf(targetId) : target.getGameProfile().getName();
+                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (changed ? " set " : " kept ") + targetName + " BBS op level at " + level);
+                BbsOpManager.syncToAll(server);
+                broadcastPermissions(server);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** Allow/deny one {@link BbsOpDomain} for a level-1 player; manager-gated like {@link #handleBbsopSet}. */
+    private static void handleBbsopGrant(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final UUID targetId = buf.readUuid();
+        final String domainId = buf.readString();
+        final boolean allowed = buf.readBoolean();
+        server.execute(() -> {
+            try {
+                if (!BbsOpManager.canManage(player)) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to change a BBS domain grant without permission");
+                    return;
+                }
+                mchorse.bbs_together.bbsop.BbsOpDomain domain = BbsOpDomain.byId(domainId);
+                if (domain == null) {
+                    return;
+                }
+                boolean changed = BbsOpManager.setGrant(targetId, domain, allowed);
+                if (changed) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (allowed ? " allowed " : " denied ") + domain.id + " for " + targetId);
+                    BbsOpManager.syncToAll(server);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
     private static void handleRemovePlayerLogs(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         final UUID targetId = buf.readUuid();
         server.execute(() -> {
@@ -977,11 +1036,13 @@ public class TogetherServerNetwork {
         });
     }
 
-    /** Tell a player whether they are an OP, so the panel can show the player list. */
+    /** Tell a player whether they are an OP and/or a BBS manager, so the panel knows which columns to show. */
     public static void sendPermissions(MinecraftServer server, ServerPlayerEntity player) {
         boolean isOp = BehaviorLogManager.isOperator(server, player);
+        boolean isManager = isOp || BbsOpManager.get(player.getUuid()) >= BbsOpManager.LEVEL_ADMIN;
         PacketByteBuf out = PacketByteBufs.create();
         out.writeBoolean(isOp);
+        out.writeBoolean(isManager);
         ServerPlayNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_PERMISSIONS, (PacketByteBuf)out);
     }
 
@@ -992,7 +1053,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmDeleted(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player)) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
             return;
         }
         String filmId = buf.readString();
@@ -1014,7 +1075,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmRenamed(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player)) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
             return;
         }
         String oldId = buf.readString();
@@ -1114,7 +1175,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleFilmDataSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (BbsOpManager.isReadOnly(player) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {

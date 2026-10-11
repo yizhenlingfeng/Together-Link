@@ -23,7 +23,7 @@ public class UIFormPaletteBbsOpMixin
     @Inject(method = "edit(Z)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockEnterEdit(boolean editing, CallbackInfo ci)
     {
-        if (editing && BbsOpClientState.isReadOnly())
+        if (editing && !BbsOpClientState.canEdit("morph"))
         {
             ci.cancel();
         }
@@ -32,7 +32,7 @@ public class UIFormPaletteBbsOpMixin
     @Inject(method = "toggleEditor", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockToggleEditor(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("morph"))
         {
             ci.cancel();
         }

@@ -24,7 +24,7 @@ implements ModInitializer {
                 TogetherServerNetwork.sendInitialFilmSync(server, handler.player);
                 BehaviorLogManager.onPlayerJoin(handler.player);
                 TogetherServerNetwork.sendPermissions(server, handler.player);
-                BbsOpManager.syncToPlayer(server, handler.player);
+                BbsOpManager.syncToPlayer(handler.player);
             });
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> TogetherServerNetwork.clearPlayerState(handler.player, server));

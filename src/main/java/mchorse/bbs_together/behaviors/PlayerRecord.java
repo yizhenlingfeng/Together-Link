@@ -21,6 +21,12 @@ public class PlayerRecord
     public boolean op;
     /** Offline-mode account (name-derived UUID v3, premium accounts are v4); filled on send. */
     public boolean offline;
+    /** BBS permission level (0/1/2); filled on send from {@code mchorse.bbs_together.bbsop.BbsOpManager}. */
+    public int bbsLevel;
+    /** Comma-separated allowed-domain whitelist for restricted level-1 editors; null = unrestricted. */
+    public String bbsGrants;
+    /** True for the synthesized group header rows of the player list ("all players", level groups). */
+    public boolean groupHeader;
 
     public PlayerRecord()
     {}

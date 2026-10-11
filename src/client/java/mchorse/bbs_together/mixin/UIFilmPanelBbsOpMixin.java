@@ -20,6 +20,6 @@ public class UIFilmPanelBbsOpMixin
     @Inject(method = "toggleFlight", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockToggleFlight(CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 }

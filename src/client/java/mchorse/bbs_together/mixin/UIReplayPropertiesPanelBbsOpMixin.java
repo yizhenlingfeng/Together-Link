@@ -33,7 +33,7 @@ public class UIReplayPropertiesPanelBbsOpMixin
     @Inject(method = "edit", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockEdit(Consumer<Replay> consumer, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly())
+        if (!BbsOpClientState.canEdit("film"))
         {
             ci.cancel();
         }
@@ -44,6 +44,6 @@ public class UIReplayPropertiesPanelBbsOpMixin
     {
         UIReplayPropertiesPanel self = (UIReplayPropertiesPanel) (Object) this;
 
-        ReadOnlyOverlay.ensureAttached(self, this.together$overlay, false);
+        ReadOnlyOverlay.ensureAttached(self, this.together$overlay, false, "film");
     }
 }

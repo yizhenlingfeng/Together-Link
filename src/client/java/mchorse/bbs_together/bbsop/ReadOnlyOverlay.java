@@ -21,14 +21,14 @@ public final class ReadOnlyOverlay
     private ReadOnlyOverlay() {}
 
     /** Builds a veil element sized via {@code relative(...)}, swallowing clicks and scrolls. */
-    public static UIElement create()
+    public static UIElement create(String domain)
     {
         return new UIElement()
         {
             @Override
             public void render(UIContext context)
             {
-                if (BbsOpClientState.isReadOnly())
+                if (!BbsOpClientState.canEdit(domain))
                 {
                     drawVeil(context, this.area);
                 }
@@ -37,31 +37,31 @@ public final class ReadOnlyOverlay
             @Override
             protected boolean subMouseClicked(UIContext context)
             {
-                /* Only when read-only AND the cursor is over the veil: BBS walks every child
+                /* Only when locked AND the cursor is over the veil: BBS walks every child
                  * without an area pre-check, so an unconditional "true" would eat clicks meant
                  * for unrelated elements (it broke the timeline scrubbing once already). */
-                return BbsOpClientState.isReadOnly() && this.area.isInside(context);
+                return !BbsOpClientState.canEdit(domain) && this.area.isInside(context);
             }
 
             @Override
             protected boolean subMouseScrolled(UIContext context)
             {
                 /* Scrolling a trackpad/spinbox edits values — swallow it too. */
-                return BbsOpClientState.isReadOnly() && this.area.isInside(context);
+                return !BbsOpClientState.canEdit(domain) && this.area.isInside(context);
             }
         };
     }
 
     /** Variant for surfaces that stay interactive while looking locked: only right-clicks
      * (context menus) are swallowed, left-click selection and scrolling pass through. */
-    public static UIElement createClickThrough()
+    public static UIElement createClickThrough(String domain)
     {
         return new UIElement()
         {
             @Override
             public void render(UIContext context)
             {
-                if (BbsOpClientState.isReadOnly())
+                if (!BbsOpClientState.canEdit(domain))
                 {
                     drawVeil(context, this.area);
                 }
@@ -70,7 +70,7 @@ public final class ReadOnlyOverlay
             @Override
             protected boolean subMouseClicked(UIContext context)
             {
-                return BbsOpClientState.isReadOnly() && context.mouseButton == 1 && this.area.isInside(context);
+                return !BbsOpClientState.canEdit(domain) && context.mouseButton == 1 && this.area.isInside(context);
             }
 
             @Override
@@ -82,22 +82,22 @@ public final class ReadOnlyOverlay
     }
 
     /** Attaches the overlay on {@code host} once, sized to fill it. */
-    public static void ensureAttached(UIElement host, UIElement[] slot, boolean clickThrough)
+    public static void ensureAttached(UIElement host, UIElement[] slot, boolean clickThrough, String domain)
     {
         if (slot[0] == null)
         {
-            slot[0] = clickThrough ? createClickThrough() : create();
+            slot[0] = clickThrough ? createClickThrough(domain) : create(domain);
             slot[0].relative(host).x(0).y(0).w(1F).h(1F);
             host.add(slot[0]);
         }
     }
 
     /** Attaches one shield per {@code boundTo} element, in parallel with {@code slots}. */
-    public static void ensureShieldsAttached(UIElement parent, UIElement[] slots, UIElement... boundTo)
+    public static void ensureShieldsAttached(UIElement parent, UIElement[] slots, String domain, UIElement... boundTo)
     {
         for (int i = 0; i < boundTo.length; i++)
         {
-            ensureShieldAttached(parent, slots, i, boundTo[i]);
+            ensureShieldAttached(parent, slots, i, domain, boundTo[i]);
         }
     }
 
@@ -107,7 +107,7 @@ public final class ReadOnlyOverlay
      * plain 100%-sized child would just become another stacked row instead of covering the
      * widgets.
      */
-    public static void ensureShieldAttached(UIElement parent, UIElement[] slots, int slot, UIElement boundTo)
+    public static void ensureShieldAttached(UIElement parent, UIElement[] slots, int slot, String domain, UIElement boundTo)
     {
         if (slots[slot] == null)
         {
@@ -122,13 +122,13 @@ public final class ReadOnlyOverlay
                 @Override
                 protected boolean subMouseClicked(UIContext context)
                 {
-                    return BbsOpClientState.isReadOnly() && this.syncArea().isInside(context);
+                    return !BbsOpClientState.canEdit(domain) && this.syncArea().isInside(context);
                 }
 
                 @Override
                 protected boolean subMouseScrolled(UIContext context)
                 {
-                    return BbsOpClientState.isReadOnly() && this.syncArea().isInside(context);
+                    return !BbsOpClientState.canEdit(domain) && this.syncArea().isInside(context);
                 }
 
                 /* The click path runs before (or instead of) render: sync here too, so the hit

@@ -27,7 +27,7 @@ public class UIFormCategoryBbsOpMixin
 {
     private static boolean together$isLocalOnly(Form form)
     {
-        if (!BbsOpClientState.isReadOnly() || !(form instanceof ModelForm modelForm))
+        if (!!BbsOpClientState.canEdit("upload") || !(form instanceof ModelForm modelForm))
         {
             return false;
         }

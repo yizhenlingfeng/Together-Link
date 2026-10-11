@@ -35,8 +35,8 @@ public class UIReplaysListPanelBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$greyOutAddAndVeil(UIContext context, CallbackInfo ci)
     {
-        this.addReplay.setEnabled(!BbsOpClientState.isReadOnly());
+        this.addReplay.setEnabled(!!BbsOpClientState.canEdit("film"));
 
-        ReadOnlyOverlay.ensureAttached((UIReplaysListPanel) (Object) this, this.together$overlay, true);
+        ReadOnlyOverlay.ensureAttached((UIReplaysListPanel) (Object) this, this.together$overlay, true, "film");
     }
 }

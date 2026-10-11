@@ -22,6 +22,6 @@ public class FilmRecordingControllerBbsOpMixin
     @Inject(method = "startRecording", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockStartRecording(List<String> groups, CallbackInfo ci)
     {
-        if (BbsOpClientState.isReadOnly()) ci.cancel();
+        if (!BbsOpClientState.canEdit("film")) ci.cancel();
     }
 }
