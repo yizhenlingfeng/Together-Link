@@ -2,7 +2,9 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.ui.film.replays.UIReplayPropertiesPanel;
-import mchorse.bbs_mod.ui.framework.elements.UIElement;import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.framework.elements.UIElement;
+import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.bbsop.ReadOnlyOverlay;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -35,8 +37,19 @@ public class UIReplayPropertiesPanelBbsOpMixin
         }
     }
 
-    @Inject(method = "setReplay", at = @At("TAIL"), remap = false)
-    private void together$attachOverlay(Replay replay, CallbackInfo ci)
+    /**
+     * Re-evaluated every frame (ensureAttached is a cheap slot check) so a permission change
+     * — e.g. the server owner promoting the player from 0 to 1 while the editor is open —
+     * takes effect immediately instead of leaving a stale veil until the next replay pick.
+     */
+    @Inject(method = "render", at = @At("TAIL"), remap = false)
+    private void together$syncOverlayPerFrame(UIContext context, CallbackInfo ci)
+    {
+        this.together$syncOverlay();
+    }
+
+    @Unique
+    private void together$syncOverlay()
     {
         UIReplayPropertiesPanel self = (UIReplayPropertiesPanel) (Object) this;
 
