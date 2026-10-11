@@ -10,20 +10,17 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 
 /**
- * The BBSFS-native look for a read-only surface: a translucent grey wash over the area,
- * a centred padlock and the localized "view only" caption — mirroring what
- * {@code UIElement.renderLockedArea} draws for individual disabled input fields.
- *
- * <p>Overlays are permission-aware at draw/click time: once attached they stay on their host
- * for its whole lifetime and simply go inert when the player is no longer read-only, so a
- * permission change takes effect on the very next frame without any extra syncing.</p>
+ * Read-only overlay elements: a translucent grey wash with a centred padlock and the
+ * localized "view only" caption, mirroring what {@code UIElement.renderLockedArea} draws
+ * for disabled inputs. Every overlay reads the permission at draw/click time, so once
+ * attached it stays on its host for life and simply goes inert on a permission change.
  */
 @Environment(EnvType.CLIENT)
 public final class ReadOnlyOverlay
 {
     private ReadOnlyOverlay() {}
 
-    /** Builds a click-consuming overlay element that must be laid out via {@code relative(...)}. */
+    /** Builds a veil element sized via {@code relative(...)}, swallowing clicks and scrolls. */
     public static UIElement create()
     {
         return new UIElement()
@@ -40,10 +37,9 @@ public final class ReadOnlyOverlay
             @Override
             protected boolean subMouseClicked(UIContext context)
             {
-                /* Swallow every click so the widgets underneath never receive it — but ONLY
-                 * when read-only and the cursor is actually over the veil: BBS walks every
-                 * child without an area pre-check, so an unconditional "true" here would eat
-                 * clicks meant for unrelated elements (it broke the timeline scrubbing). */
+                /* Only when read-only AND the cursor is over the veil: BBS walks every child
+                 * without an area pre-check, so an unconditional "true" would eat clicks meant
+                 * for unrelated elements (it broke the timeline scrubbing once already). */
                 return BbsOpClientState.isReadOnly() && this.area.isInside(context);
             }
 
@@ -56,11 +52,8 @@ public final class ReadOnlyOverlay
         };
     }
 
-    /**
-     * Variant for surfaces that must stay interactive while looking locked (the replay list:
-     * left-click selection and scrolling pass through, only right-click context menus are
-     * swallowed).
-     */
+    /** Variant for surfaces that stay interactive while looking locked: only right-clicks
+     * (context menus) are swallowed, left-click selection and scrolling pass through. */
     public static UIElement createClickThrough()
     {
         return new UIElement()
@@ -88,7 +81,7 @@ public final class ReadOnlyOverlay
         };
     }
 
-    /** Attaches the overlay on {@code host} once; it then tracks the permission by itself. */
+    /** Attaches the overlay on {@code host} once, sized to fill it. */
     public static void ensureAttached(UIElement host, UIElement[] slot, boolean clickThrough)
     {
         if (slot[0] == null)
@@ -99,18 +92,26 @@ public final class ReadOnlyOverlay
         }
     }
 
-    /**
-     * Attaches an invisible click/scroll shield that keeps its own area locked to
-     * {@code boundTo}'s area — synced every frame in {@code render}, so it follows window
-     * resizes and layout changes immediately. Needed for hosts laid out by flow containers
-     * (columns/splitters), where a plain 100%-sized child would just become another stacked
-     * row instead of covering the widgets.
-     */
-    public static void ensureShieldAttached(UIElement parent, UIElement[] slot, UIElement boundTo)
+    /** Attaches one shield per {@code boundTo} element, in parallel with {@code slots}. */
+    public static void ensureShieldsAttached(UIElement parent, UIElement[] slots, UIElement... boundTo)
     {
-        if (slot[0] == null)
+        for (int i = 0; i < boundTo.length; i++)
         {
-            slot[0] = new UIElement()
+            ensureShieldAttached(parent, slots, i, boundTo[i]);
+        }
+    }
+
+    /**
+     * Attaches an invisible click/scroll shield whose area is locked to {@code boundTo}'s
+     * live area. Needed for hosts laid out by flow containers (columns/splitters), where a
+     * plain 100%-sized child would just become another stacked row instead of covering the
+     * widgets.
+     */
+    public static void ensureShieldAttached(UIElement parent, UIElement[] slots, int slot, UIElement boundTo)
+    {
+        if (slots[slot] == null)
+        {
+            slots[slot] = new UIElement()
             {
                 @Override
                 public void render(UIContext context)
@@ -130,8 +131,8 @@ public final class ReadOnlyOverlay
                     return BbsOpClientState.isReadOnly() && this.syncArea().isInside(context);
                 }
 
-                /* The click path runs before (or instead of) render: sync here too, so the
-                 * hit test never reads a stale or never-initialized (0x0) area. */
+                /* The click path runs before (or instead of) render: sync here too, so the hit
+                 * test never reads a stale or never-initialized (0x0) area. */
                 private Area syncArea()
                 {
                     this.area.copy(boundTo.area);
@@ -140,8 +141,10 @@ public final class ReadOnlyOverlay
                 }
             };
 
-            slot[0].noCulling();
-            parent.add(slot[0]);
+            /* BBS culls zero-area children before rendering them — without this the shield
+             * starts at 0x0, render never runs and the area never gets initialized. */
+            slots[slot].noCulling();
+            parent.add(slots[slot]);
         }
     }
 
@@ -150,7 +153,7 @@ public final class ReadOnlyOverlay
         return L10n.lang("bbs_together.bbsop.view_only").get();
     }
 
-    /** The BBSFS-native lock look: grey veil + centred padlock + "view only" caption. */
+    /** Grey veil + centred padlock + "view only" caption. */
     public static void drawVeil(UIContext context, Area a)
     {
         if (a.w <= 0 || a.h <= 0)

@@ -17,23 +17,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Read-only (level 0) lock on the model block panel: the block list stays browsable, but
- * picking a model block never fills the editing side, and the whole editing side (nested
- * edit button, toggles, transform, body/equipment sections) is covered by real overlay
- * elements — the veil both draws the lock look and swallows clicks, so the properties
- * underneath cannot be edited. The overlays track the permission by themselves.
+ * picking a block never fills the editing side, and the whole editing side (editor column,
+ * body/equipment sections) is covered by one veil that both draws the lock look and swallows
+ * clicks. The veils track the permission by themselves.
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = UIModelBlockPanel.class, remap = false)
 public class UIModelBlockPanelBbsOpMixin
 {
+    /** Click shields over the editor column and the two sections, attached lazily. */
     @Unique
-    private final UIElement[] together$editorOverlay = new UIElement[1];
-
-    @Unique
-    private final UIElement[] together$bodyOverlay = new UIElement[1];
-
-    @Unique
-    private final UIElement[] together$equipmentOverlay = new UIElement[1];
+    private final UIElement[] together$shields = new UIElement[3];
 
     @Inject(method = "fill(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;Z)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockFill(ModelBlockEntity modelBlock, boolean select, CallbackInfo ci)
@@ -51,7 +45,7 @@ public class UIModelBlockPanelBbsOpMixin
         UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
 
         /* The pick button's callback dereferences this.modelBlock unconditionally; with fill
-         * cancelled it is null, so the button itself must be dead or clicking it NPEs. */
+         * cancelled it is null, so the button must be dead or clicking it NPEs. */
         self.pickEdit.setEnabled(!readOnly);
 
         if (!readOnly)
@@ -59,24 +53,32 @@ public class UIModelBlockPanelBbsOpMixin
             return;
         }
 
-        /* One visible veil spanning the editing column AND the body/equipment sections
-         * (union of their live areas, so folded rows are covered too and an unfolded
-         * section is swallowed by the growing veil); it follows resizes every frame. */
-        Area veil = new Area();
-        Area editor = self.editor.area;
-        Area body = self.bodySection.area;
-        Area equipment = self.equipmentSection.area;
-        int ex = Math.max(editor.ex(), Math.max(body.ex(), equipment.ex()));
-        int ey = Math.max(editor.ey(), Math.max(body.ey(), equipment.ey()));
+        UIElement[] covered = { self.editor, self.bodySection, self.equipmentSection };
 
-        veil.x = Math.min(editor.x, Math.min(body.x, equipment.x));
-        veil.y = Math.min(editor.y, Math.min(body.y, equipment.y));
-        veil.w = Math.max(0, ex - veil.x);
-        veil.h = Math.max(0, ey - veil.y);
+        /* One visible veil over the union of the covered areas: folded sections still fall
+         * inside it, an unfolded one grows it, and it follows resizes every frame. */
+        Area veil = new Area();
+        boolean first = true;
+
+        for (UIElement element : covered)
+        {
+            Area a = element.area;
+
+            if (first)
+            {
+                veil.set(a.x, a.y, a.w, a.h);
+                first = false;
+            }
+            else
+            {
+                veil.x = Math.min(veil.x, a.x);
+                veil.y = Math.min(veil.y, a.y);
+                veil.w = Math.max(veil.ex(), a.ex()) - veil.x;
+                veil.h = Math.max(veil.ey(), a.ey()) - veil.y;
+            }
+        }
 
         ReadOnlyOverlay.drawVeil(context, veil);
-        ReadOnlyOverlay.ensureShieldAttached(self, this.together$editorOverlay, self.editor);
-        ReadOnlyOverlay.ensureShieldAttached(self, this.together$bodyOverlay, self.bodySection);
-        ReadOnlyOverlay.ensureShieldAttached(self, this.together$equipmentOverlay, self.equipmentSection);
+        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields, covered);
     }
 }
