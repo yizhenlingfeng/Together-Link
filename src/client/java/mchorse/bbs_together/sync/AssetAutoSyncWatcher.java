@@ -13,6 +13,9 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
+
 import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 
@@ -22,7 +25,7 @@ import mchorse.bbs_together.network.TogetherClientNetwork;
  * pressing the upload button. Events are debounced by a quiet period; files written by our
  * own downloads/pushes are naturally no-ops (their hashes already match the manifest).
  */
-@net.fabricmc.api.Environment(net.fabricmc.api.EnvType.CLIENT)
+@Environment(EnvType.CLIENT)
 public class AssetAutoSyncWatcher {
     /** Silence required after the last event before a sync pass fires (editors spam events). */
     private static final long QUIET_MS = 3000L;

@@ -62,6 +62,7 @@ import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.utils.pose.Pose;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherServerNetwork;
+import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
 import mchorse.bbs_together.sync.AssetSyncTracker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -110,7 +111,6 @@ public class TogetherClientNetwork {
     public static volatile long behaviorVersion = 0;
     /** Bumped every time panel data changes, so the panel knows when to rebuild. */
     public static volatile long behaviorDataStamp = 0;
-    private static final int MAX_SELECTION_PACKET = 512;
     /** 0 = normal (follow settings), 1 = download-only resync, 2 = upload-only resync. */
     private static volatile int resyncMode = 0;
 
@@ -231,7 +231,6 @@ public class TogetherClientNetwork {
         assetDownloadFinishedAt = 0L;
         tooLargeModels.clear();
         localOnlyModels.clear();
-        damageControlActive = false;
         pendingSwapFilmId = null;
         pendingSwapFrom = -1;
         pendingSwapTo = -1;
@@ -265,7 +264,7 @@ public class TogetherClientNetwork {
             TogetherClientNetwork.sendFilmInventory();
         });
         /* Auto sync: watch the local assets folder so local edits upload by themselves. */
-        mchorse.bbs_together.sync.AssetAutoSyncWatcher.ensureStarted();
+        AssetAutoSyncWatcher.ensureStarted();
     }
 
     public static boolean isConnected() {

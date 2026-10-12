@@ -42,10 +42,8 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.forms.FormUtils;
-import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
-import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.BBSTogetherFix18;
@@ -63,7 +61,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.MinecraftServer;
 
 public class TogetherServerNetwork {
-    private static final String NS = "bbs_together";
     /** C2S: client reports whether it wants to receive pushed assets (assetSyncReceive). */
     public static final Identifier SERVER_SYNC_PREF = new Identifier("bbs_together", "s_sync_pref");
     /** C2S (crusher): client reports its local asset inventory {path: sha1} for push filtering. */
