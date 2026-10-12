@@ -258,9 +258,6 @@ public final class BBSTogetherFix28Server {
         return false;
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
     private static void remapReplaySelections(String string, Film film, Film film2) {
         Map map;
         Object object;

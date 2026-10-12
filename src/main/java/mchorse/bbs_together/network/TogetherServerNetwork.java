@@ -253,9 +253,6 @@ public class TogetherServerNetwork {
         BBSTogetherFix28Server.registerReceivers();
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
     public static void reset() {
         playerCrushers.clear();
         playerEditingFilm.clear();
@@ -286,9 +283,6 @@ public class TogetherServerNetwork {
         BBSTogetherFix28Server.resetState();
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
     public static void clearPlayerState(ServerPlayerEntity player, MinecraftServer server) {
         try {
             UUID uuid = player.getUuid();
@@ -506,9 +500,6 @@ public class TogetherServerNetwork {
         });
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
     public static void broadcastReplaySelections(MinecraftServer server, String filmId) {
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
             PacketByteBuf buf = PacketByteBufs.create();

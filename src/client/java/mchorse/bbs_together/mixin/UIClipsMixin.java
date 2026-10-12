@@ -34,10 +34,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Environment(value=EnvType.CLIENT)
 @Mixin(value={UIClips.class}, remap=false)
 public class UIClipsMixin {
-    private static final int EDITOR_CAMERA = 0;
-    private static final int EDITOR_ACTION = 2;
-    private static final int LAYER_HEIGHT = 20;
-
     @Shadow(remap = false)
     private IUIClipsDelegate delegate;
 

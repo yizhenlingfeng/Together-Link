@@ -2,10 +2,8 @@ package mchorse.bbs_together.mixin;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,7 +16,6 @@ import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.ui.film.UIClips;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
-import mchorse.bbs_mod.ui.film.replays.UIReplaysEditor;
 import mchorse.bbs_mod.ui.film.utils.undo.ValueChangeUndo;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
@@ -58,12 +55,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Environment(value=EnvType.CLIENT)
 @Mixin(value={UIFilmPanel.class}, remap=false)
 public class UIFilmPanelMixin {
-    private static final int EDITOR_CAMERA = 0;
-    private static final int EDITOR_REPLAY = 1;
-    private static final int EDITOR_ACTION = 2;
-    private static final int LAYER_HEIGHT = 20;
     @Unique
-    private static final long TOGETHER_FS2_REPLAY_CURSOR_INTERVAL_MS = 33L;
+    private static final long TOGETHER_FS2_SELECTION_FLUSH_INTERVAL_MS = 250L;
     @Unique
     private int together_lastMouseX = Integer.MIN_VALUE;
     @Unique
@@ -146,8 +139,6 @@ public class UIFilmPanelMixin {
 
     @Inject(method={"render"}, at={@At(value="HEAD")}, remap=false)
     private void onRenderHead(UIContext context, CallbackInfo ci) {
-        UIKeyframeDopeSheet ds;
-        IUIKeyframeGraph iUIKeyframeGraph;
         UIFilmPanel self = (UIFilmPanel)(Object)this;
         if (!TogetherClientNetwork.isConnected()) {
             return;
@@ -158,11 +149,6 @@ public class UIFilmPanelMixin {
         float frameDelta = MinecraftClient.getInstance().getLastFrameDuration();
         for (TogetherClientNetwork.CursorPosition pos : TogetherClientNetwork.playerCursors.values()) {
             pos.interpolate(frameDelta);
-        }
-        self.replayEditor.isVisible();
-        if (false && self.replayEditor.keyframeEditor != null && self.replayEditor.keyframeEditor.view != null && (iUIKeyframeGraph = self.replayEditor.keyframeEditor.view.getGraph()) instanceof UIKeyframeDopeSheet && (ds = (UIKeyframeDopeSheet)iUIKeyframeGraph) instanceof ITogetherDopeSheet) {
-            ITogetherDopeSheet togetherDs = (ITogetherDopeSheet)ds;
-            togetherDs.together_setExternalHighlights(this.buildKeyframeHighlights(self, ds));
         }
     }
 
@@ -235,7 +221,7 @@ public class UIFilmPanelMixin {
         int n = uIFilmPanel.getCursor();
         boolean bl3 = n != this.together_fs2LastReplayCursor;
         boolean bl4 = bl = !list.equals(this.together_fs2LastSelection);
-        if (!(bl2 || bl || bl3 || l - this.together_fs2LastSelectionSent >= 250L)) {
+        if (!(bl2 || bl || bl3 || l - this.together_fs2LastSelectionSent >= TOGETHER_FS2_SELECTION_FLUSH_INTERVAL_MS)) {
             return;
         }
         if (!bl && !bl3 && l - this.together_fs2LastSelectionSent < 33L) {
@@ -402,12 +388,6 @@ public class UIFilmPanelMixin {
             TogetherClientNetwork.sendCursorPosition(filmId, 0, tr[0], tr[1], sel, self.getCursor());
             return;
         }
-        self.replayEditor.isVisible();
-        if (false && self.replayEditor.keyframeEditor != null && self.replayEditor.keyframeEditor.view != null && (tr = this.together_tickRowFromKeyframes(self.replayEditor, mx, my)) != null) {
-            List<Integer> sel = this.together_encodeKeyframeSelection(self.replayEditor);
-            TogetherClientNetwork.sendCursorPosition(filmId, 1, tr[0], tr[1], sel, self.getCursor());
-            return;
-        }
         if (self.actionEditor.isVisible() && self.actionEditor.clips != null && (tr = this.together_tickRowFromClips(self.actionEditor.clips, mx, my)) != null) {
             ArrayList<Integer> sel = new ArrayList<Integer>(self.actionEditor.clips.getSelection());
             TogetherClientNetwork.sendCursorPosition(filmId, 2, tr[0], tr[1], sel, self.getCursor());
@@ -433,13 +413,6 @@ public class UIFilmPanelMixin {
         this.together_lastSentPlayhead = playhead;
         this.together_lastPlayheadSent = now;
         String filmId = ((Film)self.getData()).getId();
-        int editorType = 0;
-        self.replayEditor.isVisible();
-        if (false) {
-            editorType = 1;
-        } else if (self.actionEditor.isVisible()) {
-            editorType = 2;
-        }
         TogetherClientNetwork.sendCursorPosition(filmId, BBSTogetherFix14.currentEditorType(self), -1.0f, -1.0f, Collections.emptyList(), playhead);
     }
 
@@ -456,62 +429,6 @@ public class UIFilmPanelMixin {
         int rowTop = clips.toLayerY(layer);
         float frac = Math.max(0.0f, Math.min(0.999f, (float)(my - rowTop) / 20.0f));
         return new float[]{tick, (float)layer + frac};
-    }
-
-    @Unique
-    private float[] together_tickRowFromKeyframes(UIReplaysEditor replayEditor, int mx, int my) {
-        UIKeyframes view = replayEditor.keyframeEditor.view;
-        if (!view.area.isInside(mx, my)) {
-            return null;
-        }
-        IUIKeyframeGraph iUIKeyframeGraph = view.getGraph();
-        if (!(iUIKeyframeGraph instanceof UIKeyframeDopeSheet)) {
-            return null;
-        }
-        UIKeyframeDopeSheet ds = (UIKeyframeDopeSheet)iUIKeyframeGraph;
-        UIKeyframeSheet hovered = ds.getSheet(my);
-        if (hovered == null) {
-            return null;
-        }
-        float tick = (float)view.fromGraphX(mx);
-        List<String> allIds = ((ITogetherReplaysEditor)replayEditor).together_getAllSheetIds();
-        int canonicalIndex = allIds.indexOf(hovered.id);
-        if (canonicalIndex < 0) {
-            canonicalIndex = ds.getSheets().indexOf(hovered);
-        }
-        int visibleIndex = ds.getSheets().indexOf(hovered);
-        int trackTop = ds.getDopeSheetY(visibleIndex);
-        float frac = Math.max(0.0f, Math.min(0.999f, (float)(my - trackTop) / (float)ds.getTrackHeight()));
-        return new float[]{tick, (float)canonicalIndex + frac};
-    }
-
-    @Unique
-    private List<Integer> together_encodeKeyframeSelection(UIReplaysEditor replayEditor) {
-        ArrayList<Integer> result = new ArrayList<Integer>();
-        if (replayEditor.keyframeEditor == null || replayEditor.keyframeEditor.view == null) {
-            return result;
-        }
-        IUIKeyframeGraph iUIKeyframeGraph = replayEditor.keyframeEditor.view.getGraph();
-        if (!(iUIKeyframeGraph instanceof UIKeyframeDopeSheet)) {
-            return result;
-        }
-        UIKeyframeDopeSheet ds = (UIKeyframeDopeSheet)iUIKeyframeGraph;
-        List<String> allIds = ((ITogetherReplaysEditor)replayEditor).together_getAllSheetIds();
-        List<UIKeyframeSheet> sheets = ds.getSheets();
-        for (UIKeyframeSheet sheet : sheets) {
-            Collection indices = sheet.selection.getIndices();
-            if (indices.isEmpty()) continue;
-            int canonicalIndex = allIds.indexOf(sheet.id);
-            if (canonicalIndex < 0) {
-                canonicalIndex = sheets.indexOf(sheet);
-            }
-            Iterator iterator = indices.iterator();
-            while (iterator.hasNext()) {
-                int ki = (Integer)iterator.next();
-                result.add(canonicalIndex << 16 | ki & 0xFFFF);
-            }
-        }
-        return result;
     }
 
     @Unique
@@ -602,41 +519,6 @@ public class UIFilmPanelMixin {
         float frac = row - (float)layer;
         int screenY = clips.toLayerY(layer) + (int)(frac * 20.0f);
         return new int[]{screenX, screenY};
-    }
-
-    @Unique
-    private Map<Integer, Integer> buildKeyframeHighlights(UIFilmPanel self, UIKeyframeDopeSheet ds) {
-        HashMap<Integer, Integer> highlights = new HashMap<Integer, Integer>();
-        if (TogetherClientNetwork.playerCursors.isEmpty()) {
-            return highlights;
-        }
-        List<String> allIds = ((ITogetherReplaysEditor)self.replayEditor).together_getAllSheetIds();
-        List visSheets = ds.getSheets();
-        HashMap<Integer, Integer> canonToVis = new HashMap<Integer, Integer>();
-        for (int vi = 0; vi < visSheets.size(); ++vi) {
-            int ci = allIds.indexOf(((UIKeyframeSheet)visSheets.get((int)vi)).id);
-            if (ci < 0) continue;
-            canonToVis.put(ci, vi);
-        }
-        Replay localReplay = self.replayEditor.getReplay();
-        int localReplayIdx = localReplay == null || self.getData() == null ? -1 : ((Film)self.getData()).replays.getList().indexOf(localReplay);
-        for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet()) {
-            Integer col;
-            Map<Integer, List<UUID>> selMap;
-            boolean onSameReplay;
-            UUID remoteUuid = entry.getKey();
-            TogetherClientNetwork.CursorPosition pos = entry.getValue();
-            if (pos.editorType != 1 || pos.selectedIndices.isEmpty() || localReplayIdx < 0 || !(onSameReplay = (selMap = TogetherClientNetwork.replaySelections.get(self.getData() != null ? ((Film)self.getData()).getId() : "")) != null && selMap.containsKey(localReplayIdx) && selMap.get(localReplayIdx).contains(remoteUuid)) || (col = TogetherClientNetwork.playerColors.get(remoteUuid)) == null) continue;
-            int highlightColor = Colors.setA((int)(col | 0xFF000000), (float)0.85f);
-            for (int encoded : pos.selectedIndices) {
-                int canonIndex = encoded >> 16 & 0xFFFF;
-                int kfIndex = encoded & 0xFFFF;
-                Integer visIndex = (Integer)canonToVis.get(canonIndex);
-                if (visIndex == null) continue;
-                highlights.merge(visIndex << 16 | kfIndex, highlightColor, (a, b) -> b);
-            }
-        }
-        return highlights;
     }
 
     @Unique
@@ -909,7 +791,7 @@ public class UIFilmPanelMixin {
             string = uIKeyframeSheet.title == null ? "" : uIKeyframeSheet.title.get();
         }
         catch (Exception exception) {
-            // empty catch block
+
         }
         return uIKeyframeSheet.id + "\u0002" + string + "\u0002" + uIKeyframeSheet.isBoneTrack;
     }
