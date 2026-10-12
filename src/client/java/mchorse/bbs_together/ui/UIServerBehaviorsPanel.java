@@ -63,6 +63,9 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
     private long lastQueryAt;
     private long lastStamp;
     private long lastMaxId = -1;
+    /** Content stamp of the newest entry (occurrence + item counts): detects merged-in
+     * repeats, which grow the last entry without changing its id. */
+    private int lastTailStamp;
 
     public UIServerBehaviorsPanel(UIDashboard dashboard)
     {
@@ -167,6 +170,7 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
         TogetherClientNetwork.behaviorEntries.clear();
         TogetherClientNetwork.behaviorPlayers.clear();
         this.lastMaxId = -1;
+        this.lastTailStamp = 0;
         this.rebuildPlayers();
         this.rebuildBehaviors(true);
         this.lastQueryAt = 0;
@@ -308,19 +312,39 @@ public class UIServerBehaviorsPanel extends UIDashboardPanel
             entries.sort(this.sortMode::compare);
         }
 
+        /* clear() clamps the scroll back to 0, so remember where the user was —
+         * and whether they were reading at the bottom — before rebuilding. */
+        boolean pinned = this.behaviors.bottomGap() <= this.behaviors.rowHeight() * 2;
+        double savedScroll = this.behaviors.getScrollPos();
+
         this.behaviors.clear();
         this.behaviors.add(entries);
         this.behaviors.update();
 
         if (autoScroll && this.sortMode == BehaviorSort.TIME)
         {
-            long maxId = entries.isEmpty() ? 0L : entries.get(entries.size() - 1).id;
+            BehaviorEntry tail = entries.isEmpty() ? null : entries.get(entries.size() - 1);
+            long maxId = tail == null ? 0L : tail.id;
+            int tailStamp = tail == null ? 0 : tail.occurrences.size() * 1000 + tail.items.size();
+            boolean contentChanged = maxId != this.lastMaxId || tailStamp != this.lastTailStamp;
 
-            if (maxId != this.lastMaxId)
+            this.lastMaxId = maxId;
+            this.lastTailStamp = tailStamp;
+
+            /* Chat-log stickiness: follow new/merged content only while the user
+             * is already at the bottom; never yank someone reading back up top. */
+            if (contentChanged && pinned)
             {
-                this.lastMaxId = maxId;
                 this.behaviors.scrollToBottom();
             }
+            else
+            {
+                this.behaviors.setScrollPos(savedScroll);
+            }
+        }
+        else
+        {
+            this.behaviors.setScrollPos(savedScroll);
         }
     }
 

@@ -181,4 +181,22 @@ public class UIBehaviorList extends UIList<BehaviorEntry>
     {
         this.scroll.setScroll(Integer.MAX_VALUE);
     }
+
+    /** Distance in pixels between the viewport bottom and the content bottom; 0 = fully scrolled. */
+    public int bottomGap()
+    {
+        int side = this.scroll.direction.getSide(this.area);
+
+        return Math.max(0, this.scroll.scrollSize - side - (int) this.scroll.getScroll());
+    }
+
+    public double getScrollPos()
+    {
+        return this.scroll.getScroll();
+    }
+
+    public void setScrollPos(double value)
+    {
+        this.scroll.setScroll(value);
+    }
 }
