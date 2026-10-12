@@ -10,13 +10,13 @@ import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
-import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.settings.values.core.ValueForm;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.replays.ReplayListEntry;
 import mchorse.bbs_mod.ui.film.replays.UIReplayList;
 import mchorse.bbs_mod.ui.forms.UIFormPalette;
 import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.framework.elements.IUIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
 import mchorse.bbs_together.BBSTogetherFix33Client;
@@ -31,7 +31,6 @@ import org.joml.Vector3d;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(value={UIReplayList.class}, remap=false)
@@ -154,29 +153,55 @@ public class UIReplayListMixin {
         TogetherClientNetwork.sendReplayFormLock(string, n, true);
     }
 
-    @Redirect(method={"openFormEditor"}, at=@At(value="INVOKE", target="Lmchorse/bbs_mod/ui/forms/UIFormPalette;open(Lmchorse/bbs_mod/ui/framework/elements/UIElement;ZLmchorse/bbs_mod/forms/forms/Form;Ljava/util/function/Consumer;)Lmchorse/bbs_mod/ui/forms/UIFormPalette;"), remap=false)
-    private UIFormPalette redirectFormPaletteOpen(UIElement uIElement, boolean bl, Form form, Consumer<Form> consumer) {
-        UIFormPalette uIFormPalette = UIFormPalette.open((UIElement)uIElement, (boolean)bl, (Form)form, consumer);
+    // BBS More Windows 的 UIReplayListFormEditorMixin 也对 openFormEditor 里的
+    // UIFormPalette.open 做 @Redirect，两个 Redirect 不能共存（后应用的一方会
+    // "Scanned 0 target(s)" 直接崩游戏）。这里改成 TAIL 注入：不碰那条指令，
+    // 而是在方法结束后从 target 的直接子元素里找出刚打开的 UIFormPalette，
+    // 无论哪一方抢先 Redirect 都能正常拿到面板。
+    @Inject(method={"openFormEditor"}, at={@At(value="TAIL")}, remap=false)
+    private void onOpenFormEditorTail(ValueForm valueForm, boolean bl, Consumer<?> consumer, CallbackInfo callbackInfo) {
         if (!TogetherClientNetwork.isConnected()) {
-            return uIFormPalette;
+            return;
         }
         if (this.together_lockFilmId == null || this.together_lockIndex < 0) {
-            return uIFormPalette;
+            return;
         }
         String string = this.together_lockFilmId;
         int n = this.together_lockIndex;
         this.together_lockFilmId = null;
         this.together_lockIndex = -1;
+        UIReplayList uIReplayList = (UIReplayList)(Object)this;
+        UIFormPalette uIFormPalette = this.together_findOpenedPalette(uIReplayList);
         if (uIFormPalette != null) {
             uIFormPalette.getEvents().register(UIRemovedEvent.class, uIRemovedEvent -> {
                 TogetherClientNetwork.sendReplayFormLock(string, n, false);
-                BBSTogetherFix33Client.broadcastReplayStructureChanged((UIReplayList)(Object)this);
+                BBSTogetherFix33Client.broadcastReplayStructureChanged(uIReplayList);
             });
         } else {
             TogetherClientNetwork.sendReplayFormLock(string, n, false);
-            BBSTogetherFix33Client.broadcastReplayStructureChanged((UIReplayList)(Object)this);
+            BBSTogetherFix33Client.broadcastReplayStructureChanged(uIReplayList);
         }
-        return uIFormPalette;
+    }
+
+    private UIFormPalette together_findOpenedPalette(UIReplayList uIReplayList) {
+        try {
+            UIElement uIElement = uIReplayList.panel;
+            if (uIReplayList.getRoot() != null) {
+                uIElement = uIReplayList.getParentContainer();
+            }
+            if (uIElement == null) {
+                return null;
+            }
+            UIFormPalette found = null;
+            for (IUIElement child : uIElement.getChildren()) {
+                if (child instanceof UIFormPalette) {
+                    found = (UIFormPalette)child;
+                }
+            }
+            return found;
+        } catch (Throwable throwable) {
+            return null;
+        }
     }
 
     @Inject(method={"renderElementPart"}, at={@At(value="TAIL")}, remap=false)
