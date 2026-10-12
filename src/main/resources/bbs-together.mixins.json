@@ -10,7 +10,8 @@
                    "ServerNetworkModelBlockMixin",
                    "ServerNetworkBbsOpMixin",
                    "PermissionUtilsBbsOpMixin",
-                   "ModelBlockEntityMixin"
+                   "ModelBlockEntityMixin",
+                   "FormStableIdsEmptyKeyMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1

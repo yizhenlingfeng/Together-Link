@@ -552,6 +552,12 @@ public class TogetherServerNetwork {
                             return FileVisitResult.CONTINUE;
                         }
                         String relativePath = assetsPath.relativize(file).toString().replace(File.separator, "/");
+                        /* ".bbsup" files are transient multi-slice upload temps: they may be
+                         * deleted or promoted at any moment, so never advertise them or
+                         * clients will request a file that vanishes mid-transfer. */
+                        if (relativePath.endsWith(".bbsup")) {
+                            return FileVisitResult.CONTINUE;
+                        }
                         /* Manifest entries carry "<sha1>:<sizeBytes>" so clients can skip over-size
                          * assets before requesting them. */
                         String sha1 = TogetherServerNetwork.sha1OfPathCached(file, file.toFile());
@@ -618,7 +624,7 @@ public class TogetherServerNetwork {
             File assetsFolder = BBSMod.getAssetsFolder();
             for (String relativePath : paths) {
                 File file;
-                if (relativePath.contains("..") || relativePath.startsWith("/") || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile()) continue;
+                if (relativePath.contains("..") || relativePath.startsWith("/") || relativePath.endsWith(".bbsup") || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile()) continue;
                 if (file.length() > TogetherServerNetwork.maxAssetBytes() || file.length() == 0) continue;
                 String sha1 = "";
                 try {
@@ -842,7 +848,8 @@ public class TogetherServerNetwork {
             return buffer.array();
         }
         catch (Exception e) {
-            e.printStackTrace();
+            /* Quietly skip: the file can legitimately vanish between enqueue and read
+             * (upload temp deleted/promoted, asset removed). Callers handle null. */
             return null;
         }
     }
