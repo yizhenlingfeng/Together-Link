@@ -144,19 +144,7 @@ public class BehaviorLogManager
 
         synchronized (BehaviorLogManager.class)
         {
-            PlayerRecord record = players.get(id);
-
-            if (record == null)
-            {
-                record = new PlayerRecord(id, name, time);
-
-                players.put(id, record);
-            }
-
-            record.name = name;
-            record.lastSeen = time;
-            record.lastAction = time;
-            record.everEdited = true;
+            touchPlayer(id, name, time);
 
             BehaviorEntry last = entries.isEmpty() ? null : entries.get(entries.size() - 1);
 
@@ -173,20 +161,121 @@ public class BehaviorLogManager
             }
             else
             {
-                BehaviorEntry entry = new BehaviorEntry(nextId++, time, id, name, type, subType, target);
-
-                appendItems(entry, items);
-                entry.occurrences.add(new BehaviorEntry.Occurrence(time, items));
-
-                if (extra != null)
-                {
-                    entry.extra.putAll(extra);
-                }
-
-                entries.add(entry);
-                enforceLimit();
+                addEntry(id, name, time, type, subType, target, items, extra);
             }
 
+            version++;
+            dirty = true;
+        }
+    }
+
+    /**
+     * Log a behavior that must never merge into the previous entry: request
+     * entries carry an approval {@code status} in {@code extra}, which a
+     * repeat-merge would silently keep stale. Always creates a new entry.
+     */
+    public static void recordUnique(ServerPlayerEntity player, int type, int subType, String target, List<String> items, Map<String, String> extra)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        UUID id = player.getUuid();
+        String name = player.getGameProfile().getName();
+        long time = System.currentTimeMillis();
+
+        synchronized (BehaviorLogManager.class)
+        {
+            touchPlayer(id, name, time);
+            addEntry(id, name, time, type, subType, target, items, extra);
+
+            version++;
+            dirty = true;
+        }
+    }
+
+    /** Refresh the player's activity snapshot (creates the record on first sight). */
+    private static void touchPlayer(UUID id, String name, long time)
+    {
+        PlayerRecord record = players.get(id);
+
+        if (record == null)
+        {
+            record = new PlayerRecord(id, name, time);
+
+            players.put(id, record);
+        }
+
+        record.name = name;
+        record.lastSeen = time;
+        record.lastAction = time;
+        record.everEdited = true;
+    }
+
+    /** Append a fresh entry and enforce the ring limit (caller holds the lock, bumps version). */
+    private static void addEntry(UUID id, String name, long time, int type, int subType, String target, List<String> items, Map<String, String> extra)
+    {
+        BehaviorEntry entry = new BehaviorEntry(nextId++, time, id, name, type, subType, target);
+
+        appendItems(entry, items);
+        entry.occurrences.add(new BehaviorEntry.Occurrence(time, items));
+
+        if (extra != null)
+        {
+            entry.extra.putAll(extra);
+        }
+
+        entries.add(entry);
+        enforceLimit();
+    }
+
+    /** Whether a pending model-delete request for this model is already awaiting a decision. */
+    public static boolean hasPendingRequest(String modelId)
+    {
+        synchronized (BehaviorLogManager.class)
+        {
+            for (int i = entries.size() - 1; i >= 0; i--)
+            {
+                BehaviorEntry entry = entries.get(i);
+
+                if (entry.type == BehaviorType.OTHER.id
+                    && entry.subType == BehaviorType.SUB_REQUEST_MODEL_DELETE
+                    && entry.target.equals(modelId)
+                    && "pending".equals(entry.extra.get("status")))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** Look up one entry by id (request workflows mutate entries in place). */
+    public static BehaviorEntry find(long id)
+    {
+        synchronized (BehaviorLogManager.class)
+        {
+            for (int i = entries.size() - 1; i >= 0; i--)
+            {
+                BehaviorEntry entry = entries.get(i);
+
+                if (entry.id == id)
+                {
+                    return entry;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** Bump the data version after an in-place entry edit, so clients re-sync their lists. */
+    public static void bump()
+    {
+        synchronized (BehaviorLogManager.class)
+        {
             version++;
             dirty = true;
         }

@@ -18,6 +18,7 @@ public class BBSTogetherModClient
 implements ClientModInitializer {
     public void onInitializeClient() {
         TogetherClientNetwork.setup();
+        BBSTogetherUndoGuard.register();
         BBSSettings.primaryColor.postCallback((value, fromFile) -> TogetherClientNetwork.sendPlayerColor((Integer)BBSSettings.primaryColor.get()));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.world != null) {

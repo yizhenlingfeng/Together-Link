@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The right column: the facts of the picked behavior — its type and time up
@@ -34,6 +35,8 @@ public class UIBehaviorInfo extends UIElement
 {
     private static final SimpleDateFormat FULL_TIME = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     private static final SimpleDateFormat LINE_TIME = new SimpleDateFormat("MM-dd HH:mm:ss");
+    /** Internal extra keys of model-delete requests, shown through dedicated lines instead. */
+    private static final Set<String> REQUEST_EXTRA_KEYS = Set.of("status", "by", "byId", "decidedAt");
 
     private BehaviorEntry entry;
     private boolean showIdentity;
@@ -106,9 +109,27 @@ public class UIBehaviorInfo extends UIElement
             y = this.line(context, x, y, width, "bbs_together.behaviors.details.target", entry.target, bottom);
         }
 
+        /* A model-delete request shows its approval state (and who decided it) in
+         * friendly words instead of the raw extra keys below. */
+        if (UIBehaviorList.isModelDeleteRequest(entry))
+        {
+            String status = entry.extra.getOrDefault("status", "pending");
+            String statusKey = "approved".equals(status) ? "approved" : "denied".equals(status) ? "denied" : "pending";
+
+            y = this.line(context, x, y, width, "bbs_together.behaviors.details.status", L10n.lang("bbs_together.behaviors.status." + statusKey).get(), bottom);
+
+            String by = entry.extra.get("by");
+
+            if (by != null && !by.isEmpty())
+            {
+                y = this.line(context, x, y, width, "bbs_together.behaviors.details.approver", by, bottom);
+            }
+        }
+
         for (Map.Entry<String, String> extra : entry.extra.entrySet())
         {
-            if (BehaviorLogManager.BYTES_KEY.equals(extra.getKey()))
+            if (BehaviorLogManager.BYTES_KEY.equals(extra.getKey())
+                || REQUEST_EXTRA_KEYS.contains(extra.getKey()))
             {
                 continue;
             }

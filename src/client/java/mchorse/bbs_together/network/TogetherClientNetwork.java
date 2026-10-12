@@ -6,12 +6,15 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -30,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.BBSModClient;
+import mchorse.bbs_mod.BBSResources;
 import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.MapType;
@@ -75,6 +79,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.MinecraftClient;
 
@@ -206,12 +211,14 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SAVED_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSavedSyncPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DATA_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmDataSyncPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_UNDO_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleUndoRejectedPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_LIST_CHANGED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmListChangedPacket(client));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmDeletedPacket(client, buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmRenamedPacket(client, buf.readString(), buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MERGE_REPLAYS, (client, handler, buf, resp) -> TogetherClientNetwork.handleMergeReplaysPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BEHAVIOR_LIST, (client, handler, buf, resp) -> TogetherClientNetwork.handleBehaviorListPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MODEL_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleModelDeletedPacket(client, buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
         isBBSTogetherOnServer = true;
         BBSTogetherFix28Client.registerReceivers();
@@ -1382,6 +1389,68 @@ public class TogetherClientNetwork {
         });
     }
 
+    /** Path sync with an arbitrary payload — used by the undo guard to flush a still-queued
+     * edit's recorded post-edit state (the value's current data is already rolled back at
+     * that point, so it cannot be re-serialized). */
+    public static void sendSyncDataPayload(String filmId, List<String> pathStrings, BaseType payload) {
+        if (!isBBSTogetherOnServer) {
+            return;
+        }
+        if (MinecraftClient.getInstance().player == null || payload == null) {
+            return;
+        }
+        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_DATA_SYNC, payload, buf -> {
+            buf.writeString(filmId);
+            buf.writeInt(pathStrings.size());
+            for (String s : pathStrings) {
+                buf.writeString(s);
+            }
+        });
+    }
+
+    /** One subtree of an undo/redo entry, as sent to the server for guarded replay. */
+    public static class UndoChangePayload {
+        public final List<String> path;
+        public final BaseType data;
+        public final BaseType expected;
+        public final boolean checkable;
+
+        public UndoChangePayload(List<String> path, BaseType data, BaseType expected, boolean checkable) {
+            this.path = path;
+            this.data = data;
+            this.expected = expected;
+            this.checkable = checkable;
+        }
+    }
+
+    /** Broadcast an undo/redo with the entry's expected baseline attached, so the server
+     * can refuse a rollback that would wipe another player's newer edit (s_undo_sync). */
+    public static void sendUndoSync(String filmId, List<UndoChangePayload> changes) {
+        if (!isBBSTogetherOnServer || changes.isEmpty()) {
+            return;
+        }
+        if (MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_UNDO_SYNC, new byte[0], buf -> {
+            buf.writeString(filmId);
+            buf.writeInt(changes.size());
+            for (UndoChangePayload c : changes) {
+                buf.writeInt(c.path.size());
+                for (String s : c.path) {
+                    buf.writeString(s);
+                }
+                byte[] data = DataStorageUtils.writeToBytes(c.data);
+                buf.writeInt(data.length);
+                buf.writeBytes(data);
+                byte[] expected = DataStorageUtils.writeToBytes(c.expected);
+                buf.writeInt(expected.length);
+                buf.writeBytes(expected);
+                buf.writeBoolean(c.checkable);
+            }
+        });
+    }
+
     public static boolean isReplayFormLocked(String filmId, int replayIndex) {
         if (!isBBSTogetherOnServer) {
             return false;
@@ -1406,11 +1475,11 @@ public class TogetherClientNetwork {
             if (!data.isMap()) {
                 return;
             }
-            client.execute(() -> lambda$handleFilmSavedSyncPacket$42(filmId, data, saverName));
+            client.execute(() -> together_applyFilmSavedSync(filmId, data, saverName));
         });
     }
 
-    private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName) {
+    private static void together_applyFilmSavedSync(String filmId, BaseType data, String saverName) {
         UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         boolean visible = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId) && panel.isVisible();
@@ -1633,6 +1702,73 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_GRANT, (PacketByteBuf)buf);
     }
 
+    /** Ask the server (as a logged request behavior) to delete a model; managers approve/deny it. */
+    public static void sendModelDeleteRequest(String modelId) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(modelId == null ? "" : modelId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_MODEL_DELETE_REQUEST, (PacketByteBuf)buf);
+    }
+
+    /** Approve or deny a pending model-delete request (manager only, server re-checks). */
+    public static void sendModelDeleteDecision(long entryId, boolean approve) {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeLong(entryId);
+        buf.writeBoolean(approve);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_MODEL_DELETE_DECISION, (PacketByteBuf)buf);
+    }
+
+    /** An approved server-side deletion: drop this client's local copy of the model. */
+    private static void handleModelDeletedPacket(MinecraftClient client, String modelId) {
+        client.execute(() -> {
+            boolean removed = deleteLocalModelFolder(modelId);
+            System.out.println("[BBSTogether] Server deleted model " + modelId + (removed ? "; removed the local copy" : "; no local copy found"));
+        });
+    }
+
+    /**
+     * Recursively delete assets/models/<modelId>/ and let the asset watchdog refresh the
+     * model palette (ModelManager unloads, ModelFormSection rescans). Also used by the
+     * model list's local-delete menu action. Returns whether anything was deleted.
+     */
+    public static boolean deleteLocalModelFolder(String modelId) {
+        if (modelId == null || modelId.isEmpty() || modelId.contains("..")) {
+            return false;
+        }
+        File modelDir = new File(BBSMod.getAssetsFolder(), "models/" + modelId.replace('/', File.separatorChar));
+        if (!modelDir.isDirectory()) {
+            return false;
+        }
+        boolean ok = true;
+        try {
+            Files.walkFileTree(modelDir.toPath(), new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    Files.deleteIfExists(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+            ok = false;
+        }
+        localOnlyModels.remove(modelId);
+        BBSResources.markAssetsChanged();
+        return ok;
+    }
+
     private static void handlePermissionsPacket(MinecraftClient client, PacketByteBuf buf) {
         boolean op = buf.readBoolean();
         boolean manager = buf.readBoolean();
@@ -1711,6 +1847,41 @@ public class TogetherClientNetwork {
         return BBSModClient.getDashboard();
     }
 
+    /** The server refused our undo/redo (someone edited the same subtree after us): apply
+     * the server's current data for every touched path — which reverts the local rollback —
+     * and tell the player why. */
+    private static void handleUndoRejectedPacket(MinecraftClient client, PacketByteBuf buf) {
+        String filmId = buf.readString();
+        int count = buf.readInt();
+        ArrayList<List<String>> paths = new ArrayList<List<String>>();
+        ArrayList<BaseType> datas = new ArrayList<BaseType>();
+        for (int i = 0; i < count; ++i) {
+            int pathSize = buf.readInt();
+            ArrayList<String> path = new ArrayList<String>();
+            for (int j = 0; j < pathSize; ++j) {
+                path.add(buf.readString());
+            }
+            int len = buf.readInt();
+            byte[] bytes = new byte[len];
+            buf.readBytes(bytes);
+            BaseType data = DataStorageUtils.readFromBytes(bytes);
+            if (data == null) {
+                continue;
+            }
+            paths.add(path);
+            datas.add(data);
+        }
+        client.execute(() -> {
+            for (int i = 0; i < paths.size(); ++i) {
+                together_applyIncomingFilmDataSync(filmId, paths.get(i), datas.get(i));
+            }
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc != null && mc.inGameHud != null) {
+                mc.inGameHud.setOverlayMessage(Text.literal("§e撤销未生效：该区域刚被其他玩家修改，已同步为最新内容"), false);
+            }
+        });
+    }
+
     private static void handleFilmDataSyncPacket(MinecraftClient client, PacketByteBuf buf) {
         String filmId = buf.readString();
         int pathSize = buf.readInt();
@@ -1722,7 +1893,7 @@ public class TogetherClientNetwork {
         byte[] bytes = new byte[dataLen];
         buf.readBytes(bytes);
         BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
-        client.execute(() -> TogetherClientNetwork.lambda$handleFilmDataSyncPacket$47(filmId, path, data));
+        client.execute(() -> TogetherClientNetwork.together_applyIncomingFilmDataSync(filmId, path, data));
     }
 
     private static boolean applyAtPath(BaseValueGroup current, List<String> path, int depth, BaseType data) {
@@ -1780,7 +1951,7 @@ public class TogetherClientNetwork {
         return false;
     }
 
-    private static void lambda$handleFilmDataSyncPacket$47(String filmId, List<String> path, BaseType data) {
+    private static void together_applyIncomingFilmDataSync(String filmId, List<String> path, BaseType data) {
         UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         if (panel == null || panel.getData() == null || !((Film)panel.getData()).getId().equals(filmId)) {

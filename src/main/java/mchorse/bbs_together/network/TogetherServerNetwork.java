@@ -50,6 +50,7 @@ import mchorse.bbs_together.BBSTogetherFix18;
 import mchorse.bbs_together.BBSTogetherFix28Server;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
+import mchorse.bbs_together.behaviors.BehaviorEntry;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
 import mchorse.bbs_together.utils.ModelPathUtils;
@@ -57,6 +58,7 @@ import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.MinecraftServer;
@@ -90,6 +92,13 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_FILM_SCREENS = new Identifier("bbs_together", "c_film_screens");
     public static final Identifier CLIENT_MERGE_REPLAYS = new Identifier("bbs_together", "c_merge_replays");
     public static final Identifier CLIENT_FILM_SAVED_SYNC = new Identifier("bbs_together", "c_film_saved_sync");
+    /** C2S (crusher): a client undid/redid an entry — payload carries, per touched subtree,
+     * the rolled-back data PLUS the entry's other side (the state the server should still
+     * hold). The server refuses the rollback when its authoritative copy has moved on,
+     * so one player's Ctrl+Z can no longer wipe a peer's newer edit on everyone. */
+    public static final Identifier SERVER_UNDO_SYNC = new Identifier("bbs_together", "s_undo_sync");
+    /** S2C: the undo/redo was refused; carries the server's current data for each touched path. */
+    public static final Identifier CLIENT_UNDO_REJECTED = new Identifier("bbs_together", "c_undo_rejected");
     public static final Identifier CLIENT_FILM_DATA_SYNC = new Identifier("bbs_together", "c_film_data_sync");
     public static final Identifier CLIENT_FILM_LIST_CHANGED = new Identifier("bbs_together", "c_film_list_changed");
     /** S2C: ping that server assets changed; auto-sync clients re-diff the manifest (B4 makes that cheap). */
@@ -117,6 +126,12 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_BEHAVIOR_QUERY = new Identifier("bbs_together", "s_behavior_query");
     public static final Identifier SERVER_SET_OPERATOR = new Identifier("bbs_together", "s_set_operator");
     public static final Identifier SERVER_REMOVE_PLAYER_LOGS = new Identifier("bbs_together", "s_remove_player_logs");
+    /** C2S: a player asks the server to delete a model (logged as a pending request behavior). */
+    public static final Identifier SERVER_MODEL_DELETE_REQUEST = new Identifier("bbs_together", "s_model_delete_request");
+    /** C2S (manager only): approve or deny a pending model-delete request. */
+    public static final Identifier SERVER_MODEL_DELETE_DECISION = new Identifier("bbs_together", "s_model_delete_decision");
+    /** S2C: an approved model deletion — clients drop their local copy of the model. */
+    public static final Identifier CLIENT_MODEL_DELETED = new Identifier("bbs_together", "c_model_deleted");
     public static final Identifier CLIENT_BEHAVIOR_LIST = new Identifier("bbs_together", "c_behavior_list");
     public static final Identifier CLIENT_PERMISSIONS = new Identifier("bbs_together", "c_permissions");
     /** S2C: pushes the receiving player's own BBS edit level (0 read-only / 1-2 reserved). */
@@ -159,6 +174,15 @@ public class TogetherServerNetwork {
     private static final long FILM_SAVE_DELAY_MS = 2000L;
     /** A1: (absolute path -> mtime/size/sha1) cache so manifest walks only hash changed files. */
     private static final ConcurrentHashMap<String, HashCacheEntry> assetHashCache = new ConcurrentHashMap();
+
+    /**
+     * Tombstones for approved model deletions: model id -> expiry (epoch ms). Auto-sync
+     * clients diff by sha1, so without this a model deleted from the server would be
+     * re-uploaded by the next client that still holds it locally. Expires after
+     * {@link #MODEL_TOMBSTONE_TTL_MS} so the id can be legitimately reused later.
+     */
+    private static final ConcurrentHashMap<String, Long> recentlyDeletedModels = new ConcurrentHashMap();
+    private static final long MODEL_TOMBSTONE_TTL_MS = 30L * 60L * 1000L;
 
     /** Auto sync: coalesced "assets changed" pings; a burst of uploads sends one ping. */
     private static final ScheduledExecutorService ASSET_CHANGE_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -240,6 +264,7 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_RECORDING_FINISHED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRecordingFinished(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MASTER_DONE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleMasterRecordingDone(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_DATA_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDataSync(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_UNDO_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleUndoSync(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_SAVE_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmSaveSync(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_LIST_CHANGED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmListChanged(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_DELETED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDeleted(server, player, buf));
@@ -248,6 +273,8 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BEHAVIOR_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorQuery(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SET_OPERATOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSetOperator(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REMOVE_PLAYER_LOGS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRemovePlayerLogs(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MODEL_DELETE_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteRequest(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MODEL_DELETE_DECISION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteDecision(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
         BBSTogetherFix28Server.registerReceivers();
@@ -706,6 +733,13 @@ public class TogetherServerNetwork {
             }
             File assetsFolder = BBSMod.getAssetsFolder();
             if (assetsFolder == null) {
+                return;
+            }
+            /* Tombstone: drop uploads of a model that was recently deleted from the server,
+             * otherwise auto-sync clients would re-upload it wholesale by sha1 diff. */
+            String uploadModelId = ModelPathUtils.extractModelId(relativePath);
+            if (uploadModelId != null && TogetherServerNetwork.isModelTombstoned(uploadModelId)) {
+                System.out.println("[BBSTogether] Ignored upload of recently deleted model " + uploadModelId + " from " + uploader.getGameProfile().getName());
                 return;
             }
             Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
@@ -1495,6 +1529,139 @@ public class TogetherServerNetwork {
         });
     }
 
+    /* ---- Model delete requests (model list context menu -> behavior list approval) ---- */
+
+    private static boolean isModelTombstoned(String modelId) {
+        Long expiry = recentlyDeletedModels.get(modelId);
+        if (expiry == null) {
+            return false;
+        }
+        if (expiry.longValue() < System.currentTimeMillis()) {
+            recentlyDeletedModels.remove(modelId);
+            return false;
+        }
+        return true;
+    }
+
+    private static void tombstoneModel(String modelId) {
+        long now = System.currentTimeMillis();
+        recentlyDeletedModels.put(modelId, now + MODEL_TOMBSTONE_TTL_MS);
+        recentlyDeletedModels.values().removeIf(expiry -> expiry.longValue() < now);
+    }
+
+    /** Whether the folder still holds at least one file (a model is its folder). */
+    private static boolean modelFolderHasFiles(File dir) {
+        if (dir == null || !dir.isDirectory()) {
+            return false;
+        }
+        try (java.util.stream.Stream<Path> walk = Files.walk(dir.toPath())) {
+            return walk.anyMatch(Files::isRegularFile);
+        }
+        catch (Exception e) {
+            return dir.listFiles() != null && dir.listFiles().length > 0;
+        }
+    }
+
+    private static void handleModelDeleteRequest(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final String modelId = buf.readString();
+        server.execute(() -> {
+            try {
+                if (modelId.isEmpty() || modelId.contains("..") || modelId.startsWith("/") || modelId.endsWith("/")) {
+                    return;
+                }
+                File assetsFolder = BBSMod.getAssetsFolder();
+                File modelDir = new File(assetsFolder, "models/" + modelId.replace('/', File.separatorChar));
+                if (!modelFolderHasFiles(modelDir)) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " requested deletion of model " + modelId + " which does not exist on the server");
+                    return;
+                }
+                if (BehaviorLogManager.hasPendingRequest(modelId)) {
+                    return;
+                }
+                BehaviorLogManager.recordUnique(player, BehaviorType.OTHER.id, BehaviorType.SUB_REQUEST_MODEL_DELETE, modelId, Collections.singletonList(modelId), Map.of("status", "pending"));
+                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " requested server deletion of model " + modelId);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private static void handleModelDeleteDecision(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        final long entryId = buf.readLong();
+        final boolean approve = buf.readBoolean();
+        server.execute(() -> {
+            try {
+                boolean isManager = BehaviorLogManager.isOperator(server, player) || BbsOpManager.get(player.getUuid()) >= BbsOpManager.LEVEL_ADMIN;
+                if (!isManager) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to decide a model delete request without being a manager");
+                    return;
+                }
+                BehaviorEntry entry = BehaviorLogManager.find(entryId);
+                if (entry == null || entry.type != BehaviorType.OTHER.id || entry.subType != BehaviorType.SUB_REQUEST_MODEL_DELETE
+                    || !"pending".equals(entry.extra.get("status"))) {
+                    return;
+                }
+                entry.extra.put("status", approve ? "approved" : "denied");
+                entry.extra.put("by", player.getGameProfile().getName());
+                entry.extra.put("byId", player.getUuid().toString());
+                entry.extra.put("decidedAt", String.valueOf(System.currentTimeMillis()));
+                BehaviorLogManager.bump();
+                if (approve) {
+                    TogetherServerNetwork.deleteServerModel(server, entry.target);
+                }
+                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (approve ? " approved" : " denied") + " the deletion of model " + entry.target);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** Delete the model folder from the server assets, tombstone the id, and tell every
+     * client to drop its local copy (the assets-changed ping re-diffs the manifest). */
+    private static void deleteServerModel(MinecraftServer server, String modelId) {
+        if (modelId == null || modelId.isEmpty() || modelId.contains("..")) {
+            return;
+        }
+        File modelDir = new File(BBSMod.getAssetsFolder(), "models/" + modelId.replace('/', File.separatorChar));
+        boolean removed = TogetherServerNetwork.deleteModelFolder(modelDir);
+        if (!removed) {
+            System.out.println("[BBSTogether] Model " + modelId + " was already gone from the server assets");
+        }
+        tombstoneModel(modelId);
+        for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+            PacketByteBuf out = PacketByteBufs.create();
+            out.writeString(modelId);
+            ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_MODEL_DELETED, (PacketByteBuf)out);
+            ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_ASSETS_CHANGED, PacketByteBufs.create());
+        }
+    }
+
+    private static boolean deleteModelFolder(File dir) {
+        if (dir == null || !dir.exists()) {
+            return false;
+        }
+        try {
+            Files.walkFileTree(dir.toPath(), new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+                    Files.deleteIfExists(d);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+            return !dir.exists();
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
     /** Tell a player whether they are an OP and/or a BBS manager, so the panel knows which columns to show. */
     public static void sendPermissions(MinecraftServer server, ServerPlayerEntity player) {
         boolean isOp = BehaviorLogManager.isOperator(server, player);
@@ -1670,6 +1837,172 @@ public class TogetherServerNetwork {
                 }
             });
         });
+    }
+
+    /** One subtree touched by a client's undo/redo. */
+    private static class UndoChange {
+        final ArrayList<String> path;
+        final byte[] data;
+        final byte[] expected;
+        final boolean checkable;
+
+        UndoChange(ArrayList<String> path, byte[] data, byte[] expected, boolean checkable) {
+            this.path = path;
+            this.data = data;
+            this.expected = expected;
+            this.checkable = checkable;
+        }
+    }
+
+    /**
+     * Undo/redo broadcast with a server-side optimistic lock.
+     *
+     * <p>Only "replays" channel paths (size == 4) are checked: those are live-applied on
+     * every ordinary sync, so the server's copy is authoritative there. Everything else
+     * (camera clips, deeper keyframe paths, structure) is relayed unchecked, exactly like
+     * an ordinary data sync.</p>
+     */
+    private static void handleUndoSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
+            return;
+        }
+        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            if (bytes == null) {
+                return;
+            }
+            String filmId = packetByteBuf.readString();
+            int count = packetByteBuf.readInt();
+            ArrayList<UndoChange> changes = new ArrayList<UndoChange>();
+            for (int i = 0; i < count && i < 64; ++i) {
+                int pathSize = packetByteBuf.readInt();
+                ArrayList<String> path = new ArrayList<String>();
+                for (int j = 0; j < pathSize; ++j) {
+                    path.add(packetByteBuf.readString());
+                }
+                int dataLen = packetByteBuf.readInt();
+                byte[] data = new byte[dataLen];
+                packetByteBuf.readBytes(data);
+                int expectedLen = packetByteBuf.readInt();
+                byte[] expected = new byte[expectedLen];
+                packetByteBuf.readBytes(expected);
+                boolean checkable = packetByteBuf.readBoolean();
+                changes.add(new UndoChange(path, data, expected, checkable));
+            }
+            server.execute(() -> TogetherServerNetwork.applyUndoSync(server, player, filmId, changes));
+        });
+    }
+
+    private static void applyUndoSync(MinecraftServer server, ServerPlayerEntity player, String filmId, ArrayList<UndoChange> changes) {
+        playerEditingFilm.put(player.getUuid(), filmId);
+        Film film = null;
+        for (UndoChange c : changes) {
+            if (c.checkable) {
+                film = (Film)BBSMod.getFilms().load(filmId);
+                break;
+            }
+        }
+        if (film != null) {
+            for (UndoChange c : changes) {
+                if (!c.checkable) {
+                    continue;
+                }
+                BaseValue current = TogetherServerNetwork.resolveServerValue(film, c.path);
+                if (current == null) {
+                    /* Nothing to compare against (e.g. the channel does not exist on the
+                     * server yet) — let it through; a resync heals any fallout. */
+                    continue;
+                }
+                byte[] actual = DataStorageUtils.writeToBytes(current.toData());
+                if (!java.util.Arrays.equals(actual, c.expected)) {
+                    TogetherServerNetwork.rejectUndo(server, player, film, changes);
+                    return;
+                }
+            }
+        }
+        /* Accepted: same treatment as an ordinary sync — relay to co-editors, live-apply
+         * tracked paths, debounce the save. */
+        boolean dirty = false;
+        final Film filmCopy = film;
+        for (UndoChange c : changes) {
+            for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
+                ServerPlayerEntity other;
+                if (!entry.getValue().equals(filmId) || entry.getKey().equals(player.getUuid()) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null) continue;
+                PacketByteBuf outBuf = PacketByteBufs.create();
+                outBuf.writeString(filmId);
+                outBuf.writeInt(c.path.size());
+                for (String s : c.path) {
+                    outBuf.writeString(s);
+                }
+                outBuf.writeInt(c.data.length);
+                outBuf.writeBytes(c.data);
+                ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_FILM_DATA_SYNC, (PacketByteBuf)outBuf);
+            }
+            if (c.checkable && filmCopy != null) {
+                lastSavedFilmSnapshots.computeIfAbsent(filmId, k -> (MapType)filmCopy.toData());
+                TogetherServerNetwork.applyPathToFilm(filmCopy, c.path, DataStorageUtils.readFromBytes(c.data));
+                dirty = true;
+            }
+        }
+        if (dirty) {
+            TogetherServerNetwork.scheduleFilmSave(server, filmId);
+        }
+    }
+
+    /** Refuse a stale rollback: push the server's current data for every touched path back
+     * to the undoer (their local copy follows), and tell them why. */
+    private static void rejectUndo(MinecraftServer server, ServerPlayerEntity player, Film film, ArrayList<UndoChange> changes) {
+        ArrayList<byte[]> current = new ArrayList<byte[]>();
+        int count = 0;
+        for (UndoChange c : changes) {
+            if (!c.checkable) {
+                current.add(null);
+                continue;
+            }
+            BaseValue value = TogetherServerNetwork.resolveServerValue(film, c.path);
+            byte[] data = value == null ? null : DataStorageUtils.writeToBytes(value.toData());
+            current.add(data);
+            if (data != null) {
+                ++count;
+            }
+        }
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeString(film.getId());
+        out.writeInt(count);
+        for (int i = 0; i < changes.size(); ++i) {
+            byte[] data = current.get(i);
+            if (data == null) {
+                continue;
+            }
+            UndoChange c = changes.get(i);
+            out.writeInt(c.path.size());
+            for (String s : c.path) {
+                out.writeString(s);
+            }
+            out.writeInt(data.length);
+            out.writeBytes(data);
+        }
+        ServerPlayNetworking.send(player, (Identifier)CLIENT_UNDO_REJECTED, (PacketByteBuf)out);
+        player.sendMessage(Text.literal("§e[BBS Together]§f 撤销未生效：该区域刚被其他玩家修改，已为你恢复最新内容"), false);
+    }
+
+    /** Navigate the server's film copy along a client-side value path. */
+    private static BaseValue resolveServerValue(Film film, List<String> path) {
+        try {
+            BaseValue current = film;
+            for (String segment : path) {
+                if (!(current instanceof mchorse.bbs_mod.settings.values.base.BaseValueGroup)) {
+                    return null;
+                }
+                current = ((mchorse.bbs_mod.settings.values.base.BaseValueGroup)current).get(segment);
+                if (current == null) {
+                    return null;
+                }
+            }
+            return current;
+        }
+        catch (Exception e) {
+            return null;
+        }
     }
 
     private static class FormLockData {

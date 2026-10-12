@@ -35,4 +35,6 @@ public enum BehaviorType
     public static final int SUB_DOWNLOAD_MODELS = 3;
     public static final int SUB_UPLOAD_MODELS = 4;
     public static final int SUB_OTHER = 5;
+    /** A player asked the server (via the model list's context menu) to delete a model. */
+    public static final int SUB_REQUEST_MODEL_DELETE = 6;
 }

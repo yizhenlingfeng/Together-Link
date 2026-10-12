@@ -37,6 +37,7 @@ import mchorse.bbs_together.ITogetherDopeSheet;
 import mchorse.bbs_together.ITogetherReplaysEditor;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.network.TogetherEditSyncQueue;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
@@ -340,7 +341,7 @@ public class UIFilmPanelMixin {
             return;
         }
         int idx = self.getUndoHandler().getUndoManager().getCurrentUndoIndex() + 1;
-        this.syncUndoAtIndex(self, idx);
+        this.syncUndoAtIndex(self, idx, false);
     }
 
     @Inject(method={"redo"}, at={@At(value="TAIL")}, remap=false)
@@ -353,7 +354,7 @@ public class UIFilmPanelMixin {
             return;
         }
         int idx = self.getUndoHandler().getUndoManager().getCurrentUndoIndex();
-        this.syncUndoAtIndex(self, idx);
+        this.syncUndoAtIndex(self, idx, true);
     }
 
     /* ---- cursor / playhead sync helpers (legacy paths, gated by Fix14) ---------------- */
@@ -573,31 +574,58 @@ public class UIFilmPanelMixin {
         }
     }
 
+    /**
+     * Broadcast an undo/redo to the server with the entry's baseline attached (s_undo_sync),
+     * so the server can refuse a rollback that would wipe a peer's newer edit on the same
+     * subtree. For server-authoritative paths ("replays" channels) whose edit sync is still
+     * queued locally, that post-edit state is flushed first — the undo packet must not
+     * overtake the edit it is reverting.
+     */
     @Unique
-    private void syncUndoAtIndex(UIFilmPanel self, int idx) {
+    private void syncUndoAtIndex(UIFilmPanel self, int idx, boolean redo) {
         List undos = self.getUndoHandler().getUndoManager().getUndos();
         if (idx < 0 || idx >= undos.size()) {
             return;
         }
         IUndo entry = (IUndo)undos.get(idx);
-        String filmId = ((Film)self.getData()).getId();
+        Film film = (Film)self.getData();
         ArrayList<ValueChangeUndo> changes = new ArrayList<ValueChangeUndo>();
         if (entry instanceof CompoundUndo) {
             for (Object childObj : ((CompoundUndo)entry).getUndos()) {
                 IUndo child = (IUndo)childObj;
                 if (!(child instanceof ValueChangeUndo)) continue;
-                ValueChangeUndo vcu = (ValueChangeUndo)child;
-                changes.add(vcu);
+                changes.add((ValueChangeUndo)child);
             }
         } else if (entry instanceof ValueChangeUndo) {
-            ValueChangeUndo vcu = (ValueChangeUndo)entry;
-            changes.add(vcu);
+            changes.add((ValueChangeUndo)entry);
         }
+        String filmId = film.getId();
+        ArrayList<TogetherClientNetwork.UndoChangePayload> payloads = new ArrayList<TogetherClientNetwork.UndoChangePayload>();
+        ArrayList<BaseValue> claimed = new ArrayList<BaseValue>();
         for (ValueChangeUndo change : changes) {
-            BaseValue value = ((Film)self.getData()).findRecursively(change.name);
+            BaseValue value = film.findRecursively(change.name);
             if (value == null) continue;
-            TogetherClientNetwork.sendSyncData(filmId, value);
+            List<String> path = new ArrayList<String>(change.name.strings);
+            /* Server-authoritative = live-applied channel syncs; anything else is relayed
+             * unchecked, exactly like an ordinary data sync. */
+            boolean checkable = path.size() == 4 && "replays".equals(path.get(0));
+            if (checkable && TogetherEditSyncQueue.contains(value)) {
+                /* The edit that produced this entry never reached the network: send its
+                 * recorded post-edit state (the value's current data is already rolled
+                 * back here, so the entry's snapshot is the only truthful source). */
+                TogetherClientNetwork.sendSyncDataPayload(filmId, path, redo ? change.oldValue : change.newValue);
+            }
+            claimed.add(value);
+            BaseType expected = redo ? change.oldValue : change.newValue;
+            payloads.add(new TogetherClientNetwork.UndoChangePayload(path, value.toData(), expected, checkable));
         }
+        if (payloads.isEmpty()) {
+            return;
+        }
+        /* The undo packet now owns these subtrees: dropping them from the queue stops the
+         * next flush from re-sending their rolled-back data as if it were a fresh edit. */
+        TogetherEditSyncQueue.removeAll(claimed);
+        TogetherClientNetwork.sendUndoSync(filmId, payloads);
     }
 
     /* ---- FS2 keyframe collaboration helpers ------------------------------------------- */

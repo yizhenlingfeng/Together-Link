@@ -5,8 +5,10 @@ import mchorse.bbs_mod.forms.forms.ModelForm;
 import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.cells.CellState;
+import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.ui.ModelDeleteActions;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -20,6 +22,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * grey gradient fading up from the bottom of its cell and a "（仅本地）" suffix in its tooltip.
  * (The read-only block on the category's right-click menu lives in
  * {@link UIElementContextMenuBbsOpMixin} — the subclasses each register their own menus.)
+ *
+ * <p>Also appends the two delete actions (request server deletion / local deletion) to every
+ * form category's right-click menu: {@code UIFormCategory.buildContextMenu} is the one shared
+ * menu builder all categories funnel through, and the model category doesn't override it —
+ * so a single TAIL injection covers them all.</p>
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = UIFormCategory.class, remap = false)
@@ -57,5 +64,13 @@ public class UIFormCategoryBbsOpMixin
         {
             cir.setReturnValue(cir.getReturnValue() + "（仅本地）");
         }
+    }
+
+    @Inject(method = "buildContextMenu", at = @At("TAIL"), remap = false)
+    private void together$addModelDeleteActions(ContextMenuManager menu, CallbackInfo ci)
+    {
+        UIFormCategory self = (UIFormCategory) (Object) this;
+
+        ModelDeleteActions.addActions(menu, self, self.getContextForm());
     }
 }
