@@ -91,6 +91,7 @@
     "bbs_together.behaviors.context.remove_logs_cancel": "取消",
     "bbs_together.behaviors.details.clips": "剪辑（%s）",
     "bbs_together.behaviors.details.size": "大小",
+    "bbs_together.behaviors.details.timeline": "编辑时间线（%s）",
     "bbs_together.bbsop.query": "%s 的 BBS 权限等级：%d（0 = 仅浏览）",
     "bbs_together.bbsop.set": "已将 %s 的 BBS 权限等级设为 %d",
     "bbs_together.bbsop.view_only": "仅浏览",

@@ -33,6 +33,7 @@ import java.util.Map;
 public class UIBehaviorInfo extends UIElement
 {
     private static final SimpleDateFormat FULL_TIME = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    private static final SimpleDateFormat LINE_TIME = new SimpleDateFormat("MM-dd HH:mm:ss");
 
     private BehaviorEntry entry;
     private boolean showIdentity;
@@ -115,6 +116,13 @@ public class UIBehaviorInfo extends UIElement
             y = this.line(context, x, y, width, extra.getKey(), extra.getValue(), bottom);
         }
 
+        /* The per-repeat timeline of a merged entry: one row per timestamp,
+         * each with the items that came with that repeat. */
+        if (entry.occurrences.size() > 1)
+        {
+            y = this.renderTimeline(context, entry, x, y, width, bottom);
+        }
+
         if (!entry.items.isEmpty())
         {
             String header = L10n.lang(entry.subType == BehaviorType.SUB_EDIT_FILM
@@ -168,6 +176,68 @@ public class UIBehaviorInfo extends UIElement
         context.batcher.textShadow(crop(context, value, valueWidth), x + labelWidth, y, Colors.WHITE);
 
         return y + 12;
+    }
+
+    /**
+     * One row per repeat of a merged entry, oldest first: the timestamp in
+     * gray, then that repeat's items as clickable links (film clips or models,
+     * same as the pooled items above).
+     */
+    private int renderTimeline(UIContext context, BehaviorEntry entry, int x, int y, int width, int bottom)
+    {
+        String header = L10n.lang("bbs_together.behaviors.details.timeline").format(String.valueOf(entry.occurrences.size())).get();
+
+        if (y + 12 > bottom)
+        {
+            return y;
+        }
+
+        context.batcher.textShadow(header, x, y, Colors.LIGHTER_GRAY);
+
+        y += 12;
+
+        boolean filmEntry = entry.subType == BehaviorType.SUB_EDIT_FILM;
+
+        for (BehaviorEntry.Occurrence occurrence : entry.occurrences)
+        {
+            if (y + 10 > bottom)
+            {
+                context.batcher.textShadow("…", x, bottom - 10, Colors.GRAY);
+
+                break;
+            }
+
+            String time = LINE_TIME.format(new Date(occurrence.time));
+
+            context.batcher.textShadow(time, x, y, Colors.GRAY);
+
+            int lx = x + context.batcher.getFont().getWidth(time) + 6;
+
+            for (String item : occurrence.items)
+            {
+                int itemWidth = x + width - lx;
+
+                if (itemWidth < 20)
+                {
+                    break;
+                }
+
+                if (filmEntry)
+                {
+                    this.linkLine(context, lx, y, itemWidth, item, entry.target, item, null);
+                }
+                else
+                {
+                    this.linkLine(context, lx, y, itemWidth, item, null, null, item);
+                }
+
+                lx += context.batcher.getFont().getWidth(crop(context, item, itemWidth)) + 6;
+            }
+
+            y += 10;
+        }
+
+        return y + 2;
     }
 
     /** A clickable model link, lit by the theme's primary color (bright when hovered). */

@@ -33,6 +33,9 @@ public class BehaviorEntry
     public List<String> items = new ArrayList<>();
     /** Extra key/values: model block position, clip count, ... */
     public Map<String, String> extra = new LinkedHashMap<>();
+    /** Every repeat of this behavior with its own timestamp and items — the
+     * entry itself carries the latest time and the pooled items. */
+    public final List<Occurrence> occurrences = new ArrayList<>();
 
     public BehaviorEntry()
     {}
@@ -51,6 +54,26 @@ public class BehaviorEntry
     public BehaviorType getType()
     {
         return BehaviorType.byId(this.type);
+    }
+
+    /** One timestamped repeat of a merged behavior. */
+    public static class Occurrence
+    {
+        public long time;
+        public List<String> items = new ArrayList<>();
+
+        public Occurrence()
+        {}
+
+        public Occurrence(long time, List<String> items)
+        {
+            this.time = time;
+
+            if (items != null)
+            {
+                this.items.addAll(items);
+            }
+        }
     }
 
     /* Serialization */
@@ -73,6 +96,29 @@ public class BehaviorEntry
         }
 
         map.put("items", items);
+
+        if (!this.occurrences.isEmpty())
+        {
+            ListType times = new ListType();
+
+            for (Occurrence occurrence : this.occurrences)
+            {
+                MapType data = new MapType();
+                ListType occurrenceItems = new ListType();
+
+                data.putLong("t", occurrence.time);
+
+                for (String item : occurrence.items)
+                {
+                    occurrenceItems.addString(item);
+                }
+
+                data.put("items", occurrenceItems);
+                times.add(data);
+            }
+
+            map.put("times", times);
+        }
 
         if (!this.extra.isEmpty())
         {
@@ -112,6 +158,28 @@ public class BehaviorEntry
             for (int i = 0; i < items.size(); i++)
             {
                 entry.items.add(items.getString(i));
+            }
+        }
+
+        ListType times = map.getList("times");
+
+        if (times != null)
+        {
+            for (int i = 0; i < times.size(); i++)
+            {
+                MapType data = times.getMap(i);
+                ListType occurrenceItems = data.getList("items");
+                Occurrence occurrence = new Occurrence(data.getLong("t"), null);
+
+                if (occurrenceItems != null)
+                {
+                    for (int j = 0; j < occurrenceItems.size(); j++)
+                    {
+                        occurrence.items.add(occurrenceItems.getString(j));
+                    }
+                }
+
+                entry.occurrences.add(occurrence);
             }
         }
 

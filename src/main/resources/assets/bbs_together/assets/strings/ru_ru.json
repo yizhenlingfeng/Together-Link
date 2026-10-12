@@ -41,6 +41,7 @@
     "bbs_together.behaviors.context.remove_logs_cancel": "Cancel",
     "bbs_together.behaviors.details.clips": "Clips (%s)",
     "bbs_together.behaviors.details.size": "Size",
+    "bbs_together.behaviors.details.timeline": "Edit timeline (%s)",
     "bbs_together.bbsop.query": "%s's BBS permission level: %d (0 = view only)",
     "bbs_together.bbsop.set": "Set %s's BBS permission level to %d",
     "bbs_together.bbsop.view_only": "View only",

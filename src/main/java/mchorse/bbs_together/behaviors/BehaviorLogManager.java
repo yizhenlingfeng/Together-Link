@@ -39,8 +39,8 @@ public class BehaviorLogManager
 {
     /** How many detail items a single entry keeps at most. */
     private static final int MAX_ITEMS = 64;
-    /** Entries of the same player/type/target within this window merge into one. */
-    private static final long MERGE_WINDOW_MS = 10_000L;
+    /** How many per-repeat timestamps a merged entry keeps at most (oldest dropped). */
+    private static final int MAX_OCCURRENCES = 128;
     /** Extra key carrying the transferred size in bytes. */
     public static final String BYTES_KEY = "bytes";
     private static final int SAVE_PERIOD_SECONDS = 30;
@@ -125,9 +125,11 @@ public class BehaviorLogManager
     }
 
     /**
-     * Log one behavior. Entries of the same player, type and target that land
-     * within the merge window collapse into one, with their items pooled —
-     * so uploading a ten-file model doesn't spam ten log entries.
+     * Log one behavior. A record that repeats the last entry (same player,
+     * type and target) merges into it instead of creating a new one: items
+     * pool together and every repeat lands in the entry's timeline with its
+     * own timestamp — so an hour-long editing session on one film stays a
+     * single row that expands into per-save times in the details pane.
      */
     public static void record(ServerPlayerEntity player, int type, int subType, String target, List<String> items, Map<String, String> extra)
     {
@@ -162,10 +164,10 @@ public class BehaviorLogManager
                 && id.equals(last.playerId)
                 && last.type == type
                 && last.subType == subType
-                && last.target.equals(target == null ? "" : target)
-                && time - last.time < MERGE_WINDOW_MS)
+                && last.target.equals(target == null ? "" : target))
             {
                 appendItems(last, items);
+                appendOccurrence(last, time, items);
                 last.time = time;
                 mergeBytes(last, extra);
             }
@@ -174,6 +176,7 @@ public class BehaviorLogManager
                 BehaviorEntry entry = new BehaviorEntry(nextId++, time, id, name, type, subType, target);
 
                 appendItems(entry, items);
+                entry.occurrences.add(new BehaviorEntry.Occurrence(time, items));
 
                 if (extra != null)
                 {
@@ -187,6 +190,18 @@ public class BehaviorLogManager
             version++;
             dirty = true;
         }
+    }
+
+    /** Merged entries remember every repeat; the oldest timestamp drops once the cap hits. */
+    private static void appendOccurrence(BehaviorEntry entry, long time, List<String> items)
+    {
+        if (entry.occurrences.size() >= MAX_OCCURRENCES)
+        {
+            entry.occurrences.remove(0);
+            entry.extra.put("truncated", "1");
+        }
+
+        entry.occurrences.add(new BehaviorEntry.Occurrence(time, items));
     }
 
     /** Pooled entries accumulate the transferred bytes of every merged record. */

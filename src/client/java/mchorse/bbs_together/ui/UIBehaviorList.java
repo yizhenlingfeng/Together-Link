@@ -62,6 +62,12 @@ public class UIBehaviorList extends UIList<BehaviorEntry>
         }
     }
 
+    /** How many times this behavior repeated (1 for a one-shot entry). */
+    public static int occurrenceCount(BehaviorEntry entry)
+    {
+        return Math.max(1, entry.occurrences.size());
+    }
+
     /** The description for the current language, also what the search matches against. */
     public static String describe(BehaviorEntry entry)
     {
@@ -116,6 +122,13 @@ public class UIBehaviorList extends UIList<BehaviorEntry>
             text += " " + element.playerName;
         }
 
+        int occurrences = occurrenceCount(element);
+
+        if (occurrences > 1)
+        {
+            text += " ×" + occurrences;
+        }
+
         return text;
     }
 
@@ -148,6 +161,13 @@ public class UIBehaviorList extends UIList<BehaviorEntry>
         }
 
         String description = describe(element);
+        int occurrences = occurrenceCount(element);
+
+        if (occurrences > 1)
+        {
+            description += " ×" + occurrences;
+        }
+
         int timeWidth = context.batcher.getFont().getWidth(TIME.format(new Date(element.time))) + 8;
         int maxWidth = this.area.ex() - timeWidth - cx - 6;
 
