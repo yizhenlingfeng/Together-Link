@@ -21,6 +21,12 @@ public class TogetherSettings {
     public static ValueBoolean assetSyncProgressBar;
     public static ValueBoolean assetSyncProgressBarAlways;
     public static ValueInt assetMaxSizeMb;
+    public static ValueBoolean assetAutoSync;
+    public static ValueInt assetAutoSyncCooldownSec;
+    public static ValueInt assetSendIntervalMs;
+    public static ValueInt assetSendBatchKb;
+    public static ValueInt assetUploadIntervalMs;
+    public static ValueInt assetUploadBatchKb;
     public static ValueKeyframeShape defaultKeyframeShape;
     public static ValueBoolean defaultKeyframeInterpolationEnabled;
     public static ValueKeyframeInterpolation defaultKeyframeInterpolation;
@@ -39,6 +45,15 @@ public class TogetherSettings {
         assetSyncProgressBarAlways = settingsBuilder.getBoolean("progress_bar_always", false);
         settingsBuilder.category("server");
         assetMaxSizeMb = settingsBuilder.getInt("asset_max_size_mb", 1024, 16, 2048);
+        /* Auto sync: react to server/local asset changes without manual resync/upload. */
+        assetAutoSync = settingsBuilder.getBoolean("auto_sync", false);
+        assetAutoSyncCooldownSec = settingsBuilder.getInt("auto_sync_cooldown_sec", 20, 5, 300);
+        /* Server->client asset pacing: pause between 512 KB slice batches (40 ms ~= 12.8 MB/s). */
+        assetSendIntervalMs = settingsBuilder.getInt("asset_send_interval_ms", 40, 0, 10000);
+        assetSendBatchKb = settingsBuilder.getInt("asset_send_batch_kb", 512, 30, 8192);
+        /* Client->server upload pacing: pause between files and between slice batches. */
+        assetUploadIntervalMs = settingsBuilder.getInt("asset_upload_interval_ms", 200, 0, 10000);
+        assetUploadBatchKb = settingsBuilder.getInt("asset_upload_batch_kb", 512, 30, 8192);
         settingsBuilder.category("keyframes");
         defaultKeyframeShape = new ValueKeyframeShape("default_shape", KeyframeShape.SQUARE);
         settingsBuilder.register((BaseValue)defaultKeyframeShape);

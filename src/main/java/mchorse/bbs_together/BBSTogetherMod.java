@@ -18,9 +18,9 @@ implements ModInitializer {
         CommandRegistrationCallback.EVENT.register(TogetherCommands::register);
         ServerPlayConnectionEvents.JOIN.register((handler, packetSender, server) -> {
             server.execute(() -> {
-                if (!"local".equals(handler.player.getIp())) {
-                    TogetherServerNetwork.sendAssetManifest(server, handler.player);
-                }
+                /* B4: the asset manifest is client-pulled now — the client sends its cached
+                 * manifest fingerprint right after joining, and identical manifests cost a
+                 * round trip instead of a full re-send. */
                 TogetherServerNetwork.sendInitialFilmSync(server, handler.player);
                 BehaviorLogManager.onPlayerJoin(handler.player);
                 TogetherServerNetwork.sendPermissions(server, handler.player);
@@ -35,6 +35,7 @@ implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             BehaviorLogManager.onServerStopping();
             BbsOpManager.onServerStopping();
+            TogetherServerNetwork.flushPendingFilmSaves(server);
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             BehaviorLogManager.onServerStopped();

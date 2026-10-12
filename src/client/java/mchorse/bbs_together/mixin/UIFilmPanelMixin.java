@@ -109,6 +109,7 @@ public class UIFilmPanelMixin {
             return;
         }
         this.sendCursorIfMoved(self, context);
+        TogetherClientNetwork.flushPendingCursor();
         this.sendPlayheadIfChanged(self);
         this.renderRemoteCursors(self, context);
         this.renderRemotePlayheadLines(self, context);

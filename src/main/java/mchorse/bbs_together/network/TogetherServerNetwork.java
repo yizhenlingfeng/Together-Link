@@ -17,15 +17,22 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
@@ -40,6 +47,7 @@ import mchorse.bbs_mod.network.ServerPacketCrusher;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
+import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.BBSTogetherFix18;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
@@ -56,6 +64,12 @@ import net.minecraft.server.MinecraftServer;
 
 public class TogetherServerNetwork {
     private static final String NS = "bbs_together";
+    /** C2S: client reports whether it wants to receive pushed assets (assetSyncReceive). */
+    public static final Identifier SERVER_SYNC_PREF = new Identifier("bbs_together", "s_sync_pref");
+    /** C2S (crusher): client reports its local asset inventory {path: sha1} for push filtering. */
+    public static final Identifier SERVER_ASSET_REPORT = new Identifier("bbs_together", "s_asset_report");
+    /** C2S (crusher): client reports its local film inventory {filmId: sha1} for on-demand film sync. */
+    public static final Identifier SERVER_FILM_INVENTORY = new Identifier("bbs_together", "s_film_inventory");
     public static final Identifier CLIENT_PLAYER_COLORS = new Identifier("bbs_together", "c_player_colors");
     public static final Identifier CLIENT_CURSOR_POSITIONS = new Identifier("bbs_together", "c_cursor_positions");
     public static final Identifier CLIENT_FILM_SELECTIONS = new Identifier("bbs_together", "c_film_selections");
@@ -80,6 +94,8 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_FILM_SAVED_SYNC = new Identifier("bbs_together", "c_film_saved_sync");
     public static final Identifier CLIENT_FILM_DATA_SYNC = new Identifier("bbs_together", "c_film_data_sync");
     public static final Identifier CLIENT_FILM_LIST_CHANGED = new Identifier("bbs_together", "c_film_list_changed");
+    /** S2C: ping that server assets changed; auto-sync clients re-diff the manifest (B4 makes that cheap). */
+    public static final Identifier CLIENT_ASSETS_CHANGED = new Identifier("bbs_together", "c_assets_changed");
     public static final Identifier SERVER_FILM_LIST_CHANGED = new Identifier("bbs_together", "s_film_list_changed");
     public static final Identifier CLIENT_FILM_DELETED = new Identifier("bbs_together", "c_film_deleted");
     public static final Identifier SERVER_FILM_DELETED = new Identifier("bbs_together", "s_film_deleted");
@@ -128,10 +144,77 @@ public class TogetherServerNetwork {
     private static final ConcurrentHashMap<Integer, MapType> pendingReplayData = new ConcurrentHashMap();
     private static volatile String pendingFilmId = null;
     private static volatile UUID masterPlayerUUID = null;
-    private static final long ASSET_SEND_INTERVAL_MS = 50L;
     private static final ConcurrentHashMap<UUID, LinkedBlockingQueue<AssetSendTask>> assetSendQueues = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Boolean> recordingPlayers = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, AtomicBoolean> assetDrainActive = new ConcurrentHashMap();
+    /** B1: whether each client wants pushed assets at all (assetSyncReceive); default true when unreported. */
+    private static final ConcurrentHashMap<UUID, Boolean> playerReceivePush = new ConcurrentHashMap();
+    /** B2: per-player inventory {relativePath: sha1} reported after asset sync; used to skip redundant pushes. */
+    private static final ConcurrentHashMap<UUID, Map<String, String>> playerOwnedAssets = new ConcurrentHashMap();
+    /** A4: films with live edits awaiting a debounced save; edited continuously -> saved once quiet. */
+    private static final ConcurrentHashMap<String, AtomicBoolean> filmSaveDirty = new ConcurrentHashMap();
+    private static final ScheduledExecutorService FILM_SAVE_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "BBSTogether-FilmSaver");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final long FILM_SAVE_DELAY_MS = 2000L;
+    /** A1: (absolute path -> mtime/size/sha1) cache so manifest walks only hash changed files. */
+    private static final ConcurrentHashMap<String, HashCacheEntry> assetHashCache = new ConcurrentHashMap();
+
+    /** Auto sync: coalesced "assets changed" pings; a burst of uploads sends one ping. */
+    private static final ScheduledExecutorService ASSET_CHANGE_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "BBSTogether-AssetChangePing");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final AtomicBoolean assetChangePingPending = new AtomicBoolean(false);
+
+    private static final class HashCacheEntry {
+        final long mtime;
+        final long size;
+        final String sha1;
+
+        HashCacheEntry(long mtime, long size, String sha1) {
+            this.mtime = mtime;
+            this.size = size;
+            this.sha1 = sha1;
+        }
+    }
+
+    /** SHA-1 of a file, cached while mtime+size are unchanged (manifest walks + upload compares). */
+    private static String sha1OfPathCached(Path path, File file) throws IOException {
+        long mtime = Files.getLastModifiedTime(path).toMillis();
+        long size = file.length();
+        HashCacheEntry e = assetHashCache.get(path.toString());
+        if (e != null && e.mtime == mtime && e.size == size) {
+            return e.sha1;
+        }
+        String sha1 = sha1OfPath(path);
+        assetHashCache.put(path.toString(), new HashCacheEntry(mtime, size, sha1));
+        return sha1;
+    }
+
+    private static void cacheAssetHash(Path path, long mtime, long size, String sha1) {
+        if (sha1 == null || sha1.isEmpty()) return;
+        assetHashCache.put(path.toString(), new HashCacheEntry(mtime, size, sha1));
+    }
+
+    private static long sendIntervalMs() {
+        try {
+            return ((Number) TogetherSettings.assetSendIntervalMs.get()).longValue();
+        } catch (Exception e) {
+            return 40L;
+        }
+    }
+
+    private static long sendBatchBytes() {
+        try {
+            return Math.max(30_720L, ((Number) TogetherSettings.assetSendBatchKb.get()).longValue() * 1024L);
+        } catch (Exception e) {
+            return 512L * 1024L;
+        }
+    }
 
     private static ServerPacketCrusher crusherFor(ServerPlayerEntity player) {
         return playerCrushers.computeIfAbsent(player.getUuid(), k -> new ServerPacketCrusher());
@@ -147,8 +230,14 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetRequest(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_UPLOAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetUpload(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_RESYNC, (server, player, handler, buf, resp) -> {
-            TogetherServerNetwork.sendAssetManifest(server, player);
+            /* B4: the client rides its last manifest fingerprint along; a match lets the server
+             * answer "unchanged" instead of re-sending the whole manifest. 0 = unknown. */
+            long clientVersion = buf.readableBytes() >= 8 ? buf.readLong() : 0L;
+            TogetherServerNetwork.sendAssetManifest(server, player, clientVersion);
         });
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SYNC_PREF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSyncPref(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReport(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_INVENTORY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmInventory(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_SCREEN, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmScreen(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_RECORDING_FINISHED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRecordingFinished(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MASTER_DONE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleMasterRecordingDone(server, player, buf));
@@ -186,6 +275,10 @@ public class TogetherServerNetwork {
         pendingReplayData.clear();
         pendingFilmId = null;
         masterPlayerUUID = null;
+        playerReceivePush.clear();
+        playerOwnedAssets.clear();
+        filmSaveDirty.clear();
+        assetChangePingPending.set(false);
         for (LinkedBlockingQueue linkedBlockingQueue : assetSendQueues.values()) {
             linkedBlockingQueue.clear();
         }
@@ -207,15 +300,20 @@ public class TogetherServerNetwork {
             recordingPlayers.remove(uuid);
             playerEditingFilm.remove(uuid);
             playerColors.remove(uuid);
-            playerCursors.remove(uuid);
+            CursorData goneCursor = playerCursors.remove(uuid);
             playerCrushers.remove(uuid);
             playerInFilmScreen.remove(uuid);
+            playerReceivePush.remove(uuid);
+            playerOwnedAssets.remove(uuid);
             LinkedBlockingQueue<AssetSendTask> pendingAssets = assetSendQueues.remove(uuid);
             if (pendingAssets != null) {
                 pendingAssets.clear();
             }
             assetDrainActive.remove(uuid);
             if (!server.isStopping() && !server.isStopped()) {
+                if (goneCursor != null) {
+                    TogetherServerNetwork.broadcastCursorRemoval(server, goneCursor.filmId, uuid);
+                }
                 TogetherServerNetwork.broadcastReplaySelections(server, "");
                 if (formLock != null) {
                     TogetherServerNetwork.broadcastReplayFormLocks(server, formLock.filmId);
@@ -252,43 +350,65 @@ public class TogetherServerNetwork {
         float tick = buf.readFloat();
         float row = buf.readFloat();
         int selCount = buf.readInt();
-        ArrayList<Integer> selected = new ArrayList<Integer>(selCount);
+        ArrayList<Integer> selected = new ArrayList<Integer>(Math.min(selCount, 512));
         for (int i = 0; i < selCount; ++i) {
             selected.add(buf.readInt());
         }
         int playheadTick = buf.readInt();
+        boolean leaving = editorType < 0;
         server.execute(() -> {
             playerEditingFilm.put(player.getUuid(), filmId);
-            playerCursors.put(player.getUuid(), new CursorData(filmId, editorType, tick, row, selected, playheadTick));
+            if (leaving) {
+                playerCursors.remove(player.getUuid());
+            } else {
+                playerCursors.put(player.getUuid(), new CursorData(filmId, editorType, tick, row, selected, playheadTick));
+            }
+            /* A3: broadcast only this player's cursor as a single-entry delta instead of
+             * rebuilding and resending the whole snapshot to everyone (O(N) instead of O(N^2)). */
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                List<Map.Entry<UUID, CursorData>> entries;
-                CursorData fallback;
                 if (p.getUuid().equals(player.getUuid())) continue;
                 String otherFilm = playerEditingFilm.get(p.getUuid());
-                if (otherFilm == null && (fallback = playerCursors.get(p.getUuid())) != null) {
-                    otherFilm = fallback.filmId;
+                if (otherFilm == null) {
+                    CursorData fallback = playerCursors.get(p.getUuid());
+                    if (fallback != null) {
+                        otherFilm = fallback.filmId;
+                    }
                 }
                 if (otherFilm == null || !otherFilm.equals(filmId)) continue;
-                ConcurrentHashMap<UUID, CursorData> concurrentHashMap = playerCursors;
-                synchronized (concurrentHashMap) {
-                    entries = playerCursors.entrySet().stream().filter(e -> ((CursorData)e.getValue()).filmId.equals(filmId) && !((UUID)e.getKey()).equals(p.getUuid())).collect(Collectors.toList());
-                }
                 PacketByteBuf outBuf = PacketByteBufs.create();
-                outBuf.writeInt(entries.size());
-                for (Map.Entry e2 : entries) {
-                    outBuf.writeUuid((UUID)e2.getKey());
-                    outBuf.writeInt(((CursorData)e2.getValue()).editorType);
-                    outBuf.writeFloat(((CursorData)e2.getValue()).tick);
-                    outBuf.writeFloat(((CursorData)e2.getValue()).row);
-                    outBuf.writeInt(((CursorData)e2.getValue()).selectedIndices.size());
-                    for (int idx : ((CursorData)e2.getValue()).selectedIndices) {
-                        outBuf.writeInt(idx);
-                    }
-                    outBuf.writeInt(((CursorData)e2.getValue()).playheadTick);
+                outBuf.writeBoolean(false);
+                outBuf.writeInt(1);
+                outBuf.writeUuid(player.getUuid());
+                outBuf.writeInt(editorType);
+                outBuf.writeFloat(tick);
+                outBuf.writeFloat(row);
+                outBuf.writeInt(selected.size());
+                for (int idx : selected) {
+                    outBuf.writeInt(idx);
                 }
+                outBuf.writeInt(playheadTick);
                 ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
             }
         });
+    }
+
+    /** Tell everyone editing {@code filmId} that a player's cursor is gone (disconnect / wipe). */
+    private static void broadcastCursorRemoval(MinecraftServer server, String filmId, UUID gone) {
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p.getUuid().equals(gone)) continue;
+            String otherFilm = playerEditingFilm.get(p.getUuid());
+            if (otherFilm == null || !otherFilm.equals(filmId)) continue;
+            PacketByteBuf outBuf = PacketByteBufs.create();
+            outBuf.writeBoolean(false);
+            outBuf.writeInt(1);
+            outBuf.writeUuid(gone);
+            outBuf.writeInt(-1);
+            outBuf.writeFloat(0.0f);
+            outBuf.writeFloat(0.0f);
+            outBuf.writeInt(0);
+            outBuf.writeInt(0);
+            ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
+        }
     }
 
     private static void handleFilmSelection(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -410,6 +530,14 @@ public class TogetherServerNetwork {
     }
 
     public static void sendAssetManifest(MinecraftServer server, ServerPlayerEntity player) {
+        TogetherServerNetwork.sendAssetManifest(server, player, 0L);
+    }
+
+    /**
+     * Sends the asset manifest. A matching {@code clientVersion} fingerprint (B4) answers
+     * with an "unchanged" stub; the SHA-1 walk is cached per (mtime, size) (A1).
+     */
+    public static void sendAssetManifest(MinecraftServer server, ServerPlayerEntity player, long clientVersion) {
         File assetsFolder = BBSMod.getAssetsFolder();
         if (assetsFolder == null || !assetsFolder.exists()) {
             return;
@@ -418,6 +546,7 @@ public class TogetherServerNetwork {
         Thread thread = new Thread(() -> {
             try {
                 final MapType manifest = new MapType();
+                StringBuilder fingerprint = new StringBuilder();
                 Files.walkFileTree(assetsPath, (FileVisitor<? super Path>)new SimpleFileVisitor<Path>(){
 
                     @Override
@@ -428,11 +557,22 @@ public class TogetherServerNetwork {
                         String relativePath = assetsPath.relativize(file).toString().replace(File.separator, "/");
                         /* Manifest entries carry "<sha1>:<sizeBytes>" so clients can skip over-size
                          * assets before requesting them. */
-                        manifest.putString(relativePath, TogetherServerNetwork.sha1OfPath(file) + ":" + file.toFile().length());
+                        String sha1 = TogetherServerNetwork.sha1OfPathCached(file, file.toFile());
+                        String entry = sha1 + ":" + file.toFile().length();
+                        manifest.putString(relativePath, entry);
+                        fingerprint.append(relativePath).append('=').append(entry).append('\n');
                         return FileVisitResult.CONTINUE;
                     }
                 });
-                server.execute(() -> TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_ASSET_MANIFEST, (BaseType)manifest, null));
+                long version = TogetherServerNetwork.fingerprintVersion(fingerprint.toString());
+                boolean unchanged = clientVersion != 0L && clientVersion == version;
+                server.execute(() -> {
+                    MapType payload = unchanged ? new MapType() : manifest;
+                    TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_ASSET_MANIFEST, (BaseType)payload, outBuf -> {
+                        outBuf.writeBoolean(unchanged);
+                        outBuf.writeLong(version);
+                    });
+                });
             }
             catch (Exception e) {
                 e.printStackTrace();
@@ -442,18 +582,25 @@ public class TogetherServerNetwork {
         thread.start();
     }
 
+    /** Stable 64-bit fingerprint of manifest content, used as its version for delta syncs. */
+    private static long fingerprintVersion(String content) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-1");
+            byte[] hash = digest.digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            long v = 0L;
+            for (int i = 0; i < 8; ++i) {
+                v = v << 8 | (long)(hash[i] & 0xFF);
+            }
+            return v;
+        }
+        catch (NoSuchAlgorithmException e) {
+            return content.hashCode();
+        }
+    }
+
+    /** B3: films are pulled on demand via the client's film inventory, not pushed on join. */
     public static void sendInitialFilmSync(MinecraftServer server, ServerPlayerEntity player) {
         try {
-            Collection<String> keys = BBSMod.getFilms().getKeys();
-            for (String filmId : keys) {
-                Film film = (Film)BBSMod.getFilms().load(filmId);
-                if (film == null) continue;
-                MapType filmData = (MapType)film.toData();
-                TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_FILM_SAVED_SYNC, (BaseType)filmData, outBuf -> {
-                    outBuf.writeString(filmId);
-                    outBuf.writeString("[Server]");
-                });
-            }
             TogetherServerNetwork.broadcastFilmSelections(server);
             TogetherServerNetwork.broadcastReplaySelections(server, "");
             TogetherServerNetwork.broadcastFilmScreens(server);
@@ -475,14 +622,13 @@ public class TogetherServerNetwork {
             for (String relativePath : paths) {
                 File file;
                 if (relativePath.contains("..") || relativePath.startsWith("/") || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile()) continue;
-                if (file.length() > TogetherServerNetwork.maxAssetBytes()) continue;
+                if (file.length() > TogetherServerNetwork.maxAssetBytes() || file.length() == 0) continue;
+                String sha1 = "";
                 try {
-                    byte[] fileBytes = Files.readAllBytes(file.toPath());
-                    TogetherServerNetwork.enqueueAssetSend(server, player, new AssetSendTask(relativePath, fileBytes, false));
+                    sha1 = TogetherServerNetwork.sha1OfPathCached(file.toPath(), file);
                 }
-                catch (Exception e) {
-                    e.printStackTrace();
-                }
+                catch (Exception ignored) {}
+                TogetherServerNetwork.enqueueAssetSend(server, player, new AssetSendTask(relativePath, file, file.length(), sha1, false));
             }
         }, "BBSTogether-AssetSend");
         thread.setDaemon(true);
@@ -496,85 +642,317 @@ public class TogetherServerNetwork {
         }
         TogetherServerNetwork.crusherFor(uploader).receive(buf, (bytes, packetByteBuf) -> {
             String relativePath = packetByteBuf.readString();
+            /* A5: uploads arrive in slice batches; each batch is a complete crusher transfer
+             * whose metadata says which slice of the file it is. */
+            int seq = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 0;
+            int seqTotal = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 1;
+            long totalSize = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : (bytes == null ? 0L : (long)bytes.length);
+            String sha1 = packetByteBuf.readableBytes() > 0 ? packetByteBuf.readString() : "";
             if (relativePath.contains("..") || relativePath.startsWith("/")) {
                 return;
             }
-            if (bytes.length > TogetherServerNetwork.maxAssetBytes()) {
+            if (bytes == null || totalSize > TogetherServerNetwork.maxAssetBytes()) {
                 return;
             }
-            /* Persist the uploaded asset into the server's own assets folder. Without this the file
-             * is only relayed to other players and never lands on the server, so it also never shows
-             * up in later manifests. */
             File assetsFolder = BBSMod.getAssetsFolder();
-            boolean changed = true;
-            if (assetsFolder != null) {
-                try {
-                    Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
-                    if (target.getParent() != null) {
-                        Files.createDirectories(target.getParent());
+            if (assetsFolder == null) {
+                return;
+            }
+            Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
+            if (target.getParent() == null) {
+                return;
+            }
+            try {
+                Files.createDirectories(target.getParent());
+                if (seqTotal > 1) {
+                    /* Multi-slice upload: accumulate into a sibling temp file, verify the
+                     * combined hash, then promote atomically. */
+                    Path tmp = target.resolveSibling(target.getFileName().toString() + ".bbsup");
+                    if (seq == 0) {
+                        Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                    } else {
+                        Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                     }
-                    /* Content comparison: re-uploading identical bytes (a save that changed
-                     * nothing) isn't logged */
-                    byte[] existing = Files.exists(target) ? Files.readAllBytes(target) : null;
-                    changed = existing == null || !java.util.Arrays.equals(existing, bytes);
-                    Files.write(target, bytes);
-                } catch (Exception e) {
-                    e.printStackTrace();
+                    if (seq < seqTotal - 1) {
+                        return;
+                    }
+                    if (!sha1.isEmpty() && !TogetherServerNetwork.sha1OfPath(tmp).equalsIgnoreCase(sha1)) {
+                        Files.deleteIfExists(tmp);
+                        System.out.println("[BBS Assets] Upload rejected (sha1 mismatch): " + relativePath);
+                        return;
+                    }
+                    Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                    TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1, true);
+                } else {
+                    /* A6: compare by cached/streamed SHA-1 instead of reading the whole
+                     * existing file into the heap. Unchanged re-uploads are not stored,
+                     * logged or pushed. */
+                    String existingSha1 = Files.exists(target) ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : null;
+                    boolean changed = existingSha1 == null || (sha1.isEmpty()
+                        ? !java.util.Arrays.equals(Files.readAllBytes(target), bytes)
+                        : !existingSha1.equalsIgnoreCase(sha1));
+                    if (changed) {
+                        Files.write(target, bytes);
+                        TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1.isEmpty() ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : sha1, true);
+                    } else {
+                        TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1, false);
+                    }
                 }
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-            if (changed) {
-                recordUploadBehavior(uploader, relativePath, (long)bytes.length);
-            }
-            server.execute(() -> {
-                for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
-                    if (other == uploader) continue;
-                    TogetherServerNetwork.enqueueAssetSend(server, other, new AssetSendTask(relativePath, bytes, true));
-                }
-            });
         });
+    }
+
+    /** Post-upload bookkeeping: cache the hash, log the behavior, then push to everyone who
+     * wants pushes (B1) and does not already own the identical file (B2). */
+    private static void finalizeUpload(MinecraftServer server, ServerPlayerEntity uploader, String relativePath, Path target, long size, String sha1, boolean changed) {
+        try {
+            TogetherServerNetwork.cacheAssetHash(target, Files.getLastModifiedTime(target).toMillis(), target.toFile().length(), sha1);
+        }
+        catch (Exception ignored) {}
+        if (changed) {
+            recordUploadBehavior(uploader, relativePath, size);
+        }
+        if (!changed) {
+            return;
+        }
+        scheduleAssetsChangedPing(server, uploader);
+        server.execute(() -> {
+            for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+                if (other.getUuid().equals(uploader.getUuid())) continue;
+                Boolean pref = playerReceivePush.get(other.getUuid());
+                if (pref != null && !pref.booleanValue()) continue;
+                Map<String, String> owned = playerOwnedAssets.get(other.getUuid());
+                if (!sha1.isEmpty() && owned != null && sha1.equalsIgnoreCase(owned.get(relativePath))) continue;
+                TogetherServerNetwork.enqueueAssetSend(server, other, new AssetSendTask(relativePath, target.toFile(), size, sha1, true));
+            }
+        });
+    }
+
+    /** Auto sync: ~2s after an accepted upload changes server assets, ping everyone but the
+     * uploader so their auto-sync re-diffs the manifest. Coalesced via the pending flag. */
+    private static void scheduleAssetsChangedPing(MinecraftServer server, ServerPlayerEntity uploader) {
+        if (!assetChangePingPending.compareAndSet(false, true)) {
+            return;
+        }
+        final UUID uploaderId = uploader.getUuid();
+        ASSET_CHANGE_SCHEDULER.schedule(() -> {
+            assetChangePingPending.set(false);
+            try {
+                server.execute(() -> {
+                    for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                        if (p.getUuid().equals(uploaderId)) continue;
+                        ServerPlayNetworking.send(p, CLIENT_ASSETS_CHANGED, PacketByteBufs.create());
+                    }
+                });
+            }
+            catch (Exception ignored) {}
+        }, 2000L, TimeUnit.MILLISECONDS);
     }
 
     private static void enqueueAssetSend(MinecraftServer server, ServerPlayerEntity player, AssetSendTask task) {
         UUID uuid = player.getUuid();
-        LinkedBlockingQueue queue = assetSendQueues.computeIfAbsent(uuid, k -> new LinkedBlockingQueue());
+        LinkedBlockingQueue<AssetSendTask> queue = assetSendQueues.computeIfAbsent(uuid, k -> new LinkedBlockingQueue());
         queue.add(task);
         AtomicBoolean draining = assetDrainActive.computeIfAbsent(uuid, k -> new AtomicBoolean(false));
         if (draining.compareAndSet(false, true)) {
             Thread drainThread = new Thread(() -> {
                 try {
-                    LinkedBlockingQueue<AssetSendTask> q = assetSendQueues.get(uuid);
-                    while (q != null && !q.isEmpty()) {
-                        AssetSendTask t = q.poll();
+                    while (true) {
+                        LinkedBlockingQueue<AssetSendTask> q = assetSendQueues.get(uuid);
+                        AssetSendTask t = q == null ? null : (AssetSendTask)q.poll();
                         if (t == null) {
-                            break;
-                        }
-                        AssetSendTask ft = t;
-                        server.execute(() -> {
-                            if (!server.getPlayerManager().getPlayerList().contains(player)) {
-                                return;
+                            /* Hand the drain role back before giving up, so a task racing in
+                             * right now can't be stranded in a queue nobody drains. */
+                            assetDrainActive.remove(uuid);
+                            q = assetSendQueues.get(uuid);
+                            if (q == null || q.isEmpty()) {
+                                break;
                             }
-                            TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_ASSET_FILE, ft.bytes, outBuf -> {
-                                outBuf.writeString(ft.relativePath);
-                                outBuf.writeBoolean(ft.isPush);
-                            });
-                        });
-                        try {
-                            Thread.sleep(50L);
+                            if (!assetDrainActive.computeIfAbsent(uuid, k -> new AtomicBoolean(false)).compareAndSet(false, true)) {
+                                break;
+                            }
+                            continue;
                         }
-                        catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
+                        TogetherServerNetwork.sendTaskInBatches(server, player, t);
                     }
                 }
                 finally {
                     assetDrainActive.remove(uuid);
-                    assetSendQueues.remove(uuid);
                 }
             }, "BBSTogether-AssetDrain-" + String.valueOf(uuid));
             drainThread.setDaemon(true);
             drainThread.start();
         }
+    }
+
+    /** A5: stream one asset as slice batches, pacing between batches (see sendIntervalMs). */
+    private static void sendTaskInBatches(MinecraftServer server, ServerPlayerEntity player, AssetSendTask task) {
+        long interval = Math.max(0L, TogetherServerNetwork.sendIntervalMs());
+        final long batchBytes = Math.max(30_720L, TogetherServerNetwork.sendBatchBytes());
+        final long size = task.size;
+        if (size <= 0) {
+            return;
+        }
+        final int totalSlices = (int)Math.max(1L, (size + batchBytes - 1L) / batchBytes);
+        try {
+            for (int seq = 0; seq < totalSlices; ++seq) {
+                final int fSeq = seq;
+                final int fTotal = totalSlices;
+                server.execute(() -> {
+                    try {
+                        if (!server.getPlayerManager().getPlayerList().contains(player)) {
+                            return;
+                        }
+                        byte[] slice = TogetherServerNetwork.readSlice(task.file, (long)fSeq * batchBytes, (int)Math.min(batchBytes, size - (long)fSeq * batchBytes));
+                        if (slice == null) {
+                            return;
+                        }
+                        TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_ASSET_FILE, slice, outBuf -> {
+                            outBuf.writeString(task.relativePath);
+                            outBuf.writeBoolean(task.isPush);
+                            outBuf.writeInt(fSeq);
+                            outBuf.writeInt(fTotal);
+                            outBuf.writeLong(task.size);
+                            outBuf.writeString(task.sha1 == null ? "" : task.sha1);
+                        });
+                    }
+                    catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                });
+                if (seq < totalSlices - 1 && interval > 0L) {
+                    Thread.sleep(interval);
+                }
+            }
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static byte[] readSlice(File file, long offset, int length) {
+        try (FileChannel ch = FileChannel.open(file.toPath(), StandardOpenOption.READ)){
+            ByteBuffer buffer = ByteBuffer.allocate(length);
+            while (buffer.hasRemaining()) {
+                int read = ch.read(buffer, offset + (long)buffer.position());
+                if (read < 0) break;
+            }
+            if (buffer.hasRemaining()) {
+                return null;
+            }
+            return buffer.array();
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /* ---- A4: debounced film saves ------------------------------------- */
+
+    /** Mark a film dirty and arm a debounced save ~2s out; continuous editing coalesces. */
+    private static void scheduleFilmSave(MinecraftServer server, String filmId) {
+        AtomicBoolean flag = filmSaveDirty.computeIfAbsent(filmId, k -> new AtomicBoolean(false));
+        flag.set(true);
+        FILM_SAVE_SCHEDULER.schedule(() -> {
+            try {
+                server.execute(() -> TogetherServerNetwork.saveIfDirty(filmId));
+            }
+            catch (Exception ignored) {}
+        }, FILM_SAVE_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Runs on the server thread: saves the film if it is still marked dirty. */
+    private static void saveIfDirty(String filmId) {
+        AtomicBoolean flag = filmSaveDirty.get(filmId);
+        if (flag == null || !flag.compareAndSet(true, false)) {
+            return;
+        }
+        try {
+            Film film = (Film)BBSMod.getFilms().load(filmId);
+            if (film != null) {
+                BBSMod.getFilms().save(filmId, (MapType)film.toData());
+            }
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /** Flush every pending debounced save (server shutdown). Must run on the server thread. */
+    public static void flushPendingFilmSaves(MinecraftServer server) {
+        for (String filmId : filmSaveDirty.keySet()) {
+            TogetherServerNetwork.saveIfDirty(filmId);
+        }
+        filmSaveDirty.clear();
+    }
+
+    /* ---- B1/B2/B3: client reports -------------------------------------- */
+
+    private static void handleSyncPref(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        boolean receive = buf.readBoolean();
+        server.execute(() -> playerReceivePush.put(player.getUuid(), receive));
+    }
+
+    /** B2: client posted its local asset inventory {path: sha1}; used to skip redundant pushes. */
+    private static void handleAssetReport(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            if (bytes == null) {
+                return;
+            }
+            try {
+                BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+                if (!data.isMap()) {
+                    return;
+                }
+                MapType report = data.asMap();
+                Map<String, String> owned = new HashMap<String, String>();
+                for (String key : report.keys()) {
+                    owned.put(key, report.getString(key));
+                }
+                server.execute(() -> playerOwnedAssets.put(player.getUuid(), owned));
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** B3: client posted its local film inventory {filmId: sha1}; send only missing/changed films. */
+    private static void handleFilmInventory(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            if (bytes == null) {
+                return;
+            }
+            Thread thread = new Thread(() -> {
+                try {
+                    BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+                    if (!data.isMap()) {
+                        return;
+                    }
+                    MapType inventory = data.asMap();
+                    Collection<String> keys = BBSMod.getFilms().getKeys();
+                    for (String filmId : keys) {
+                        File file = BBSMod.getFilms().getFile(filmId);
+                        if (file == null || !file.isFile()) continue;
+                        String serverSha1 = TogetherServerNetwork.sha1OfPathCached(file.toPath(), file);
+                        String clientSha1 = inventory.has(filmId) ? inventory.getString(filmId) : "";
+                        if (!clientSha1.isEmpty() && clientSha1.equalsIgnoreCase(serverSha1)) continue;
+                        Film film = (Film)BBSMod.getFilms().load(filmId);
+                        if (film == null) continue;
+                        MapType filmData = (MapType)film.toData();
+                        server.execute(() -> TogetherServerNetwork.broadcastFilmSavedToAll(server, player, filmId, filmData));
+                    }
+                }
+                catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }, "BBSTogether-FilmInventory");
+            thread.setDaemon(true);
+            thread.start();
+        });
     }
 
     private static String sha1OfPath(Path path) throws IOException {
@@ -716,9 +1094,7 @@ public class TogetherServerNetwork {
                     merged = (MapType)stored.toData();
                 }
                 BBSMod.getFilms().save(filmId, merged);
-                for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
-                    TogetherServerNetwork.broadcastFilmSavedToAll(server, recipient, filmId, merged);
-                }
+                TogetherServerNetwork.broadcastFilmSaved(server, filmId, merged);
             });
         });
     }
@@ -744,9 +1120,7 @@ public class TogetherServerNetwork {
         pendingReplayData.clear();
         MapType filmData = (MapType)film.toData();
         BBSMod.getFilms().save(filmId, filmData);
-        for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
-            TogetherServerNetwork.broadcastFilmSavedToAll(server, recipient, filmId, filmData);
-        }
+        TogetherServerNetwork.broadcastFilmSaved(server, filmId, filmData);
     }
 
     public static void broadcastFilmSavedToAll(MinecraftServer server, ServerPlayerEntity recipient, String filmId, MapType filmData) {
@@ -754,6 +1128,24 @@ public class TogetherServerNetwork {
             outBuf.writeString(filmId);
             outBuf.writeString("[Server]");
         });
+    }
+
+    /** B3: full data only to players looking at the film; others get a list-changed ping. */
+    public static void broadcastFilmSaved(MinecraftServer server, String filmId, MapType filmData) {
+        ArrayList<ServerPlayerEntity> others = new ArrayList<ServerPlayerEntity>();
+        for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
+            String editing = playerEditingFilm.get(recipient.getUuid());
+            String screen = playerInFilmScreen.get(recipient.getUuid());
+            boolean interested = filmId.equals(editing) || filmId.equals(screen);
+            if (interested) {
+                TogetherServerNetwork.broadcastFilmSavedToAll(server, recipient, filmId, filmData);
+            } else {
+                others.add(recipient);
+            }
+        }
+        for (ServerPlayerEntity recipient : others) {
+            ServerPlayNetworking.send(recipient, (Identifier)CLIENT_FILM_LIST_CHANGED, PacketByteBufs.create());
+        }
     }
 
     private static void handleFilmSaveSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -800,14 +1192,16 @@ public class TogetherServerNetwork {
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
                 lastSavedFilmSnapshots.put(filmId, merged);
+                AtomicBoolean pending = filmSaveDirty.get(filmId);
+                if (pending != null) {
+                    pending.set(false);
+                }
                 /* Content comparison: a save whose merge changed nothing on an existing
                  * film isn't logged; new films always are */
                 if (before == null || !BaseType.equals(before, merged)) {
                     BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, changedClips, Map.of("replays", String.valueOf(mergedFilmReplays(merged))));
                 }
-                for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
-                    TogetherServerNetwork.broadcastFilmSavedToAll(server, recipient, filmId, merged);
-                }
+                TogetherServerNetwork.broadcastFilmSaved(server, filmId, merged);
                 TogetherServerNetwork.broadcastFilmSelections(server);
                 TogetherServerNetwork.broadcastReplaySelections(server, filmId);
             });
@@ -1207,7 +1601,9 @@ public class TogetherServerNetwork {
                 if (path.size() >= 4 && "replays".equals(path.get(0)) && (film = (Film)BBSMod.getFilms().load(filmId)) != null) {
                     lastSavedFilmSnapshots.computeIfAbsent(filmId, k -> (MapType)film.toData());
                     TogetherServerNetwork.applyPathToFilm(film, path, DataStorageUtils.readFromBytes((byte[])bytes));
-                    BBSMod.getFilms().save(filmId, (MapType)film.toData());
+                    /* A4: live edits no longer rewrite the whole film on the main thread per
+                     * packet; saves are debounced until edits go quiet. */
+                    TogetherServerNetwork.scheduleFilmSave(server, filmId);
                 }
             });
         });
@@ -1225,12 +1621,16 @@ public class TogetherServerNetwork {
 
     private static class AssetSendTask {
         final String relativePath;
-        final byte[] bytes;
+        final File file;
+        final long size;
+        final String sha1;
         final boolean isPush;
 
-        AssetSendTask(String relativePath, byte[] bytes, boolean isPush) {
+        AssetSendTask(String relativePath, File file, long size, String sha1, boolean isPush) {
             this.relativePath = relativePath;
-            this.bytes = bytes;
+            this.file = file;
+            this.size = size;
+            this.sha1 = sha1;
             this.isPush = isPush;
         }
     }
