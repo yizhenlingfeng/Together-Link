@@ -458,7 +458,6 @@ public class TogetherClientNetwork {
         client.execute(() -> lambda$handleToggleRecordingPacket$24(start, replayIndex));
     }
 
-
     private static void lambda$handleToggleRecordingPacket$24(boolean start, int replayIndex) {
         Films films = BBSModClient.getFilms();
         Recorder recorder = films.getRecorder();
@@ -510,7 +509,6 @@ public class TogetherClientNetwork {
             client.execute(() -> lambda$handleMergeReplaysPacket$25(filmId, batchMap));
         });
     }
-
 
     private static void lambda$handleMergeReplaysPacket$25(String filmId, MapType batchMap) {
         UIDashboard dashboard = getDashboardIfOpen();
@@ -1412,7 +1410,6 @@ public class TogetherClientNetwork {
         });
     }
 
-
     private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName) {
         UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
@@ -1487,7 +1484,6 @@ public class TogetherClientNetwork {
                 BBSMod.getFilms().delete(filmId);
             }
             catch (Exception exception) {
-                // empty catch block
             }
             UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
             UIFilmPanel uIFilmPanel = panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
@@ -1507,7 +1503,6 @@ public class TogetherClientNetwork {
                 BBSMod.getFilms().rename(oldId, newId);
             }
             catch (Exception exception) {
-                // empty catch block
             }
             UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
             UIFilmPanel uIFilmPanel = panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);

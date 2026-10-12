@@ -1523,7 +1523,6 @@ public class TogetherServerNetwork {
                 BBSMod.getFilms().delete(filmId);
             }
             catch (Exception exception) {
-                // empty catch block
             }
             for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
                 PacketByteBuf out = PacketByteBufs.create();
@@ -1544,7 +1543,6 @@ public class TogetherServerNetwork {
                 BBSMod.getFilms().rename(oldId, newId);
             }
             catch (Exception exception) {
-                // empty catch block
             }
             lastSavedFilmSnapshots.remove(oldId);
             for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {

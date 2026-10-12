@@ -1,6 +1,5 @@
 package mchorse.bbs_together.mixin;
 
-import java.lang.invoke.StringConcatFactory;
 import java.util.ArrayList;
 import java.util.List;
 import mchorse.bbs_mod.film.Film;
@@ -35,11 +34,15 @@ implements ITogetherReplaysEditor {
         return this.together_allSheetIds;
     }
 
-    @ModifyVariable(method={"updateChannelsList"}, at=@At(value="INVOKE", target="Ljava/util/List;removeIf(Ljava/util/function/Predicate;)Z", remap=false), ordinal=1, remap=false)
+    /* Capture the sheet list right before the FIRST removeIf (the category filter) —
+     * updateChannelsList has a second removeIf (disabled sheets) whose list is already
+     * narrowed, and capturing there would clobber the canonical ids with a filtered
+     * subset, breaking remote cursor mapping across clients in different categories. */
+    @ModifyVariable(method={"updateChannelsList"}, at=@At(value="INVOKE", target="Ljava/util/List;removeIf(Ljava/util/function/Predicate;)Z", ordinal=0, remap=false), ordinal=1, remap=false)
     private List<UIKeyframeSheet> captureAllSheets(List<UIKeyframeSheet> list) {
         this.together_allSheetIds.clear();
         for (UIKeyframeSheet uIKeyframeSheet : list) {
-            this.together_allSheetIds.add(UIReplaysEditorMixin.together_sheetKey(uIKeyframeSheet));
+            this.together_allSheetIds.add(together_sheetKey(uIKeyframeSheet));
         }
         return list;
     }
@@ -63,7 +66,6 @@ implements ITogetherReplaysEditor {
             string = uIKeyframeSheet.title == null ? "" : uIKeyframeSheet.title.get();
         }
         catch (Exception exception) {
-            // empty catch block
         }
         return uIKeyframeSheet.id + "\u0002" + string + "\u0002" + uIKeyframeSheet.isBoneTrack;
     }
