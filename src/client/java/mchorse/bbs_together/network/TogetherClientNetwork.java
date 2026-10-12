@@ -1475,11 +1475,11 @@ public class TogetherClientNetwork {
             if (!data.isMap()) {
                 return;
             }
-            client.execute(() -> together_applyFilmSavedSync(filmId, data, saverName));
+            client.execute(() -> lambda$handleFilmSavedSyncPacket$42(filmId, data, saverName));
         });
     }
 
-    private static void together_applyFilmSavedSync(String filmId, BaseType data, String saverName) {
+    private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName) {
         UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         boolean visible = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId) && panel.isVisible();

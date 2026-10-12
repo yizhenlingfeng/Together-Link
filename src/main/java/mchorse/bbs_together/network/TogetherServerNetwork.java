@@ -44,6 +44,7 @@ import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.forms.FormUtils;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
+import mchorse.bbs_mod.settings.values.base.BaseValueGroup;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.BBSTogetherFix18;
@@ -1990,10 +1991,10 @@ public class TogetherServerNetwork {
         try {
             BaseValue current = film;
             for (String segment : path) {
-                if (!(current instanceof mchorse.bbs_mod.settings.values.base.BaseValueGroup)) {
+                if (!(current instanceof BaseValueGroup)) {
                     return null;
                 }
-                current = ((mchorse.bbs_mod.settings.values.base.BaseValueGroup)current).get(segment);
+                current = ((BaseValueGroup)current).get(segment);
                 if (current == null) {
                     return null;
                 }

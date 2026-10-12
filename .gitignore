@@ -55,3 +55,6 @@ lib/**/.gradle/
 lib/**/build/
 .workbuddy/
 .crash-report/
+
+# 部署备份（旧版 jar 快照）
+dist/*.bak
