@@ -915,7 +915,9 @@ public class TogetherServerNetwork {
         }, FILM_SAVE_DELAY_MS, TimeUnit.MILLISECONDS);
     }
 
-    /** Runs on the server thread: saves the film if it is still marked dirty. */
+    /** Runs on the server thread: saves the film if it is still marked dirty.
+     * Retries briefly on failure — BBS saves films from the netty thread while
+     * we save from the server thread, and on Windows the loser gets a file lock. */
     private static void saveIfDirty(String filmId) {
         AtomicBoolean flag = filmSaveDirty.get(filmId);
         if (flag == null || !flag.compareAndSet(true, false)) {
@@ -924,7 +926,19 @@ public class TogetherServerNetwork {
         try {
             Film film = (Film)BBSMod.getFilms().load(filmId);
             if (film != null) {
-                BBSMod.getFilms().save(filmId, (MapType)film.toData());
+                MapType data = (MapType)film.toData();
+                for (int attempt = 0; ; attempt++) {
+                    try {
+                        BBSMod.getFilms().save(filmId, data);
+                        return;
+                    }
+                    catch (Exception e) {
+                        if (attempt >= 2) {
+                            throw e;
+                        }
+                        Thread.sleep(100L * (attempt + 1));
+                    }
+                }
             }
         }
         catch (Exception e) {
@@ -1703,6 +1717,9 @@ public class TogetherServerNetwork {
                 }
             }
             PacketByteBuf out = PacketByteBufs.create();
+            /* Full snapshot of this film's remaining cursors: the client replaces its
+             * whole set, which also drops the cursor of whoever just left. */
+            out.writeBoolean(true);
             out.writeInt(entries.size());
             for (Map.Entry<UUID, CursorData> entry : entries) {
                 CursorData cursor = entry.getValue();
