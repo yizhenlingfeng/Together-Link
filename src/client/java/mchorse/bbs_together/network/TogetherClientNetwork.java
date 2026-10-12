@@ -45,13 +45,19 @@ import mchorse.bbs_mod.network.ClientPacketCrusher;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.base.BaseValueGroup;
 import mchorse.bbs_mod.ui.UIKeys;
+import mchorse.bbs_mod.ui.ContentType;
 import mchorse.bbs_mod.ui.dashboard.UIDashboard;
+import mchorse.bbs_mod.ui.film.UIClips;
+import mchorse.bbs_mod.ui.film.UIClipsPanel;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIBaseMenu;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.UIScreen;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeEditor;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.factories.UIKeyframeFactory;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.factories.UIPoseKeyframeFactory;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.IUIKeyframeGraph;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.UIKeyframeDopeSheet;
 import mchorse.bbs_mod.utils.DataPath;
 import mchorse.bbs_mod.utils.clips.Clip;
@@ -60,6 +66,11 @@ import mchorse.bbs_mod.utils.keyframes.Keyframe;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.utils.pose.Pose;
+import mchorse.bbs_together.BBSTogetherFix14;
+import mchorse.bbs_together.BBSTogetherFix22;
+import mchorse.bbs_together.BBSTogetherFix28Client;
+import mchorse.bbs_together.BBSTogetherFix33Client;
+import mchorse.bbs_together.BBSTogetherFix45;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
@@ -453,7 +464,7 @@ public class TogetherClientNetwork {
     private static void lambda$handleToggleRecordingPacket$24(boolean start, int replayIndex) {
         Films films = BBSModClient.getFilms();
         Recorder recorder = films.getRecorder();
-        UIDashboard dashboard = TogetherClientNetwork.getDashboardIfExists();
+        UIDashboard dashboard = getDashboardIfExists();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         String filmId = panel != null && panel.getData() != null ? ((Film)panel.getData()).getId() : lastLocalFilmId;
         if (filmId == null || filmId.isEmpty()) {
@@ -467,31 +478,28 @@ public class TogetherClientNetwork {
             if (recorder == null || recorder.hasNotStarted()) {
                 return;
             }
-            int recordedIdx = recorder.exception;
             if (panel == null || panel.getData() == null) {
                 return;
             }
             Film film = (Film)panel.getData();
             panel.applyRecordedKeyframes(recorder, film);
             if (panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId)) {
-                panel.replayEditor.replaysList.replays.update();
+                together_updateReplayList(panel);
                 panel.getController().createEntities();
             }
-        } else {
-            if (recorder != null) {
-                return;
-            }
-            int idx = replayIndex >= 0 ? replayIndex : lastLocalReplayIdx;
-            Film film = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId) ? (Film)panel.getData() : (Film)BBSMod.getFilms().load(filmId);
-            if (film == null) {
-                return;
-            }
-            if (idx < 0 || idx >= film.replays.getList().size()) {
-                return;
-            }
-            films.startRecording(film, idx, 0);
-            recordingSessionActive = true;
+            return;
         }
+        if (recorder != null) {
+            return;
+        }
+        int idx = replayIndex >= 0 ? replayIndex : lastLocalReplayIdx;
+        Film film = together_getOpenOrStoredFilm(panel, filmId);
+        if (film == null || idx < 0 || idx >= film.replays.getList().size()) {
+            return;
+        }
+        BBSTogetherFix28Client.sendRecordingBaselineSnapshot(filmId, film);
+        films.startRecording(film, idx, 0);
+        recordingSessionActive = true;
     }
     private static void handleMergeReplaysPacket(MinecraftClient client, PacketByteBuf buf) {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
@@ -507,34 +515,40 @@ public class TogetherClientNetwork {
 
 
     private static void lambda$handleMergeReplaysPacket$25(String filmId, MapType batchMap) {
-        UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
+        UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
-        Film film = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId) ? (Film)panel.getData() : (Film)BBSMod.getFilms().load(filmId);
+        Film film = together_getOpenOrStoredFilm(panel, filmId);
         if (film == null) {
             return;
         }
-        List replays = film.replays.getList();
+        List<Replay> replays = film.replays.getList();
         for (String key : batchMap.keys()) {
             try {
                 int idx = Integer.parseInt(key);
                 BaseType rd = batchMap.get(key);
                 if (idx < 0 || idx >= replays.size() || rd == null || !rd.isMap()) continue;
-                ((Replay)replays.get(idx)).fromData((BaseType)rd.asMap());
+                BBSTogetherFix22.beginRemoteSyncApply();
+                try {
+                    ((Replay)replays.get(idx)).fromData(rd.asMap());
+                }
+                finally {
+                    BBSTogetherFix22.endRemoteSyncApply();
+                }
             }
             catch (NumberFormatException numberFormatException) {}
         }
-        TogetherClientNetwork.sendMasterRecordingDone(filmId, film);
+        sendMasterRecordingDone(filmId, film);
         if (panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId)) {
             panel.fillData();
-            panel.replayEditor.replaysList.replays.update();
+            together_updateReplayList(panel);
             panel.getController().createEntities();
             Replay r = panel.replayEditor.getReplay();
-            int idx = r == null ? -1 : ((Film)panel.getData()).replays.getList().indexOf(r);
+            int idx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), r);
             if (idx < 0 && !((Film)panel.getData()).replays.getList().isEmpty()) {
                 panel.replayEditor.setReplay((Replay)((Film)panel.getData()).replays.getList().get(0));
                 idx = 0;
             }
-            TogetherClientNetwork.sendReplaySelection(filmId, idx);
+            sendReplaySelection(filmId, idx);
         }
     }
     private static void handleAssetManifestPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -1050,12 +1064,13 @@ public class TogetherClientNetwork {
     }
 
     public static void sendReplaySelection(String filmId, int replayIndex) {
-        if (!isBBSTogetherOnServer) {
+        if (!isBBSTogetherOnServer || BBSTogetherFix22.isApplyingRemoteSync()) {
             return;
         }
         if (replayIndex >= 0) {
             lastLocalReplayIdx = replayIndex;
         }
+        together_setLocalReplaySelection(filmId, replayIndex);
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeInt(replayIndex);
@@ -1401,100 +1416,70 @@ public class TogetherClientNetwork {
 
 
     private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName) {
-        AssetSyncTracker.active("film:" + filmId, AssetSyncTracker.Dir.DOWNLOAD);
-        AssetSyncTracker.done("film:" + filmId);
-        UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
+        UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
-        boolean filmIsOpen = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId);
-        if (filmIsOpen) {
-            TogetherClientNetwork.applyFilmDataUpdate(panel, data.asMap());
-            UIContext context = panel.getContext();
-            if (context != null) {
-                if (MinecraftClient.getInstance().isIntegratedServerRunning()) {
-                    context.notifySuccess(UIKeys.PANELS_SAVED_NOTIFICATION.format(new Object[]{filmId}));
-                } else {
-                    String syncMsg = L10n.lang((String)"bbs_together.notification.synced").get() + " " + saverName + ": " + filmId;
-                    context.notifyInfo(IKey.raw((String)syncMsg));
-                }
-            }
-        } else {
-            BBSMod.getFilms().save(filmId, data.asMap());
-            /* B3: this film arrived on demand (join pull / save ping); refresh open lists. */
-            UIDashboard pulled = TogetherClientNetwork.getDashboardIfOpen();
-            UIFilmPanel pulledPanel = pulled == null ? null : (UIFilmPanel)pulled.getPanel(UIFilmPanel.class);
-            if (pulledPanel != null) {
-                pulledPanel.requestNames();
-            }
+        boolean visible = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId) && panel.isVisible();
+        if (visible) {
+            applyFilmDataUpdate(panel, data.asMap());
+            together_notifyFilmSyncApplied(panel, filmId);
+            return;
         }
+        UIDashboard created = BBSModClient.getDashboardIfCreated();
+        UIFilmPanel hiddenPanel = created == null ? null : (UIFilmPanel)created.getPanel(UIFilmPanel.class);
+        if (hiddenPanel != null && hiddenPanel.getData() != null && ((Film)hiddenPanel.getData()).getId().equals(filmId)) {
+            together_applyHiddenFilmDataUpdate(hiddenPanel, data.asMap());
+        }
+        together_saveReceivedFilm(filmId, data.asMap());
     }
+
     private static void applyFilmDataUpdate(UIFilmPanel panel, MapType data) {
-        Replay reconfirmed;
-        int idx03;
-        Object object;
-        int savedIdx = -1;
-        Replay cur = panel.replayEditor.getReplay();
-        if (cur != null && panel.getData() != null) {
-            savedIdx = ((Film)panel.getData()).replays.getList().indexOf(cur);
+        together_applyFullFilmDataUpdate(panel, data, true);
+    }
+
+    private static void together_applyFullFilmDataUpdate(UIFilmPanel panel, MapType data, boolean announce) {
+        List<Integer> cameraSel = together_copyClipSelection(panel.cameraEditor);
+        List<Integer> actionSel = together_copyClipSelection(panel.actionEditor);
+        Map<String, List<Integer>> keyframeSel = together_copyKeyframeSelection(panel);
+        Film film = (Film)panel.getData();
+        int currentIdx = together_getCurrentReplayIndex(panel, film);
+        if (together_wouldClearLocalCamera(film, data)) {
+            return;
         }
-        ArrayList savedCameraClipSelection = new ArrayList(panel.cameraEditor.clips != null ? panel.cameraEditor.clips.getSelection() : Collections.emptyList());
-        ArrayList savedActionClipSelection = new ArrayList(panel.actionEditor.clips != null ? panel.actionEditor.clips.getSelection() : Collections.emptyList());
-        HashMap savedSelection = new HashMap();
-        if (panel.replayEditor.keyframeEditor != null && panel.replayEditor.keyframeEditor.view != null && (object = panel.replayEditor.keyframeEditor.view.getGraph()) instanceof UIKeyframeDopeSheet) {
-            UIKeyframeDopeSheet ds = (UIKeyframeDopeSheet)object;
-            for (UIKeyframeSheet sheet : ds.getSheets()) {
-                Collection indices = sheet.selection.getIndices();
-                if (indices.isEmpty()) continue;
-                savedSelection.put(sheet.id, new ArrayList(indices));
+        Film incoming = new Film();
+        incoming.fromData((BaseType)data);
+        if (together_clipCount(film.camera) > 0 && together_clipCount(incoming.camera) == 0) {
+            return;
+        }
+        int remappedIdx = together_remapReplayIndex(film.replays.getList(), incoming.replays.getList(), currentIdx);
+        together_remapClientReplaySelections(film.getId(), film, incoming);
+        BBSTogetherFix22.beginRemoteSyncApply();
+        try {
+            film.fromData(incoming.toData());
+            if (!BBSTogetherFix14.hasCameraKeyframeEditor(panel)) {
+                panel.fillData();
             }
-        }
-        ((Film)panel.getData()).fromData((BaseType)data);
-        panel.fillData();
-        panel.replayEditor.replaysList.replays.update();
-        panel.getController().createEntities();
-        List replays = ((Film)panel.getData()).replays.getList();
-        if (savedIdx >= 0 && savedIdx < replays.size()) {
-            panel.replayEditor.setReplay((Replay)replays.get(savedIdx));
-        } else if (!replays.isEmpty()) {
-            panel.replayEditor.setReplay((Replay)replays.get(0));
-        }
-        if (panel.cameraEditor.clips != null && !savedCameraClipSelection.isEmpty()) {
-            panel.cameraEditor.clips.setSelection(savedCameraClipSelection);
-            if (!savedCameraClipSelection.isEmpty()) {
-                List cameraClips = panel.cameraEditor.clips.getClips() != null ? panel.cameraEditor.clips.getClips().get() : Collections.emptyList();
-                int idx02 = (Integer)savedCameraClipSelection.get(0);
-                if (idx02 >= 0 && idx02 < cameraClips.size()) {
-                    panel.cameraEditor.clips.pickClip((Clip)cameraClips.get(idx02));
-                }
+            if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
+                panel.replayEditor.replaysList.replays.refreshReplayList();
+                panel.replayEditor.replaysList.replays.update();
             }
+            panel.getController().createEntities();
+            List<Replay> replays = ((Film)panel.getData()).replays.getList();
+            together_restoreReplaySelection(panel, replays, remappedIdx);
         }
-        if (panel.actionEditor.clips != null && !savedActionClipSelection.isEmpty()) {
-            panel.actionEditor.clips.setSelection(savedActionClipSelection);
-            if (!savedActionClipSelection.isEmpty()) {
-                List actionClips = panel.actionEditor.clips.getClips() != null ? panel.actionEditor.clips.getClips().get() : Collections.emptyList();
-                idx03 = (Integer)savedActionClipSelection.get(0);
-                if (idx03 >= 0 && idx03 < actionClips.size()) {
-                    panel.actionEditor.clips.pickClip((Clip)actionClips.get(idx03));
-                }
-            }
+        finally {
+            BBSTogetherFix22.endRemoteSyncApply();
         }
-        if (!savedSelection.isEmpty() && panel.replayEditor.keyframeEditor != null && panel.replayEditor.keyframeEditor.view != null && panel.replayEditor.keyframeEditor.view.getGraph() instanceof UIKeyframeDopeSheet) {
-            UIKeyframeDopeSheet ds2 = (UIKeyframeDopeSheet)panel.replayEditor.keyframeEditor.view.getGraph();
-            for (UIKeyframeSheet sheet : ds2.getSheets()) {
-                List indices = (List)savedSelection.get(sheet.id);
-                if (indices == null) continue;
-                Iterator iterator = indices.iterator();
-                while (iterator.hasNext()) {
-                    int i = (Integer)iterator.next();
-                    if (sheet.selection == null) continue;
-                    sheet.selection.add(i);
-                }
-            }
+        together_restoreClipSelection(panel.cameraEditor, cameraSel);
+        together_restoreClipSelection(panel.actionEditor, actionSel);
+        together_restoreKeyframeSelection(panel, keyframeSel);
+        UIKeyframeEditor keyframeEditor = panel.replayEditor.keyframeEditor;
+        if (keyframeEditor != null && keyframeEditor.view != null) {
+            keyframeEditor.view.getGraph().pickSelected();
         }
-        if (panel.replayEditor.keyframeEditor != null && panel.replayEditor.keyframeEditor.view != null) {
-            panel.replayEditor.keyframeEditor.view.getGraph().pickSelected();
-        }
-        int reconfirmedIdx = (reconfirmed = panel.replayEditor.getReplay()) == null ? -1 : ((Film)panel.getData()).replays.getList().indexOf(reconfirmed);
-        TogetherClientNetwork.sendReplaySelection(((Film)panel.getData()).getId(), reconfirmedIdx);
+        int reconfirmedIdx = together_getCurrentReplayIndex(panel, (Film)panel.getData());
+        together_setLocalReplaySelection(((Film)panel.getData()).getId(), reconfirmedIdx);
+        sendReplaySelection(((Film)panel.getData()).getId(), reconfirmedIdx);
+        BBSTogetherFix33Client.reannounceReplaySelectionAfterFullSync(panel);
     }
 
     private static void handleFilmDeletedPacket(MinecraftClient client, String filmId) {
@@ -1803,67 +1788,436 @@ public class TogetherClientNetwork {
     }
 
     private static void lambda$handleFilmDataSyncPacket$47(String filmId, List<String> path, BaseType data) {
-        UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
+        UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         if (panel == null || panel.getData() == null || !((Film)panel.getData()).getId().equals(filmId)) {
             return;
         }
-        if (!TogetherClientNetwork.applyAtPath((BaseValueGroup)panel.getData(), path, 1, data)) {
+        if (together_wouldClearLocalCamera((Film)panel.getData(), path, data)) {
             return;
         }
-        boolean isKeyframeEdit = false;
-        if (path.size() > 1 && "replays".equals(path.get(1))) {
-            if (path.size() >= 5) {
-                isKeyframeEdit = true;
-            } else if (path.size() == 4) {
-                isKeyframeEdit = "keyframes".equals(path.get(3));
-            }
+        Film film = (Film)panel.getData();
+        int currentIdx = together_getCurrentReplayIndex(panel, film);
+        List<Replay> snapshot = new ArrayList<Replay>(film.replays.getList());
+        boolean structureSync = together_isReplayStructurePath(path);
+        int offset = together_applyPathOffset(path);
+        boolean applied;
+        BBSTogetherFix22.beginRemoteSyncApply();
+        try {
+            applied = applyAtPath((BaseValueGroup)panel.getData(), path, offset, data);
+        }
+        finally {
+            BBSTogetherFix22.endRemoteSyncApply();
+        }
+        if (!applied) {
+            return;
+        }
+        if (structureSync) {
+            together_restoreReplayAfterStructureSync(panel, snapshot, currentIdx);
+            return;
+        }
+        if (together_isKeyframeOnlySyncPath(path)) {
+            together_refreshEmbeddedClipKeyframeEditor(panel, path);
+            return;
         }
         panel.fillData();
-        if (!isKeyframeEdit) {
-            panel.replayEditor.replaysList.replays.update();
-            panel.getController().createEntities();
-        }
+        together_updateReplayList(panel);
+        panel.getController().createEntities();
         Replay currentReplay = panel.replayEditor.getReplay();
-        if (path.size() >= 3 && "replays".equals(path.get(1)) && currentReplay != null) {
-            int replayIdx = ((Film)panel.getData()).replays.getList().indexOf(currentReplay);
-            if (replayIdx >= 0 && String.valueOf(replayIdx).equals(path.get(2))) {
-                boolean needsChannelRebuild = path.size() == 3;
-                if (!needsChannelRebuild && path.size() == 4) {
-                    String key4 = (String)path.get(3);
-                    needsChannelRebuild = "form".equals(key4) || "properties".equals(key4);
-                }
-                if (needsChannelRebuild) {
-                    panel.replayEditor.updateChannelsList();
-                }
-            }
+        if (together_isCurrentReplayPath(panel, path, currentReplay) && together_shouldUpdateChannels(path)) {
+            panel.replayEditor.updateChannelsList();
+        }
+        if (together_isReplayPath(path) && currentReplay != null) {
+            panel.replayEditor.setReplay(currentReplay);
         }
         Replay openReplay = panel.replayEditor.getReplay();
-        if (path.size() >= 3 && "replays".equals(path.get(1)) && openReplay != null) {
-            panel.replayEditor.setReplay(openReplay);
+        int newIdx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), openReplay);
+        sendReplaySelection(((Film)panel.getData()).getId(), newIdx);
+    }
+
+    private static void together_setLocalReplaySelection(String filmId, int replayIndex) {
+        UUID playerId = together_localPlayerUuid();
+        if (playerId == null) {
+            return;
         }
-        if (isKeyframeEdit && panel.replayEditor.keyframeEditor != null) {
-            Object kff = panel.replayEditor.keyframeEditor.editor;
-            if (kff instanceof UIPoseKeyframeFactory) {
-                UIPoseKeyframeFactory poseFactory = (UIPoseKeyframeFactory)kff;
-                if (poseFactory.poseEditor != null) {
-                    String currentBone = poseFactory.poseEditor.getGroup();
-                    Keyframe kf = poseFactory.getKeyframe();
-                    if (kf != null) {
-                        poseFactory.poseEditor.setPose((Pose)kf.getValue(), poseFactory.poseEditor.getGroup());
-                    }
-                    if (currentBone != null && !currentBone.isEmpty()) {
-                        poseFactory.poseEditor.selectBone(currentBone);
-                    }
-                }
-            } else if (panel.replayEditor.keyframeEditor.view != null) {
-                panel.replayEditor.keyframeEditor.view.getGraph().pickSelected();
+        if (filmId == null || filmId.isEmpty()) {
+            for (Map<Integer, List<UUID>> selections : replaySelections.values()) {
+                together_removePlayerFromReplaySelections(selections, playerId);
             }
+            return;
         }
-        if (panel.getData() != null) {
-            Replay r = panel.replayEditor.getReplay();
-            int idx = r == null ? -1 : ((Film)panel.getData()).replays.getList().indexOf(r);
-            TogetherClientNetwork.sendReplaySelection(((Film)panel.getData()).getId(), idx);
+        Map<Integer, List<UUID>> selections = replaySelections.computeIfAbsent(filmId, key -> new HashMap<Integer, List<UUID>>());
+        together_removePlayerFromReplaySelections(selections, playerId);
+        if (replayIndex >= 0) {
+            List<UUID> players = selections.computeIfAbsent(replayIndex, idx -> new ArrayList<UUID>());
+            if (!players.contains(playerId)) {
+                players.add(playerId);
+            }
+            filmSelections.put(playerId, filmId);
+        }
+    }
+
+    private static void together_removePlayerFromReplaySelections(Map<Integer, List<UUID>> selections, UUID playerId) {
+        if (selections == null || playerId == null) {
+            return;
+        }
+        for (List<UUID> players : selections.values()) {
+            players.removeIf(playerId::equals);
+        }
+        selections.entrySet().removeIf(entry -> ((List)entry.getValue()).isEmpty());
+    }
+
+    private static UUID together_localPlayerUuid() {
+        return MinecraftClient.getInstance().player == null ? null : MinecraftClient.getInstance().player.getUuid();
+    }
+
+    private static boolean together_isReplayPath(List<String> path) {
+        return together_replayPathIndex(path) >= 0 && path.size() > together_replayPathIndex(path) + 1;
+    }
+
+    private static boolean together_isReplayStructurePath(List<String> path) {
+        int idx = together_replayPathIndex(path);
+        return idx >= 0 && path.size() <= idx + 2;
+    }
+
+    private static int together_applyPathOffset(List<String> path) {
+        return path != null && !path.isEmpty() && "replays".equals(path.get(0)) ? 0 : 1;
+    }
+
+    private static int together_replayPathIndex(List<String> path) {
+        if (path == null) {
+            return -1;
+        }
+        for (int i = 0; i < path.size(); ++i) {
+            if (!"replays".equals(path.get(i))) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    private static void together_restoreReplayAfterStructureSync(UIFilmPanel panel, List<Replay> snapshot, int previousIdx) {
+        if (panel == null || panel.getData() == null || panel.replayEditor == null) {
+            return;
+        }
+        Film film = (Film)panel.getData();
+        List<Replay> replays = film.replays.getList();
+        int remappedIdx = together_remapReplayIndex(snapshot, replays, previousIdx);
+        together_remapClientReplaySelections(film.getId(), snapshot, replays);
+        if (remappedIdx < 0 && !replays.isEmpty()) {
+            remappedIdx = Math.min(Math.max(previousIdx, 0), replays.size() - 1);
+        }
+        panel.fillData();
+        if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
+            panel.replayEditor.replaysList.replays.refreshReplayList();
+            panel.replayEditor.replaysList.replays.update();
+        }
+        panel.getController().createEntities();
+        if (replays.isEmpty()) {
+            panel.replayEditor.setReplay(null);
+            together_setLocalReplaySelection(film.getId(), -1);
+            sendReplaySelection(film.getId(), -1);
+            return;
+        }
+        Replay replay = (Replay)replays.get(remappedIdx);
+        panel.replayEditor.setReplay(replay);
+        if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
+            panel.replayEditor.replaysList.replays.scrollToReplay(replay);
+        }
+        together_setLocalReplaySelection(film.getId(), remappedIdx);
+        sendReplaySelection(film.getId(), remappedIdx);
+        BBSTogetherFix33Client.reannounceReplaySelectionAfterFullSync(panel);
+    }
+
+    private static Film together_getOpenOrStoredFilm(UIFilmPanel panel, String filmId) {
+        if (panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId)) {
+            return (Film)panel.getData();
+        }
+        return (Film)BBSMod.getFilms().load(filmId);
+    }
+
+    private static void together_saveReceivedFilm(String filmId, MapType data) {
+        BBSMod.getFilms().save(filmId, data);
+        try {
+            ContentType.FILMS.getRepository().save(filmId, data);
+        }
+        catch (Exception exception) {
+            exception.printStackTrace();
+        }
+    }
+
+    private static void together_applyHiddenFilmDataUpdate(UIFilmPanel panel, MapType data) {
+        Film film = (Film)panel.getData();
+        int currentIdx = together_getCurrentReplayIndex(panel, film);
+        Film incoming = new Film();
+        incoming.fromData((BaseType)data);
+        int remappedIdx = together_remapReplayIndex(film.replays.getList(), incoming.replays.getList(), currentIdx);
+        BBSTogetherFix22.beginRemoteSyncApply();
+        try {
+            film.fromData(incoming.toData());
+            if (panel.replayEditor != null && remappedIdx >= 0 && remappedIdx < film.replays.getList().size()) {
+                panel.replayEditor.setReplay((Replay)film.replays.getList().get(remappedIdx));
+            }
+            panel.getController().createEntities();
+        }
+        finally {
+            BBSTogetherFix22.endRemoteSyncApply();
+        }
+    }
+
+    private static void together_notifyFilmSyncApplied(UIFilmPanel panel, String filmId) {
+        UIContext context = panel.getContext();
+        if (context == null) {
+            return;
+        }
+        context.notifySuccess(UIKeys.PANELS_SAVED_NOTIFICATION.format(new Object[]{filmId}));
+    }
+
+    private static boolean together_isKeyframeOnlySyncPath(List<String> path) {
+        if (path.size() <= 1) {
+            return false;
+        }
+        String section = path.get(1);
+        if ("replays".equals(section)) {
+            if (path.size() >= 5) {
+                return true;
+            }
+            return path.size() == 4 && "keyframes".equals(path.get(3));
+        }
+        if ("camera".equals(section) || "action".equals(section) || "actions".equals(section)) {
+            return together_isClipKeyframeOnlyPath(path);
+        }
+        return false;
+    }
+
+    private static boolean together_isCurrentReplayPath(UIFilmPanel panel, List<String> path, Replay replay) {
+        if (!together_isReplayPath(path) || replay == null) {
+            return false;
+        }
+        int idx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), replay);
+        int pathIdx = together_replayPathIndex(path);
+        return idx >= 0 && pathIdx >= 0 && path.size() > pathIdx + 1 && String.valueOf(idx).equals(path.get(pathIdx + 1));
+    }
+
+    private static boolean together_shouldUpdateChannels(List<String> path) {
+        if (path.size() == 3) {
+            return true;
+        }
+        if (path.size() != 4) {
+            return false;
+        }
+        String segment = path.get(3);
+        return "form".equals(segment) || "properties".equals(segment);
+    }
+
+    private static void together_updateReplayList(UIFilmPanel panel) {
+        if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
+            panel.replayEditor.replaysList.replays.update();
+        }
+    }
+
+    private static int together_getCurrentReplayIndex(UIFilmPanel panel, Film film) {
+        if (panel == null || panel.replayEditor == null || film == null) {
+            return -1;
+        }
+        Replay replay = panel.replayEditor.getReplay();
+        int idx = BBSTogetherFix45.identityReplayIndex(film.replays.getList(), replay);
+        if (idx >= 0) {
+            return idx;
+        }
+        if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
+            Replay current = panel.replayEditor.replaysList.replays.getSelectedReplayFirst();
+            return current == null ? -1 : ((Film)panel.getData()).replays.getList().indexOf(current);
+        }
+        return -1;
+    }
+
+    private static void together_restoreReplaySelection(UIFilmPanel panel, List<Replay> replays, int idx) {
+        if (panel == null || panel.replayEditor == null || replays == null || replays.isEmpty()) {
+            return;
+        }
+        int target = idx >= 0 && idx < replays.size() ? idx : 0;
+        Replay replay = replays.get(target);
+        panel.replayEditor.setReplay(replay);
+        if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
+            panel.replayEditor.replaysList.replays.scrollToReplay(replay);
+        }
+    }
+
+    private static boolean together_wouldClearLocalCamera(Film film, MapType data) {
+        BaseType camera = data.get("camera");
+        if (camera == null || !camera.isList()) {
+            return false;
+        }
+        return together_wouldClearLocalCamera(film, camera);
+    }
+
+    private static boolean together_wouldClearLocalCamera(Film film, List<String> path, BaseType data) {
+        if (path.size() != 2 || !"camera".equals(path.get(1))) {
+            return false;
+        }
+        return together_wouldClearLocalCamera(film, data);
+    }
+
+    private static boolean together_wouldClearLocalCamera(Film film, BaseType data) {
+        return film != null && data != null && data.isList() && together_clipCount(film.camera) > 0 && data.asList().size() == 0;
+    }
+
+    private static int together_clipCount(Clips clips) {
+        return clips == null || clips.get() == null ? 0 : clips.get().size();
+    }
+
+    private static boolean together_isClipKeyframeOnlyPath(List<String> path) {
+        int idx = path.indexOf("channels");
+        if (idx >= 0 && path.size() > idx + 1) {
+            return true;
+        }
+        for (String segment : path) {
+            if (!"keyframes".equals(segment) && !"channel".equals(segment) && !"x".equals(segment) && !"y".equals(segment) && !"z".equals(segment) && !"yaw".equals(segment) && !"pitch".equals(segment) && !"roll".equals(segment) && !"fov".equals(segment) && !"distance".equals(segment)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static void together_refreshEmbeddedClipKeyframeEditor(UIFilmPanel panel, List<String> path) {
+        if (path.size() <= 1) {
+            return;
+        }
+        String section = path.get(1);
+        if (!("camera".equals(section) || "action".equals(section) || "actions".equals(section))) {
+            return;
+        }
+        UIKeyframeEditor keyframeEditor = "camera".equals(section) ? BBSTogetherFix14.getCameraKeyframeEditor(panel) : null;
+        if (keyframeEditor != null && keyframeEditor.editor != null) {
+            keyframeEditor.editor.update();
+        }
+    }
+
+    private static void together_remapClientReplaySelections(String filmId, Film oldFilm, Film newFilm) {
+        if (filmId == null || filmId.isEmpty() || oldFilm == null || newFilm == null) {
+            return;
+        }
+        together_remapClientReplaySelections(filmId, oldFilm.replays.getList(), newFilm.replays.getList());
+    }
+
+    private static void together_remapClientReplaySelections(String filmId, List<Replay> oldReplays, List<Replay> newReplays) {
+        if (filmId == null || filmId.isEmpty() || oldReplays == null || newReplays == null) {
+            return;
+        }
+        if (oldReplays.size() == newReplays.size()) {
+            return;
+        }
+        Map<Integer, List<UUID>> selections = replaySelections.get(filmId);
+        if (selections == null || selections.isEmpty()) {
+            return;
+        }
+        HashMap<Integer, List<UUID>> remapped = new HashMap<Integer, List<UUID>>();
+        for (Map.Entry<Integer, List<UUID>> entry : selections.entrySet()) {
+            int idx = together_remapReplayIndex(oldReplays, newReplays, entry.getKey());
+            if (idx < 0) {
+                if (newReplays.isEmpty()) continue;
+                idx = Math.min(Math.max(entry.getKey(), 0), newReplays.size() - 1);
+            }
+            remapped.computeIfAbsent(idx, key -> new ArrayList<UUID>()).addAll((Collection<UUID>)entry.getValue());
+        }
+        replaySelections.put(filmId, remapped);
+    }
+
+    private static int together_remapReplayIndex(List<Replay> oldReplays, List<Replay> newReplays, int idx) {
+        if (idx < 0 || newReplays == null || newReplays.isEmpty()) {
+            return -1;
+        }
+        if (oldReplays == null || oldReplays.isEmpty()) {
+            return Math.min(idx, newReplays.size() - 1);
+        }
+        int oldCount = oldReplays.size();
+        int newCount = newReplays.size();
+        if (newCount == oldCount + 1) {
+            int changed = together_findChangedReplayIndex(oldReplays, newReplays);
+            return idx >= changed ? idx + 1 : idx;
+        }
+        if (newCount == oldCount - 1) {
+            int changed = together_findChangedReplayIndex(newReplays, oldReplays);
+            if (idx > changed) {
+                return idx - 1;
+            }
+            if (idx == changed) {
+                return Math.min(changed, newCount - 1);
+            }
+            return Math.min(idx, newCount - 1);
+        }
+        return Math.min(idx, newCount - 1);
+    }
+
+    private static int together_findChangedReplayIndex(List<Replay> oldReplays, List<Replay> newReplays) {
+        int count = Math.min(oldReplays.size(), newReplays.size());
+        for (int i = 0; i < count; ++i) {
+            if (together_replaySignature(oldReplays.get(i)).equals(together_replaySignature(newReplays.get(i)))) continue;
+            return i;
+        }
+        return count;
+    }
+
+    private static String together_replaySignature(Replay replay) {
+        return replay == null ? "" : replay.toData().toString();
+    }
+
+    private static List<Integer> together_copyClipSelection(UIClipsPanel clipsPanel) {
+        if (clipsPanel == null || clipsPanel.clips == null) {
+            return new ArrayList<Integer>();
+        }
+        return new ArrayList<Integer>(clipsPanel.clips.getSelection());
+    }
+
+    private static void together_restoreClipSelection(UIClipsPanel clipsPanel, List<Integer> selection) {
+        if (clipsPanel == null || clipsPanel.clips == null || selection.isEmpty()) {
+            return;
+        }
+        UIClips clips = clipsPanel.clips;
+        clips.setSelection(selection);
+        List clipList = clips.getClips() == null ? Collections.emptyList() : clips.getClips().get();
+        int first = selection.get(0);
+        if (first >= 0 && first < clipList.size()) {
+            clips.pickClip((Clip)clipList.get(first));
+        }
+    }
+
+    private static Map<String, List<Integer>> together_copyKeyframeSelection(UIFilmPanel panel) {
+        HashMap<String, List<Integer>> saved = new HashMap<String, List<Integer>>();
+        UIKeyframeEditor keyframeEditor = panel.replayEditor.keyframeEditor;
+        if (keyframeEditor == null || keyframeEditor.view == null) {
+            return saved;
+        }
+        IUIKeyframeGraph graph = keyframeEditor.view.getGraph();
+        if (!(graph instanceof UIKeyframeDopeSheet)) {
+            return saved;
+        }
+        UIKeyframeDopeSheet dopeSheet = (UIKeyframeDopeSheet)graph;
+        for (UIKeyframeSheet sheet : dopeSheet.getSheets()) {
+            if (sheet.selection == null || sheet.selection.getIndices().isEmpty()) continue;
+            saved.put(sheet.id, new ArrayList(sheet.selection.getIndices()));
+        }
+        return saved;
+    }
+
+    private static void together_restoreKeyframeSelection(UIFilmPanel panel, Map<String, List<Integer>> saved) {
+        if (saved.isEmpty()) {
+            return;
+        }
+        UIKeyframeEditor keyframeEditor = panel.replayEditor.keyframeEditor;
+        if (keyframeEditor == null || keyframeEditor.view == null) {
+            return;
+        }
+        IUIKeyframeGraph graph = keyframeEditor.view.getGraph();
+        if (!(graph instanceof UIKeyframeDopeSheet)) {
+            return;
+        }
+        UIKeyframeDopeSheet dopeSheet = (UIKeyframeDopeSheet)graph;
+        for (UIKeyframeSheet sheet : dopeSheet.getSheets()) {
+            List<Integer> indices = saved.get(sheet.id);
+            if (indices == null || sheet.selection == null) continue;
+            for (Integer index : indices) {
+                sheet.selection.add(index.intValue());
+            }
         }
     }
 

@@ -9,7 +9,6 @@
                    "UIFilmUndoHandlerMixin",
                    "UIReplaysEditorMixin",
                    "UIReplayListMixin",
-                   "UIReplayListBbsOpMixin",
                    "UIDataPathListMixin",
                    "UIUtilityOverlayPanelMixin",
                    "MorphRendererMixin",
@@ -40,9 +39,7 @@
                    "UIFormPaletteBbsOpMixin",
                    "UIModelBlockPanelBbsOpMixin",
                    "UIClipsMixin",
-                   "TogetherClientNetworkMixin",
                    "TogetherClientNetworkFix28Mixin",
-                   "BBSClientInitFix66Mixin",
                    "UIFormCategoryModelSizeMixin",
                    "FormCellRendererTooLargeMixin",
                    "ModelManagerMixin"

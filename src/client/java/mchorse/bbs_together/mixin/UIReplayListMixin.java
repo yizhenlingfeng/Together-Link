@@ -21,7 +21,10 @@ import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
 import mchorse.bbs_together.BBSTogetherFix33Client;
 import mchorse.bbs_together.BBSTogetherFixReplayStructure;
+import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.PlayerListEntry;
@@ -33,6 +36,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * Replay list collaboration sync (structure broadcast, form-editor lock, selection heads)
+ * merged with the read-only (level 0) permission lock: adding, duplicating, removing,
+ * pasting, importing from camera/model-block, editing category and opening the form
+ * editor are all short-circuited for players who may not edit films. Selecting and
+ * browsing replays stays available. The server still refuses the resulting packets,
+ * so the permission check here is just the client-side UX.
+ */
+@Environment(EnvType.CLIENT)
 @Mixin(value={UIReplayList.class}, remap=false)
 public class UIReplayListMixin {
     private String together_lockFilmId = null;
@@ -41,8 +53,17 @@ public class UIReplayListMixin {
     private int together_lastSelectionsSize = -1;
     private List<Replay> together_replaysBeforeStructureChange;
 
+    /** Read-only (level 0) gate: cancel the operation when the player may not edit films. */
+    private static boolean together_mayEditFilm() {
+        return BbsOpClientState.canEdit("film");
+    }
+
     @Inject(method={"pasteReplay"}, at={@At(value="HEAD")}, remap=false)
     private void together_fix1615BeforePasteReplay(MapType mapType, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_captureReplayStructure();
     }
 
@@ -53,6 +74,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"fromModelBlock(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;)V"}, at={@At(value="HEAD")}, remap=false)
     private void together_fix1615BeforeFromModelBlock(ModelBlockEntity modelBlockEntity, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_captureReplayStructure();
     }
 
@@ -63,6 +88,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"addReplay(Lorg/joml/Vector3d;FF)V"}, at={@At(value="HEAD")}, remap=false)
     private void together_fix1615BeforeAddReplay(Vector3d vector3d, float f, float f2, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_captureReplayStructure();
     }
 
@@ -73,6 +102,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"fromCamera"}, at={@At(value="HEAD")}, remap=false)
     private void together_fix1615BeforeFromCamera(int n, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_captureReplayStructure();
     }
 
@@ -83,6 +116,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"dupeReplay"}, at={@At(value="HEAD")}, remap=false)
     private void together_fix1615BeforeDupeReplay(CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_captureReplayStructure();
     }
 
@@ -93,6 +130,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"removeReplay"}, at={@At(value="HEAD")}, remap=false)
     private void together_fix1615BeforeRemoveReplay(CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_captureReplayStructure();
     }
 
@@ -113,9 +154,23 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
+    @Inject(method={"applyReplayCategory"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
+    private void together_blockApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+        }
+    }
+
     @Inject(method={"applyReplayCategory"}, at={@At(value="TAIL")}, remap=false)
     private void together_fix133ApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
         BBSTogetherFix33Client.broadcastReplayStructureChanged((UIReplayList)(Object)this);
+    }
+
+    @Inject(method={"removeReplayCategory"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
+    private void together_blockRemoveReplayCategory(String string, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+        }
     }
 
     @Inject(method={"removeReplayCategory"}, at={@At(value="TAIL")}, remap=false)
@@ -125,6 +180,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"openFormEditor"}, at={@At(value="HEAD")}, remap=false)
     private void onOpenFormEditorHead(ValueForm valueForm, boolean bl, Consumer<?> consumer, CallbackInfo callbackInfo) {
+        if (!together_mayEditFilm()) {
+            callbackInfo.cancel();
+            return;
+        }
         this.together_lockFilmId = null;
         this.together_lockIndex = -1;
         if (!TogetherClientNetwork.isConnected()) {

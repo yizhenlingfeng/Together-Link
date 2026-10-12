@@ -2,6 +2,7 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.resources.Link;
+import mchorse.bbs_together.BBSTogetherFix66Client;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,6 +17,6 @@ public class BBSClientInitMixin {
     private void onBBSClientInit(CallbackInfo ci) {
         BBSModClient.getL10n().registerOne(lang -> new Link("bbs_together", "strings/" + lang + ".json"));
         BBSModClient.getL10n().reload();
+        BBSTogetherFix66Client.registerSettingUIs();
     }
 }
-
