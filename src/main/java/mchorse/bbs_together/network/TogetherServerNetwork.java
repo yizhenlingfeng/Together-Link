@@ -47,6 +47,7 @@ import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.BBSTogetherFix18;
+import mchorse.bbs_together.BBSTogetherFix28Server;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
@@ -249,6 +250,7 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REMOVE_PLAYER_LOGS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRemovePlayerLogs(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
+        BBSTogetherFix28Server.registerReceivers();
     }
 
     /*
@@ -281,6 +283,7 @@ public class TogetherServerNetwork {
         }
         assetSendQueues.clear();
         assetDrainActive.clear();
+        BBSTogetherFix28Server.resetState();
     }
 
     /*
@@ -342,6 +345,36 @@ public class TogetherServerNetwork {
     }
 
     private static void handleCursorPosition(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        /* Fix 15.5: a "leave" cursor packet (empty filmId + all-negative markers) clears the
+         * player's editing/cursor state and broadcasts a snapshot of the remaining cursors
+         * instead of updating them. */
+        int mark = buf.readerIndex();
+        try {
+            String clearFilmId = buf.readString();
+            int clearEditorType = buf.readInt();
+            float clearTick = buf.readFloat();
+            float clearRow = buf.readFloat();
+            int clearSelCount = buf.readInt();
+            for (int i = 0; i < clearSelCount; ++i) {
+                buf.readInt();
+            }
+            buf.readInt();
+            if (clearFilmId == null || clearFilmId.isEmpty() || clearEditorType >= 0 || clearTick >= 0.0f || clearRow >= 0.0f || clearSelCount > 0) {
+                buf.readerIndex(mark);
+            } else {
+                UUID leaver = player.getUuid();
+                server.execute(() -> {
+                    playerEditingFilm.remove(leaver, clearFilmId);
+                    playerCursors.remove(leaver);
+                    TogetherServerNetwork.broadcastFilmSelections(server);
+                    TogetherServerNetwork.together_broadcastCursorSnapshot(server, clearFilmId);
+                });
+                return;
+            }
+        }
+        catch (RuntimeException runtimeException) {
+            buf.readerIndex(mark);
+        }
         String filmId = buf.readString();
         int editorType = buf.readInt();
         float tick = buf.readFloat();
@@ -433,6 +466,29 @@ public class TogetherServerNetwork {
     }
 
     private static void handleReplaySelection(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        /* Fix 15.6: a "leave" replay selection packet (empty filmId + negative index) clears
+         * the player's replay selection instead of updating it. */
+        int mark = buf.readerIndex();
+        try {
+            String clearFilmId = buf.readString();
+            int clearIndex = buf.readInt();
+            if (clearFilmId == null || clearFilmId.isEmpty() || clearIndex >= 0) {
+                buf.readerIndex(mark);
+            } else {
+                UUID leaver = player.getUuid();
+                server.execute(() -> {
+                    LinkedHashMap<UUID, Integer> selections = playerReplaySelections;
+                    synchronized (selections) {
+                        selections.remove(leaver);
+                    }
+                    TogetherServerNetwork.broadcastReplaySelections(server, clearFilmId);
+                });
+                return;
+            }
+        }
+        catch (RuntimeException runtimeException) {
+            buf.readerIndex(mark);
+        }
         String filmId = buf.readString();
         int replayIndex = buf.readInt();
         server.execute(() -> {
@@ -1636,6 +1692,41 @@ public class TogetherServerNetwork {
             this.size = size;
             this.sha1 = sha1;
             this.isPush = isPush;
+        }
+    }
+
+    /** Fix 15.5: send every remaining cursor of the given film to all its current viewers. */
+    private static void together_broadcastCursorSnapshot(MinecraftServer server, String filmId) {
+        for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
+            UUID playerId = recipient.getUuid();
+            String recipientFilm = playerEditingFilm.get(playerId);
+            if (recipientFilm == null) {
+                CursorData ownCursor = playerCursors.get(playerId);
+                recipientFilm = ownCursor == null ? null : ownCursor.filmId;
+            }
+            if (!filmId.equals(recipientFilm)) continue;
+            ArrayList<Map.Entry<UUID, CursorData>> entries = new ArrayList<Map.Entry<UUID, CursorData>>();
+            for (Map.Entry<UUID, CursorData> entry : playerCursors.entrySet()) {
+                if (!entry.getKey().equals(playerId) && filmId.equals(entry.getValue().filmId)) {
+                    entries.add(entry);
+                }
+            }
+            PacketByteBuf out = PacketByteBufs.create();
+            out.writeInt(entries.size());
+            for (Map.Entry<UUID, CursorData> entry : entries) {
+                CursorData cursor = entry.getValue();
+                List<Integer> selected = cursor.selectedIndices == null ? List.of() : cursor.selectedIndices;
+                out.writeUuid(entry.getKey());
+                out.writeInt(cursor.editorType);
+                out.writeFloat(cursor.tick);
+                out.writeFloat(cursor.row);
+                out.writeInt(selected.size());
+                for (Integer index : selected) {
+                    out.writeInt(index == null ? -1 : index);
+                }
+                out.writeInt(cursor.playheadTick);
+            }
+            ServerPlayNetworking.send(recipient, CLIENT_CURSOR_POSITIONS, out);
         }
     }
 

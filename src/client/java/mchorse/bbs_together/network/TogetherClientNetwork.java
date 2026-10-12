@@ -64,6 +64,7 @@ import mchorse.bbs_together.BBSTogetherFix22;
 import mchorse.bbs_together.BBSTogetherFix28Client;
 import mchorse.bbs_together.BBSTogetherFix33Client;
 import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
@@ -213,6 +214,8 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
         isBBSTogetherOnServer = true;
+        BBSTogetherFix28Client.registerReceivers();
+        BBSTogetherFixReplayStructure.registerClientReceiver();
     }
 
     public static void reset() {
@@ -252,6 +255,8 @@ public class TogetherClientNetwork {
         lastAutoSyncMs = 0L;
         mchorse.bbs_together.bbsop.BbsOpClientState.reset();
         isBBSTogetherOnServer = false;
+        BBSTogetherFix28Client.resetState();
+        BBSTogetherFixReplayStructure.resetClient();
     }
 
     public static void onJoin() {

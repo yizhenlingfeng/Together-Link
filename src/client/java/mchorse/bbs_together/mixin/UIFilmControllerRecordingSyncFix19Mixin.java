@@ -9,6 +9,7 @@ import mchorse.bbs_mod.ui.film.controller.UIFilmController;
 import mchorse.bbs_together.BBSTogetherFix19;
 import mchorse.bbs_together.BBSTogetherFix28Client;
 import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.bbsop.BbsOpClientState;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Final;
@@ -92,6 +93,24 @@ public abstract class UIFilmControllerRecordingSyncFix19Mixin {
         }
         Film film = (Film)this.panel.getData();
         BBSTogetherFix19.sendRecordingDelta(film, this.together_recordingReplayIndex, replay, this.together_oldKeyframesData, this.together_oldPropertiesData, this.together_oldActionsData);
+    }
+
+    @Inject(method = "toggleControl", at = @At("HEAD"), cancellable = true, remap = false)
+    private void together$blockToggleControl(CallbackInfo ci)
+    {
+        if (!BbsOpClientState.canEdit("film"))
+        {
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "pickRecording", at = @At("HEAD"), cancellable = true, remap = false)
+    private void together$blockPickRecording(CallbackInfo ci)
+    {
+        if (!BbsOpClientState.canEdit("film"))
+        {
+            ci.cancel();
+        }
     }
 }
 
