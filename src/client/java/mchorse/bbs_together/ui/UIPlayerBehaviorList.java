@@ -4,6 +4,7 @@ import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.input.list.UIList;
+import mchorse.bbs_mod.ui.utils.context.ContextAction;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Colors;
@@ -188,7 +189,7 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
     }
 
     /** Whether the domain is currently editable for this (level-1) player; null grants = all. */
-    private static boolean isDomainAllowed(PlayerRecord record, BbsOpDomain domain)
+    static boolean isDomainAllowed(PlayerRecord record, BbsOpDomain domain)
     {
         return record.bbsGrants == null || record.bbsGrants.contains(domain.id);
     }
@@ -229,27 +230,41 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
             {
                 menu.action(Icons.LIST, L10n.lang("bbs_together.bbsop.context.domain_menu"), () ->
                 {
-                    this.getContext().replaceContextMenu((sub) ->
+                    /* The custom menu paints the record sub-permission as a hover popup
+                     * on the film row; the loop below skips RECORD so it never becomes
+                     * a top-level entry. */
+                    UIDomainMenuWithRecord domainMenu = new UIDomainMenuWithRecord(record);
+                    ContextMenuManager manager = new ContextMenuManager().custom(domainMenu);
+
+                    for (BbsOpDomain domain : BbsOpDomain.values())
                     {
-                        for (BbsOpDomain domain : BbsOpDomain.values())
+                        if (domain == BbsOpDomain.RECORD)
                         {
-                            boolean allowed = isDomainAllowed(record, domain);
-
-                            String label = L10n.lang("bbs_together.bbsop.context.domain").get()
-                                .replace("{domain}", L10n.lang("bbs_together.bbsop.domain." + domain.id).get())
-                                .replace("{state}", L10n.lang(allowed ? "bbs_together.bbsop.context.allowed" : "bbs_together.bbsop.context.denied").get());
-
-                            sub.action(allowed ? Icons.ADD : Icons.CLOSE, IKey.constant(label), () ->
-                            {
-                                /* Resolve the toggle against the latest snapshot at click time,
-                                 * not the state captured when the menu was built. */
-                                PlayerRecord latest = TogetherClientNetwork.behaviorPlayers.get(record.id);
-                                boolean nowAllowed = latest == null ? allowed : isDomainAllowed(latest, domain);
-
-                                TogetherClientNetwork.sendSetBbsGrant(record.id, domain.id, !nowAllowed);
-                            });
+                            continue;
                         }
-                    });
+
+                        boolean allowed = isDomainAllowed(record, domain);
+
+                        String label = L10n.lang("bbs_together.bbsop.context.domain").get()
+                            .replace("{domain}", L10n.lang("bbs_together.bbsop.domain." + domain.id).get())
+                            .replace("{state}", L10n.lang(allowed ? "bbs_together.bbsop.context.allowed" : "bbs_together.bbsop.context.denied").get());
+
+                        ContextAction action = domain == BbsOpDomain.FILM
+                            ? manager.action(domainMenu.filmAction(allowed ? Icons.ADD : Icons.CLOSE, IKey.constant(label), null))
+                            : manager.action(allowed ? Icons.ADD : Icons.CLOSE, IKey.constant(label), null);
+
+                        action.runnable = () ->
+                        {
+                            /* Resolve the toggle against the latest snapshot at click time,
+                             * not the state captured when the menu was built. */
+                            PlayerRecord latest = TogetherClientNetwork.behaviorPlayers.get(record.id);
+                            boolean nowAllowed = latest == null ? allowed : isDomainAllowed(latest, domain);
+
+                            TogetherClientNetwork.sendSetBbsGrant(record.id, domain.id, !nowAllowed);
+                        };
+                    }
+
+                    this.getContext().replaceContextMenu(manager.create());
                 });
             }
         }

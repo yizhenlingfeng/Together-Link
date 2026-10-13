@@ -10,6 +10,13 @@ public enum BbsOpDomain
 {
     MORPH("morph"),
     FILM("film"),
+    /**
+     * Sub-permission of {@link #FILM}: starting a recording take. Never shown as a
+     * top-level entry in the domain menu — the UI surfaces it as a hover popup on the
+     * film row ({@code UIDomainMenuWithRecord}), but on the wire, in grants and in
+     * persistence it is a plain domain id like any other.
+     */
+    RECORD("record"),
     MODEL_BLOCKS("model_blocks"),
     PARTICLES("particles"),
     MODEL_EDITOR("model_editor"),

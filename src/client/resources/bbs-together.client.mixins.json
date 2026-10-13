@@ -22,6 +22,8 @@
                    "BBSClientInitMixin",
                    "UIDataOverlayPanelMixin",
                    "FilmRecordingControllerBbsOpMixin",
+                   "FilmsBbsOpMixin",
+                   "UIFilmPreviewBbsOpMixin",
                    "UIElementContextMenuBbsOpMixin",
                    "UIReplayPropertiesPanelBbsOpMixin",
                    "UIReplaysListPanelBbsOpMixin",

@@ -57,6 +57,7 @@
     "bbs_together.bbsop.group.2": "Admins (level 2)",
     "bbs_together.bbsop.domain.morph": "Morphs",
     "bbs_together.bbsop.domain.film": "Films",
+    "bbs_together.bbsop.domain.record": "錄製",
     "bbs_together.bbsop.domain.model_blocks": "Model blocks",
     "bbs_together.bbsop.domain.particles": "Particles",
     "bbs_together.bbsop.domain.model_editor": "Model editor",

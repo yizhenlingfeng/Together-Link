@@ -103,6 +103,7 @@
     "bbs_together.bbsop.group.2": "管理员（2 级）",
     "bbs_together.bbsop.domain.morph": "伪装",
     "bbs_together.bbsop.domain.film": "影片",
+    "bbs_together.bbsop.domain.record": "录制",
     "bbs_together.bbsop.domain.model_blocks": "模型方块",
     "bbs_together.bbsop.domain.particles": "粒子",
     "bbs_together.bbsop.domain.model_editor": "模型编辑器",

@@ -107,7 +107,7 @@ public abstract class UIFilmControllerRecordingSyncFix19Mixin {
     @Inject(method = "pickRecording", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockPickRecording(CallbackInfo ci)
     {
-        if (!BbsOpClientState.canEdit("film"))
+        if (!BbsOpClientState.canEdit("film") || !BbsOpClientState.canEdit("record"))
         {
             ci.cancel();
         }

@@ -1176,7 +1176,8 @@ public class TogetherServerNetwork {
     }
 
     private static void handleRecordingFinished(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+        /* Recording needs both the film domain and its record sub-permission. */
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) || !BbsOpManager.isAllowed(player, BbsOpDomain.RECORD) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {

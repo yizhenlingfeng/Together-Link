@@ -3,7 +3,7 @@
 BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft）的多人协作模组，基于 Minecraft 1.20.1 Fabric。它让多名玩家在同一个 BBS 影片项目中实时协作编辑，同步光标、选中、关键帧、回放，并支持资产和影片数据的服务器端分发。
 
 - **模组 ID**：`bbs_together`
-- **当前版本**：1.7.4
+- **当前版本**：1.7.5
 - **Minecraft**：1.20.1
 - **前置**：BBS FS >= 2.6、Fabric API、Fabric Loader >= 0.15.6
 - **Java**：17（编译目标）/ 21（运行 Gradle 9.2）
@@ -65,6 +65,7 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 ### BBS 权限等级（bbsop）
 - **三级权限**：0 级仅浏览（可浏览、可下载，不可编辑、不可上传）、1 级编辑者（默认可编辑全部内容）、2 级管理员（可编辑全部内容并管理他人权限）。玩家进服默认 0 级。
 - **功能域**：伪装、影片、模型方块、粒子、模型编辑器、纹理、音频编辑器、资产上传八个域，服务端写包与客户端 UI 全部按域判定。
+- **录制子权限**：影片域下的隐藏子域「录制」，控制回放录制（录制按钮、录制快捷键、`/bbstogether record` 远程触发）与影片预览的「录制视频/截图」按钮。它不占「修改可编辑行为」菜单的顶层项——鼠标悬停「影片」行时在右侧弹出「录制：允许/禁止」小按钮切换；服务端在录制数据包与动作录制两条通道复核。
 - **1 级域白名单**：管理员可对 1 级玩家逐域"允许/禁止"；首次禁止即进入白名单模式（其余全开），空白名单 = 全部禁止。
 - **管理入口**：服务器行为面板玩家列表——拖拽玩家到目标等级分组即可换级；右键「修改 BBS 等级」「修改可编辑行为」子菜单。仅 2 级玩家可管理（原版 OP 走 `/bbsop` 指令）；管理员不可拖动修改自身等级、不可解除自身 OP。
 - **等级分组**：玩家列表按 2 → 1 → 0 三级分组显示，等级持久化到 `<存档>/bbs/bbsop.json`，玩家每次进服自动归入原分组；点选分组标题可按组过滤行为列表。
@@ -74,7 +75,7 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 ### 服务器命令
 - `/bbstogether record <玩家>`：切换指定玩家的录制状态；若其中有人正在录制，则停止所有目标玩家的录制。
 - `/bbsop <玩家> [0-2]`：查询或设置玩家的 BBS 权限等级（0 仅浏览 / 1 编辑者 / 2 管理员）。
-- `/bbsop <玩家> grant <域> <allow|deny>`：允许或禁止 1 级玩家的某个功能域；`/bbsop <玩家> grant reset` 恢复为不受限。域：morph、film、model_blocks、particles、model_editor、textures、audio、upload。
+- `/bbsop <玩家> grant <域> <allow|deny>`：允许或禁止 1 级玩家的某个功能域；`/bbsop <玩家> grant reset` 恢复为不受限。域：morph、film、record、model_blocks、particles、model_editor、textures、audio、upload。
 
 ---
 
@@ -120,7 +121,14 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
   - 新增协议：`s_model_delete_request` / `s_model_delete_decision` / `c_model_deleted`（客户端与服务端需同版本部署）
   - 行为条目新增 `SUB_REQUEST_MODEL_DELETE` 类型，审批状态存 `extra`，请求类条目不参与 10 秒合并
 - **新增：撤回撤销防误撤**——远端数据落盘前封存进行中撤销批次；撤销同步按路径带期望基线校验，冲突时服务器拒绝并回推现状；待发编辑同步队列抽离为独立类
-- mixin 零新增类：菜单注入挂在既有 `UIFormCategoryBbsOpMixin`（`buildContextMenu` TAIL），只读放行改造既有 `UIElementContextMenuBbsOpMixin`
+- **新增：录制子权限（bbsop）**（详见功能介绍）
+  - 新增隐藏域 `record`，作为影片域的子权限；「修改可编辑行为」菜单悬停「影片」行右侧弹出切换按钮（含滞回，避免鼠标移出闪烁），不占顶层菜单项
+  - 回放录制三条入口全拦截：编辑器录制按钮、录制快捷键、远程录制触发（客户端 `Films` / `FilmRecordingController` 两道闸 + 服务端 `RECORDING_FINISHED` 与动作录制复核）
+  - 「录制视频/截图」按钮（影片预览工具条）权限不足时灰显锁定，与"仅浏览"锁按钮同机制
+  - 19 个语言文件新增 `bbs_together.bbsop.domain.record` 文案
+  - 迁移注意：已进入白名单模式的 1 级玩家，旧 grants 中无 `record`，升级后录制默认禁止，需管理员对其 `grant record allow` 一次
+- **优化：资产同步冲突仲裁**——清单条目扩展为 `sha1:size:mtime` 三段并随内容传播编辑时间；本地与服务器副本差异小于 3 秒视为无冲突（服务器胜），同一文件单轮 diff 只允许一个方向，杜绝两端互传死循环
+- 模型删除功能 mixin 零新增类：菜单注入挂在既有 `UIFormCategoryBbsOpMixin`（`buildContextMenu` TAIL），只读放行改造既有 `UIElementContextMenuBbsOpMixin`
 - 版本号从 1.7.4 升至 1.7.5
 
 ### v1.7.4
