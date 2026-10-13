@@ -175,6 +175,75 @@ public class TogetherClientNetwork {
      */
     private static final long MTIME_TOLERANCE_MS = 3000L;
 
+    /* ---- Auto-sync flip-flop guard ----------------------------------------------------- */
+
+    /** A file whose auto-sync direction alternates between upload and download within this
+     * window is considered caught in a rewrite loop. */
+    private static final long AUTO_FLIP_WINDOW_MS = 120_000L;
+    /** How long a loop-caught file is excluded from auto sync (manual resync is not affected). */
+    private static final long AUTO_COOLDOWN_MS = 300_000L;
+    /** Alternations within the window before the cooldown kicks in. */
+    private static final int AUTO_FLIP_LIMIT = 2;
+
+    private static final Map<String, Character> autoLastDir = new ConcurrentHashMap();
+    private static final Map<String, Long> autoLastDirMs = new ConcurrentHashMap();
+    private static final Map<String, Integer> autoFlips = new ConcurrentHashMap();
+    private static final Map<String, Long> autoCooldown = new ConcurrentHashMap();
+
+    /**
+     * Flip-flop guard for auto sync. Some generators rewrite files inside a model folder
+     * on every client without anyone editing; each rewrite uploads, the other side
+     * downloads, its generator rewrites again — an endless upload/download loop. When a
+     * file's auto direction keeps alternating, cool it down and say which file it is.
+     *
+     * @param relPath the asset-relative path
+     * @param dir     the direction the diff is about to take ('U'pload or 'D'ownload)
+     * @param manual  false for automatic sync passes; manual resync is never throttled
+     * @return true when the file is currently cooled down and must be skipped
+     */
+    private static boolean together$isAutoFlip(String relPath, char dir, boolean manual) {
+        if (manual) {
+            autoCooldown.remove(relPath);
+            autoFlips.remove(relPath);
+            autoLastDir.put(relPath, dir);
+            autoLastDirMs.put(relPath, System.currentTimeMillis());
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        Long cooldown = autoCooldown.get(relPath);
+
+        if (cooldown != null) {
+            if (cooldown.longValue() > now) {
+                return true;
+            }
+            autoCooldown.remove(relPath);
+            autoFlips.remove(relPath);
+        }
+
+        Character last = autoLastDir.get(relPath);
+        Long lastMs = autoLastDirMs.get(relPath);
+
+        if (last != null && last.charValue() != dir && lastMs != null && now - lastMs.longValue() < AUTO_FLIP_WINDOW_MS) {
+            int flips = autoFlips.merge(relPath, 1, Integer::sum);
+
+            if (flips >= AUTO_FLIP_LIMIT) {
+                autoCooldown.put(relPath, now + AUTO_COOLDOWN_MS);
+                autoFlips.remove(relPath);
+                System.out.println("[BBSTogether] Auto sync of \"" + relPath + "\" paused for 5 minutes — it keeps"
+                    + " flip-flopping between upload and download (something is rewriting this file without you editing it)");
+                return true;
+            }
+        } else if (last == null || last.charValue() == dir) {
+            autoFlips.remove(relPath);
+        }
+
+        autoLastDir.put(relPath, dir);
+        autoLastDirMs.put(relPath, now);
+
+        return false;
+    }
+
     /* ---- A6: download retry bookkeeping ----------------------------------------------- */
 
     private static final Map<String, Integer> downloadRetries = new ConcurrentHashMap();
@@ -578,6 +647,7 @@ public class TogetherClientNetwork {
             boolean ul = ((Boolean)TogetherSettings.assetSyncUpload.get()).booleanValue();
             if (resyncMode == 1) { dl = true; ul = false; }
             else if (resyncMode == 2) { dl = false; ul = true; }
+            final boolean manual = resyncMode != 0;
             resyncMode = 0;
             if (!dl && !ul) {
                 return;
@@ -717,7 +787,9 @@ public class TogetherClientNetwork {
                                 }
                             }
                             if (!needsDownload) continue;
-                            needed.add(relPath);
+                            if (!TogetherClientNetwork.together$isAutoFlip(relPath, 'D', manual)) {
+                                needed.add(relPath);
+                            }
                         }
                         if (!needed.isEmpty()) {
                             int downloadCount = needed.size();
@@ -755,7 +827,7 @@ public class TogetherClientNetwork {
                                             upload = false;
                                         }
                                     }
-                                    if (upload) {
+                                    if (upload && !TogetherClientNetwork.together$isAutoFlip(relativePath, 'U', manual)) {
                                         toUpload.add(relativePath);
                                     }
                                 }
