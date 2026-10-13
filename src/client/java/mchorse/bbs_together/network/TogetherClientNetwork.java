@@ -165,7 +165,15 @@ public class TogetherClientNetwork {
     /** Last received server manifest, kept across joins so unchanged manifests cost nothing. */
     private static final HashMap<String, String> lastServerSha1Map = new HashMap();
     private static final HashMap<String, Long> lastServerSizeMap = new HashMap();
+    private static final HashMap<String, Long> lastServerMtimeMap = new HashMap();
     private static volatile long lastManifestVersion = 0L;
+
+    /**
+     * Conflict arbitration slack for manifest mtimes, in millis. Copies whose edit times are
+     * closer than this are treated as "server wins" so two clients editing near-simultaneously
+     * converge deterministically on the server copy instead of ping-ponging uploads.
+     */
+    private static final long MTIME_TOLERANCE_MS = 3000L;
 
     /* ---- A6: download retry bookkeeping ----------------------------------------------- */
 
@@ -587,21 +595,28 @@ public class TogetherClientNetwork {
                     Path assetsPath = assetsFolder.toPath();
                     HashMap<String, String> serverSha1Map = new HashMap<String, String>();
                     HashMap<String, Long> serverSizeMap = new HashMap<String, Long>();
+                    HashMap<String, Long> serverMtimeMap = new HashMap<String, Long>();
                     if (reuseCache) {
                         synchronized (lastServerSha1Map) {
                             serverSha1Map.putAll(lastServerSha1Map);
                             serverSizeMap.putAll(lastServerSizeMap);
+                            serverMtimeMap.putAll(lastServerMtimeMap);
                         }
                     } else {
                         for (String key : manifest.keys()) {
+                            /* Entries are "<sha1>:<size>:<mtime>" (mtime optional, old servers). */
                             String raw = manifest.get(key).asString();
-                            int colon = raw.indexOf(':');
-                            if (colon > 0) {
-                                serverSha1Map.put(key, raw.substring(0, colon));
-                                try { serverSizeMap.put(key, Long.parseLong(raw.substring(colon + 1))); }
+                            String[] parts = raw.split(":", 3);
+                            if (parts.length > 0 && !parts[0].isEmpty()) {
+                                serverSha1Map.put(key, parts[0]);
+                            }
+                            if (parts.length > 1) {
+                                try { serverSizeMap.put(key, Long.parseLong(parts[1])); }
                                 catch (NumberFormatException ignored2) {}
-                            } else {
-                                serverSha1Map.put(key, raw);
+                            }
+                            if (parts.length > 2) {
+                                try { serverMtimeMap.put(key, Long.parseLong(parts[2])); }
+                                catch (NumberFormatException ignored2) {}
                             }
                         }
                         synchronized (lastServerSha1Map) {
@@ -609,6 +624,8 @@ public class TogetherClientNetwork {
                             lastServerSha1Map.putAll(serverSha1Map);
                             lastServerSizeMap.clear();
                             lastServerSizeMap.putAll(serverSizeMap);
+                            lastServerMtimeMap.clear();
+                            lastServerMtimeMap.putAll(serverMtimeMap);
                         }
                         lastManifestVersion = manifestVersion;
                     }
@@ -675,6 +692,22 @@ public class TogetherClientNetwork {
                             boolean needsDownload = true;
                             if (localFile.exists() && localFile.isFile()) {
                                 needsDownload = !((String)entry.getValue()).equalsIgnoreCase(TogetherClientNetwork.sha1OfLocalFileCached(localFile.toPath()));
+                                /* mtime arbitration: a strictly newer local copy must NOT be
+                                 * clobbered by the server's stale one — skip it here; the upload
+                                 * pass sends it up instead. One direction per file per diff pass,
+                                 * otherwise download+upload race forever and never converge. */
+                                if (needsDownload) {
+                                    Long serverMtime = serverMtimeMap.get(relPath);
+                                    if (serverMtime != null && serverMtime.longValue() > 0L) {
+                                        try {
+                                            long localMtime = Files.getLastModifiedTime(localFile.toPath()).toMillis();
+                                            if (localMtime > serverMtime.longValue() + MTIME_TOLERANCE_MS) {
+                                                needsDownload = false;
+                                            }
+                                        }
+                                        catch (Exception ignored2) {}
+                                    }
+                                }
                             }
                             if (!needsDownload) continue;
                             needed.add(relPath);
@@ -703,7 +736,21 @@ public class TogetherClientNetwork {
                                 String serverSha1 = (String)serverSha1Map.get(relativePath);
                                 String localSha1 = TogetherClientNetwork.sha1OfLocalFileCached(localPath);
                                 if ((serverSha1 == null || !serverSha1.equalsIgnoreCase(localSha1))) {
-                                    toUpload.add(relativePath);
+                                    /* mtime arbitration (see the download pass): when the server
+                                     * copy is newer than ours (or their edit times are within
+                                     * tolerance), let the download fetch it instead of pushing a
+                                     * stale local copy over it. */
+                                    boolean upload = true;
+                                    Long serverMtime = serverMtimeMap.get(relativePath);
+                                    if (serverSha1 != null && serverMtime != null && serverMtime.longValue() > 0L) {
+                                        long localMtime = Files.getLastModifiedTime(localPath).toMillis();
+                                        if (localMtime <= serverMtime.longValue() + MTIME_TOLERANCE_MS) {
+                                            upload = false;
+                                        }
+                                    }
+                                    if (upload) {
+                                        toUpload.add(relativePath);
+                                    }
                                 }
                             }
                             catch (Exception e) {
@@ -864,6 +911,9 @@ public class TogetherClientNetwork {
             int seqTotal = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 1;
             long totalSize = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : (bytes == null ? 0L : (long)bytes.length);
             String sha1 = packetByteBuf.readableBytes() > 0 ? packetByteBuf.readString() : "";
+            /* Optional mtime (absent with old servers): restored on disk so later manifest
+             * diffs arbitrate by edit time instead of "when we downloaded it". */
+            long fileMtime = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : 0L;
             if (relativePath.contains("..") || relativePath.startsWith("/")) {
                 return;
             }
@@ -910,6 +960,12 @@ public class TogetherClientNetwork {
                             throw new IOException("sha1 mismatch");
                         }
                         Files.move(part, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                        if (fileMtime > 0L) {
+                            try {
+                                Files.setLastModifiedTime(dest.toPath(), java.nio.file.attribute.FileTime.fromMillis(fileMtime));
+                            }
+                            catch (Exception ignored2) {}
+                        }
                         if (!sha1.isEmpty()) {
                             TogetherClientNetwork.cacheLocalSha1(dest.toPath(), sha1);
                         }
@@ -1157,6 +1213,9 @@ public class TogetherClientNetwork {
         long size = f.length();
         int totalSlices = (int)Math.max(1L, (size + batchBytes - 1L) / batchBytes);
         String sha1 = TogetherClientNetwork.sha1OfLocalFileCached(f.toPath());
+        /* The edit time travels with the content; the server stamps it onto its stored copy so
+         * later manifest diffs compare edit times, not receipt times. */
+        long mtime = Files.getLastModifiedTime(f.toPath()).toMillis();
         try (FileChannel ch = FileChannel.open(f.toPath(), StandardOpenOption.READ)){
             for (int seq = 0; seq < totalSlices; ++seq) {
                 long offset = (long)seq * batchBytes;
@@ -1174,6 +1233,7 @@ public class TogetherClientNetwork {
                 final int fTotal = totalSlices;
                 final long fSize = size;
                 final String fSha = sha1;
+                final long fMtime = mtime;
                 AssetSyncTracker.active(relPath, AssetSyncTracker.Dir.UPLOAD);
                 sendCrusher(MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_ASSET_UPLOAD, slice, pbuf -> {
                     pbuf.writeString(relPath);
@@ -1181,6 +1241,7 @@ public class TogetherClientNetwork {
                     pbuf.writeInt(fTotal);
                     pbuf.writeLong(fSize);
                     pbuf.writeString(fSha);
+                    pbuf.writeLong(fMtime);
                 });
                 if (seq < totalSlices - 1 && interval > 0L) {
                     Thread.sleep(Math.min(interval, 50L));

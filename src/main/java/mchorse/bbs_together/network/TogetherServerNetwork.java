@@ -55,6 +55,7 @@ import mchorse.bbs_together.behaviors.BehaviorEntry;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
 import mchorse.bbs_together.utils.ModelPathUtils;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
@@ -279,10 +280,12 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
         BBSTogetherFix28Server.registerReceivers();
+        ServerTickEvents.END_SERVER_TICK.register(server -> TogetherServerNetwork.sweepUploadAggregates(server));
     }
 
     public static void reset() {
         playerCrushers.clear();
+        pendingUploadAggregates.clear();
         playerEditingFilm.clear();
         playerColors.clear();
         playerCursors.clear();
@@ -313,6 +316,9 @@ public class TogetherServerNetwork {
 
     public static void clearPlayerState(ServerPlayerEntity player, MinecraftServer server) {
         try {
+            /* Log this player's pending upload aggregates while the entity is still valid. */
+            flushUploadAggregates(player, true);
+
             UUID uuid = player.getUuid();
             LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
             synchronized (linkedHashMap) {
@@ -633,10 +639,12 @@ public class TogetherServerNetwork {
                         if (relativePath.endsWith(".bbsup")) {
                             return FileVisitResult.CONTINUE;
                         }
-                        /* Manifest entries carry "<sha1>:<sizeBytes>" so clients can skip over-size
-                         * assets before requesting them. */
+                        /* Manifest entries carry "<sha1>:<sizeBytes>:<mtimeMillis>" so clients can
+                         * skip over-size assets before requesting them and arbitrate conflicting
+                         * copies by newness (the mtime travels with the content: uploads inherit
+                         * the uploader's edit time, see handleAssetUpload). */
                         String sha1 = TogetherServerNetwork.sha1OfPathCached(file, file.toFile());
-                        String entry = sha1 + ":" + file.toFile().length();
+                        String entry = sha1 + ":" + file.toFile().length() + ":" + attrs.lastModifiedTime().toMillis();
                         manifest.putString(relativePath, entry);
                         fingerprint.append(relativePath).append('=').append(entry).append('\n');
                         return FileVisitResult.CONTINUE;
@@ -726,6 +734,13 @@ public class TogetherServerNetwork {
             int seqTotal = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 1;
             long totalSize = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : (bytes == null ? 0L : (long)bytes.length);
             String sha1 = packetByteBuf.readableBytes() > 0 ? packetByteBuf.readString() : "";
+            /* mtime travels with the content so manifest arbitration compares edit times, not
+             * receipt times. Absent (old client) or implausible values fall back to "now". */
+            long uploadMtime = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : 0L;
+            long receivedAt = System.currentTimeMillis();
+            if (uploadMtime <= 0L || uploadMtime > receivedAt + 60_000L) {
+                uploadMtime = receivedAt;
+            }
             if (relativePath.contains("..") || relativePath.startsWith("/")) {
                 return;
             }
@@ -767,6 +782,10 @@ public class TogetherServerNetwork {
                         return;
                     }
                     Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                    try {
+                        java.nio.file.attribute.FileTime stamp = java.nio.file.attribute.FileTime.fromMillis(uploadMtime);
+                        Files.setLastModifiedTime(target, stamp);
+                    } catch (Exception ignored2) {}
                     TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1, true);
                 } else {
                     /* A6: compare by cached/streamed SHA-1 instead of reading the whole
@@ -778,6 +797,10 @@ public class TogetherServerNetwork {
                         : !existingSha1.equalsIgnoreCase(sha1));
                     if (changed) {
                         Files.write(target, bytes);
+                        try {
+                            java.nio.file.attribute.FileTime stamp = java.nio.file.attribute.FileTime.fromMillis(uploadMtime);
+                            Files.setLastModifiedTime(target, stamp);
+                        } catch (Exception ignored2) {}
                         TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1.isEmpty() ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : sha1, true);
                     } else {
                         TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1, false);
@@ -901,6 +924,10 @@ public class TogetherServerNetwork {
                             outBuf.writeInt(fTotal);
                             outBuf.writeLong(task.size);
                             outBuf.writeString(task.sha1 == null ? "" : task.sha1);
+                            /* mtime rides along so the client restores it on disk and later
+                             * manifest diffs arbitrate by edit time. Read at send time — for
+                             * uploads this is the uploader's edit time (just stamped). */
+                            outBuf.writeLong(task.file.lastModified());
                         });
                     }
                     catch (Exception e) {
@@ -1389,6 +1416,10 @@ public class TogetherServerNetwork {
      * belong to a model (skins, fonts, archives, ...) aren't logged, and the
      * pooled entry lists just the models, which the client can jump to. The
      * pooled entry also accumulates the uploaded byte count.
+     *
+     * Per-file reports are pooled into their model's pending aggregate first
+     * (see {@link #queueUploadBehavior}), so a burst of N files of one model
+     * lands as a single timeline occurrence instead of N identical rows.
      */
     private static void recordUploadBehavior(ServerPlayerEntity player, String relativePath, long bytes) {
         try {
@@ -1403,9 +1434,111 @@ public class TogetherServerNetwork {
             if (modelId == null || modelId.isEmpty()) {
                 return;
             }
-            BehaviorLogManager.record(player, BehaviorType.UPLOAD.id, BehaviorType.SUB_UPLOAD_MODELS, "", Collections.singletonList(modelId), Map.of(BehaviorLogManager.BYTES_KEY, String.valueOf(bytes)));
+            queueUploadBehavior(player, modelId, bytes);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /** One model's pooled upload reports: file count, summed bytes, last report time. */
+    private static class PendingUpload {
+        int files;
+        long bytes;
+        long lastTime;
+    }
+
+    /** Player UUID -> modelId -> pending upload aggregate. Touched on the server
+     * thread (upload receivers and the tick sweep); synchronized for safety. */
+    private static final Map<UUID, Map<String, PendingUpload>> pendingUploadAggregates = new ConcurrentHashMap<>();
+
+    /** How long a model's aggregate waits for more files after the last one before being logged. */
+    private static final long UPLOAD_AGGREGATE_WINDOW_MS = 3000L;
+
+    /** Pool a per-file upload report into its model's pending aggregate; the tick
+     * sweep logs it once that model has been quiet for {@link #UPLOAD_AGGREGATE_WINDOW_MS}. */
+    private static void queueUploadBehavior(ServerPlayerEntity player, String modelId, long bytes) {
+        synchronized (pendingUploadAggregates) {
+            PendingUpload pending = pendingUploadAggregates
+                .computeIfAbsent(player.getUuid(), k -> new HashMap<>())
+                .computeIfAbsent(modelId, k -> new PendingUpload());
+
+            pending.files++;
+            pending.bytes += bytes;
+            pending.lastTime = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Log pending upload aggregates of this player. {@code forceAll} logs every
+     * model now (player quit / server stop); otherwise only models quiet for
+     * the whole window are flushed. Logging happens outside the lock —
+     * BehaviorLogManager.record takes its own lock.
+     */
+    private static void flushUploadAggregates(ServerPlayerEntity player, boolean forceAll) {
+        UUID id = player.getUuid();
+        long now = System.currentTimeMillis();
+        ArrayList<String> flushedModels = new ArrayList<String>();
+        ArrayList<PendingUpload> flushedData = new ArrayList<PendingUpload>();
+
+        synchronized (pendingUploadAggregates) {
+            Map<String, PendingUpload> models = pendingUploadAggregates.get(id);
+
+            if (models == null) {
+                return;
+            }
+
+            for (Map.Entry<String, PendingUpload> entry : models.entrySet()) {
+                if (!forceAll && now - entry.getValue().lastTime < UPLOAD_AGGREGATE_WINDOW_MS) {
+                    continue;
+                }
+
+                flushedModels.add(entry.getKey());
+                flushedData.add(entry.getValue());
+            }
+
+            for (String modelId : flushedModels) {
+                models.remove(modelId);
+            }
+
+            if (models.isEmpty()) {
+                pendingUploadAggregates.remove(id);
+            }
+        }
+
+        for (int i = 0; i < flushedModels.size(); i++) {
+            try {
+                PendingUpload pending = flushedData.get(i);
+                Map<String, String> extra = new HashMap<String, String>();
+
+                extra.put(BehaviorLogManager.BYTES_KEY, String.valueOf(pending.bytes));
+                extra.put("files", String.valueOf(pending.files));
+
+                BehaviorLogManager.record(player, BehaviorType.UPLOAD.id, BehaviorType.SUB_UPLOAD_MODELS, "", Collections.singletonList(flushedModels.get(i)), extra);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    /**
+     * End-of-tick sweep: log every model whose file stream has been quiet for
+     * the aggregate window, so the tail of an upload burst isn't stuck pending
+     * until the player quits. Pending aggregates of players gone from the
+     * player list are dropped (the disconnect hook flushes them first).
+     */
+    public static void sweepUploadAggregates(MinecraftServer server) {
+        if (pendingUploadAggregates.isEmpty()) {
+            return;
+        }
+
+        for (UUID id : new ArrayList<UUID>(pendingUploadAggregates.keySet())) {
+            ServerPlayerEntity player = server.getPlayerManager().getPlayer(id);
+
+            if (player != null) {
+                flushUploadAggregates(player, false);
+            } else {
+                pendingUploadAggregates.remove(id);
+            }
         }
     }
 
