@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
+import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.command.EntitySelector;
@@ -24,6 +25,11 @@ public class TogetherCommands {
         target.executes(ctx -> {
             Collection<ServerPlayerEntity> players = EntityArgumentType.getPlayers(ctx, "targets");
             ServerCommandSource source = ctx.getSource();
+            /* Coop recording sessions own their members' recording flow; the command must
+             * not remote-toggle someone a coop session is driving (double bookkeeping). */
+            players = players.stream()
+                .filter(p -> !CoopSessionManager.isPlayerInSession(p.getUuid()))
+                .collect(java.util.stream.Collectors.toList());
             boolean anyRecording = players.stream().anyMatch(TogetherServerNetwork::isPlayerRecording);
             if (anyRecording) {
                 ArrayList<ServerPlayerEntity> stopping = new ArrayList<ServerPlayerEntity>();

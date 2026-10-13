@@ -37,4 +37,8 @@ public enum BehaviorType
     public static final int SUB_OTHER = 5;
     /** A player asked the server (via the model list's context menu) to delete a model. */
     public static final int SUB_REQUEST_MODEL_DELETE = 6;
+    /** Reserved for the future "revert this change" plan — do NOT reuse. */
+    public static final int SUB_REVERT = 7;
+    /** A cooperative recording session was merged into a film (host + members + picks in extra). */
+    public static final int SUB_COOP_RECORDING = 8;
 }

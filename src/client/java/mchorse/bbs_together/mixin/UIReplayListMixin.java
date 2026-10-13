@@ -51,9 +51,12 @@ public class UIReplayListMixin {
     private int together_lastSelectionsSize = -1;
     private List<Replay> together_replaysBeforeStructureChange;
 
-    /** Read-only (level 0) gate: cancel the operation when the player may not edit films. */
+    /** Read-only (level 0) gate: cancel the operation when the player may not edit films.
+     * Also blocks structure changes while a cooperative recording session has the player —
+     * claims are addressed by replay index, and a delete/add mid-session would scramble
+     * everyone's picks. */
     private static boolean together_mayEditFilm() {
-        return BbsOpClientState.canEdit("film");
+        return BbsOpClientState.canEdit("film") && !mchorse.bbs_together.network.CoopClient.isInSession();
     }
 
     @Inject(method={"pasteReplay"}, at={@At(value="HEAD")}, remap=false)

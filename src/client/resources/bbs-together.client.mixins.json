@@ -33,7 +33,8 @@
                    "UIClipsMixin",
                    "UIFormCategoryModelSizeMixin",
                    "FormCellRendererTooLargeMixin",
-                   "ModelManagerMixin"
+                   "ModelManagerMixin",
+                   "UIBaseMenuCoopPopupMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1

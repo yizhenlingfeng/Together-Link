@@ -4,6 +4,7 @@ import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.ui.framework.UIScreen;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_together.network.CoopClient;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
@@ -27,6 +28,23 @@ implements ClientModInitializer {
         });
         ClientPlayConnectionEvents.JOIN.register((handler, packetSender, client) -> TogetherClientNetwork.onJoin());
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> TogetherClientNetwork.reset());
+        /* Coop recording: in-world render of the pinned invite popup, popup hotkey
+         * polling (serves the BBS-screen path too), and releasing a room screen that
+         * was waiting for a vanilla screen to close. */
+        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+            if (!TogetherClientNetwork.isConnected()) {
+                return;
+            }
+            CoopClient.pollPopupKeys();
+            CoopClient.update();
+            if (CoopClient.pendingInvite == null || UIScreen.getCurrentMenu() != null) {
+                return;
+            }
+            MinecraftClient mc = MinecraftClient.getInstance();
+            Batcher2D batcher = new Batcher2D(drawContext);
+            CoopClient.renderPopup(batcher, mc.getWindow().getScaledWidth(), mc.getWindow().getScaledHeight());
+            batcher.flush();
+        });
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             int padding;
             if (!TogetherClientNetwork.isConnected()) {

@@ -33,6 +33,8 @@ public class TogetherSettings {
     public static ValueBoolean defaultKeyframeColorEnabled;
     public static ValueInt defaultKeyframeColor;
     public static ValueInt behaviorLogLimit;
+    /** Cooperative recording: how long invitees have to accept a request (seconds). */
+    public static ValueInt coopInviteSeconds;
 
     public static void register(SettingsBuilder settingsBuilder) {
         settingsBuilder.category("cdn");
@@ -64,6 +66,9 @@ public class TogetherSettings {
         defaultKeyframeColor = settingsBuilder.getInt("default_color", -1).color();
         settingsBuilder.category("behaviors");
         behaviorLogLimit = settingsBuilder.getInt("behavior_log_limit", 1000, 100, 50000);
+        settingsBuilder.category("coop");
+        /* How long invitees have to accept a cooperative recording request. */
+        coopInviteSeconds = settingsBuilder.getInt("coop_invite_seconds", 60, 10, 600);
     }
 
     /**

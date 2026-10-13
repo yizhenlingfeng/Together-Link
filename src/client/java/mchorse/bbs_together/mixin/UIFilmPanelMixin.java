@@ -261,6 +261,33 @@ public class UIFilmPanelMixin {
         TogetherClientNetwork.sendFilmListChanged();
     }
 
+    /* Coop recording guards. BBS's film panel stops whatever take is running the moment
+     * the dashboard opens (pickUpRecording, an onOpen hook) and applies it to this panel's
+     * film — which during a cooperative take would kill it behind the member's back, and
+     * NPE-crash when the panel has no film loaded. */
+
+    @Inject(method={"pickUpRecording"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
+    private void together$guardPickUpRecording(CallbackInfo ci) {
+        /* A coop take only ends when the member stops it or hands it in. */
+        if (mchorse.bbs_together.network.CoopClient.isInSession() || ((UIFilmPanel)(Object)this).getData() == null) {
+            ci.cancel();
+        }
+    }
+
+    @Inject(method={"applyRecordedKeyframes"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
+    private void together$guardApplyRecordedKeyframes(Recorder recorder, Film film, CallbackInfo ci) {
+        /* The take belongs to the coop session's film: when this panel holds nothing or a
+         * different film, deliver it directly instead of dropping or misplacing it
+         * (vanilla would also NPE on the null film). */
+        if (film == null || (mchorse.bbs_together.network.CoopClient.isInSession()
+            && !film.getId().equals(mchorse.bbs_together.network.CoopClient.room.filmId))) {
+            if (mchorse.bbs_together.network.CoopClient.isCoopTakeActive()) {
+                mchorse.bbs_together.network.CoopClient.sendTakeDirect(recorder);
+            }
+            ci.cancel();
+        }
+    }
+
     @Inject(method={"applyRecordedKeyframes"}, at={@At(value="TAIL")}, remap=false)
     private void onApplyRecordedKeyframesFix19(Recorder recorder, Film film, CallbackInfo callbackInfo) {
         if (recorder == null || recorder.hasNotStarted()) {
@@ -274,6 +301,12 @@ public class UIFilmPanelMixin {
 
     @Inject(method={"applyRecordedKeyframes"}, at={@At(value="TAIL")}, remap=false)
     private void onApplyRecordedKeyframes(Recorder recorder, Film film, CallbackInfo ci) {
+        /* Coop takes travel to the server exclusively through RECORDING_FINISHED; the
+         * per-channel sync below would only race the server-side merge (and is refused
+         * there anyway while the session lock holds). */
+        if (mchorse.bbs_together.network.CoopClient.isInSession()) {
+            return;
+        }
         if (!TogetherClientNetwork.isConnected()) {
             return;
         }

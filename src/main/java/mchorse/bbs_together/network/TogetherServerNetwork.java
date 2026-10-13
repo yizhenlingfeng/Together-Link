@@ -142,6 +142,20 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_BBSOP_SET = new Identifier("bbs_together", "s_bbsop_set");
     /** C2S: a level-2/vanilla-OP player allows/denies one editable domain for a level-1 player. */
     public static final Identifier SERVER_BBSOP_GRANT = new Identifier("bbs_together", "s_bbsop_grant");
+    /* ---- Cooperative recording ("request coop recording"); logic in CoopSessionManager ---- */
+    public static final Identifier SERVER_COOP_INVITE = new Identifier("bbs_together", "s_coop_invite");
+    public static final Identifier SERVER_COOP_RESPOND = new Identifier("bbs_together", "s_coop_respond");
+    public static final Identifier SERVER_COOP_PICK = new Identifier("bbs_together", "s_coop_pick");
+    public static final Identifier SERVER_COOP_LEAVE = new Identifier("bbs_together", "s_coop_leave");
+    public static final Identifier SERVER_COOP_START = new Identifier("bbs_together", "s_coop_start");
+    public static final Identifier SERVER_COOP_CANCEL = new Identifier("bbs_together", "s_coop_cancel");
+    public static final Identifier SERVER_COOP_MOUSE = new Identifier("bbs_together", "s_coop_mouse");
+    public static final Identifier CLIENT_COOP_REQUEST = new Identifier("bbs_together", "c_coop_request");
+    public static final Identifier CLIENT_COOP_REQUEST_CLOSED = new Identifier("bbs_together", "c_coop_request_closed");
+    public static final Identifier CLIENT_COOP_ROOM = new Identifier("bbs_together", "c_coop_room");
+    public static final Identifier CLIENT_COOP_END = new Identifier("bbs_together", "c_coop_end");
+    public static final Identifier CLIENT_COOP_BEGIN = new Identifier("bbs_together", "c_coop_begin");
+    public static final Identifier CLIENT_COOP_MOUSE = new Identifier("bbs_together", "c_coop_mouse");
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> playerCrushers = new ConcurrentHashMap();
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
@@ -279,8 +293,18 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MODEL_DELETE_DECISION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteDecision(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_INVITE, (server, player, handler, buf, resp) -> CoopSessionManager.handleInvite(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_RESPOND, (server, player, handler, buf, resp) -> CoopSessionManager.handleRespond(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_PICK, (server, player, handler, buf, resp) -> CoopSessionManager.handlePick(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_LEAVE, (server, player, handler, buf, resp) -> CoopSessionManager.handleLeave(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_START, (server, player, handler, buf, resp) -> CoopSessionManager.handleStart(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_CANCEL, (server, player, handler, buf, resp) -> CoopSessionManager.handleCancel(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_MOUSE, (server, player, handler, buf, resp) -> CoopSessionManager.handleMouse(server, player, buf));
         BBSTogetherFix28Server.registerReceivers();
-        ServerTickEvents.END_SERVER_TICK.register(server -> TogetherServerNetwork.sweepUploadAggregates(server));
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            TogetherServerNetwork.sweepUploadAggregates(server);
+            CoopSessionManager.sweep(server);
+        });
     }
 
     public static void reset() {
@@ -311,6 +335,7 @@ public class TogetherServerNetwork {
         }
         assetSendQueues.clear();
         assetDrainActive.clear();
+        CoopSessionManager.reset();
         BBSTogetherFix28Server.resetState();
     }
 
@@ -320,6 +345,8 @@ public class TogetherServerNetwork {
             flushUploadAggregates(player, true);
 
             UUID uuid = player.getUuid();
+
+            CoopSessionManager.onDisconnect(uuid, server);
             LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
             synchronized (linkedHashMap) {
                 playerReplaySelections.remove(uuid);
@@ -1188,6 +1215,11 @@ public class TogetherServerNetwork {
                 return;
             }
             server.execute(() -> {
+                /* Coop takes are collected and merged once everyone handed in; the legacy
+                 * per-player merge must not also run (double merge + master bookkeeping). */
+                if (CoopSessionManager.onRecordingFinished(server, player, filmId, replayIndex, replayData.asMap())) {
+                    return;
+                }
                 BBSTogetherFix18.mergeRecordingFinished(filmId, replayIndex, replayData, server);
                 recordingPlayers.remove(player.getUuid());
                 pendingStopPlayers.remove(player.getUuid());
@@ -1290,6 +1322,11 @@ public class TogetherServerNetwork {
                 return;
             }
             server.execute(() -> {
+                /* Coop session owns the film: members' local copies are stale (only their
+                 * own take) and their writes would wipe the merged takes. */
+                if (CoopSessionManager.isFilmLockedForEditing(filmId)) {
+                    return;
+                }
                 Film stored = (Film)BBSMod.getFilms().load(filmId);
                 Film incomingFilm = new Film();
                 incomingFilm.fromData((BaseType)incoming.asMap());
@@ -1964,6 +2001,10 @@ public class TogetherServerNetwork {
                     ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_FILM_DATA_SYNC, (PacketByteBuf)outBuf);
                 }
                 if (path.size() >= 4 && "replays".equals(path.get(0)) && (film = (Film)BBSMod.getFilms().load(filmId)) != null) {
+                    /* Coop session owns the film — refused writes would wipe merged takes. */
+                    if (CoopSessionManager.isFilmLockedForEditing(filmId)) {
+                        return;
+                    }
                     lastSavedFilmSnapshots.computeIfAbsent(filmId, k -> (MapType)film.toData());
                     TogetherServerNetwork.applyPathToFilm(film, path, DataStorageUtils.readFromBytes((byte[])bytes));
                     /* A4: live edits no longer rewrite the whole film on the main thread per

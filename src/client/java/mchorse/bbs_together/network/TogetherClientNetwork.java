@@ -228,6 +228,12 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MODEL_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleModelDeletedPacket(client, buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST, (client, handler, buf, resp) -> CoopClient.handleRequest(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST_CLOSED, (client, handler, buf, resp) -> CoopClient.handleRequestClosed(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_ROOM, (client, handler, buf, resp) -> CoopClient.handleRoom(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_END, (client, handler, buf, resp) -> CoopClient.handleEnd(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_MOUSE, (client, handler, buf, resp) -> CoopClient.handleMouse(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_BEGIN, (client, handler, buf, resp) -> CoopClient.handleBegin(client, buf));
         isBBSTogetherOnServer = true;
         BBSTogetherFix28Client.registerReceivers();
         BBSTogetherFixReplayStructure.registerClientReceiver();
@@ -269,6 +275,7 @@ public class TogetherClientNetwork {
         autoSyncScheduled.set(false);
         lastAutoSyncMs = 0L;
         mchorse.bbs_together.bbsop.BbsOpClientState.reset();
+        CoopClient.reset();
         isBBSTogetherOnServer = false;
         BBSTogetherFix28Client.resetState();
         BBSTogetherFixReplayStructure.resetClient();
