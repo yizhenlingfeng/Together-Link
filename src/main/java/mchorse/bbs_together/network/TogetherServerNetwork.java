@@ -54,6 +54,8 @@ import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorEntry;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
+import mchorse.bbs_together.commits.FilmCommit;
+import mchorse.bbs_together.commits.FilmCommitStore;
 import mchorse.bbs_together.utils.ModelPathUtils;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -170,6 +172,33 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_COOP_END = new Identifier("bbs_together", "c_coop_end");
     public static final Identifier CLIENT_COOP_BEGIN = new Identifier("bbs_together", "c_coop_begin");
     public static final Identifier CLIENT_COOP_MOUSE = new Identifier("bbs_together", "c_coop_mouse");
+    /* ---- Film commits ("影片编辑分支"); the graph itself lives in commits/FilmCommitStore ---- */
+    /** C2S: ask for the whole commit graph of one film. */
+    public static final Identifier SERVER_COMMITS_QUERY = new Identifier("bbs_together", "s_commits_query");
+    /** C2S: ask which films have commits at all. */
+    public static final Identifier SERVER_COMMIT_INDEX = new Identifier("bbs_together", "s_commit_index");
+    /** C2S: ask for one commit's diff. */
+    public static final Identifier SERVER_COMMIT_DIFF = new Identifier("bbs_together", "s_commit_diff");
+    /** C2S: rename one commit's message (the graph shape does not change). */
+    public static final Identifier SERVER_COMMIT_RENAME = new Identifier("bbs_together", "s_commit_rename");
+    /** C2S: put the film back to the state of one commit. */
+    public static final Identifier SERVER_COMMIT_REVERT = new Identifier("bbs_together", "s_commit_revert");
+    /** C2S: commit the film as it is now. */
+    public static final Identifier SERVER_COMMIT_CREATE = new Identifier("bbs_together", "s_commit_create");
+    /** C2S: start a branch at one commit. */
+    public static final Identifier SERVER_BRANCH_CREATE = new Identifier("bbs_together", "s_branch_create");
+    /** C2S: check a branch out, i.e. put the film back to that branch's head. */
+    public static final Identifier SERVER_BRANCH_CHECKOUT = new Identifier("bbs_together", "s_branch_checkout");
+    /** S2C: the whole graph of one film. */
+    public static final Identifier CLIENT_COMMITS = new Identifier("bbs_together", "c_commits");
+    /** S2C: which films have commits at all. */
+    public static final Identifier CLIENT_COMMIT_INDEX = new Identifier("bbs_together", "c_commit_index");
+    /** S2C: one commit was added. */
+    public static final Identifier CLIENT_COMMIT_ADDED = new Identifier("bbs_together", "c_commit_added");
+    /** S2C: one commit's diff. */
+    public static final Identifier CLIENT_COMMIT_DIFF = new Identifier("bbs_together", "c_commit_diff");
+    /** S2C: one commit was renamed. */
+    public static final Identifier CLIENT_COMMIT_RENAMED = new Identifier("bbs_together", "c_commit_renamed");
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> playerCrushers = new ConcurrentHashMap();
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
@@ -325,6 +354,14 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_START, (server, player, handler, buf, resp) -> CoopSessionManager.handleStart(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_CANCEL, (server, player, handler, buf, resp) -> CoopSessionManager.handleCancel(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_MOUSE, (server, player, handler, buf, resp) -> CoopSessionManager.handleMouse(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMITS_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitsQuery(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_INDEX, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitIndex(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_DIFF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitDiff(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_RENAME, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRename(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_REVERT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRevert(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitCreate(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BRANCH_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCreate(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BRANCH_CHECKOUT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCheckout(server, player, buf));
         BBSTogetherFix28Server.registerReceivers();
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TogetherServerNetwork.sweepUploadAggregates(server);
@@ -342,6 +379,7 @@ public class TogetherServerNetwork {
         playerInFilmScreen.clear();
         deletedFilmIds.clear();
         lastSavedFilmSnapshots.clear();
+        FilmCommitStore.unload();
         LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
         synchronized (linkedHashMap) {
             playerReplaySelections.clear();
@@ -731,7 +769,6 @@ public class TogetherServerNetwork {
                 final MapType manifest = new MapType();
                 StringBuilder fingerprint = new StringBuilder();
                 final long syncMaxBytes = TogetherServerNetwork.syncMaxBytes();
-                final java.util.concurrent.atomic.AtomicLong skipped = new java.util.concurrent.atomic.AtomicLong();
                 Files.walkFileTree(assetsPath, (FileVisitor<? super Path>)new SimpleFileVisitor<Path>(){
 
                     @Override
@@ -739,15 +776,12 @@ public class TogetherServerNetwork {
                         if (!attrs.isRegularFile()) {
                             return FileVisitResult.CONTINUE;
                         }
-                        /* Huge media (screen recordings in particular) must not be part of the
-                         * automatic sync: one 700 MB video is enough to saturate a link for
-                         * minutes on first join and get the client dropped by the 30 s read
-                         * timeout. They stay on the server; raise/zero asset_sync_max_mb to
-                         * sync them anyway. */
-                        if (syncMaxBytes > 0L && attrs.size() > syncMaxBytes) {
-                            skipped.incrementAndGet();
-                            return FileVisitResult.CONTINUE;
-                        }
+                        /* Over-size assets (attrs.size() > syncMaxBytes) stay in the manifest on
+                         * purpose. Hiding them made a too-big video/model indistinguishable from a
+                         * file that simply failed to sync: it was absent everywhere with no
+                         * explanation. Clients see the size, skip the transfer and write a named
+                         * stub, so the entry shows up dimmed as "文件尺寸过大" instead of vanishing.
+                         * No bytes travel for these files unless the limit is raised. */
                         String relativePath = assetsPath.relativize(file).toString().replace(File.separator, "/");
                         /* ".bbsup" / ".bbspart" are transient multi-slice temps: they may be
                          * deleted or promoted at any moment, so never advertise them or
@@ -1584,6 +1618,8 @@ public class TogetherServerNetwork {
                 playerEditingFilm.put(player.getUuid(), filmId);
                 BBSMod.getFilms().save(filmId, merged);
                 lastSavedFilmSnapshots.put(filmId, merged);
+                /* Saving writes the film, it does not commit it: a commit is the author's
+                 * decision, made with the commit button in the film editor */
                 AtomicBoolean pending = filmSaveDirty.get(filmId);
                 if (pending != null) {
                     pending.set(false);
@@ -1598,6 +1634,241 @@ public class TogetherServerNetwork {
                 TogetherServerNetwork.broadcastReplaySelections(server, filmId);
             });
         });
+    }
+
+    /* Film commits */
+
+    private static void handleCommitIndex(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        /* Browsing history is read-only, so it needs no film permission: the films themselves
+         * are readable by everyone on the server too */
+        server.execute(() -> TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_COMMIT_INDEX, (BaseType)FilmCommitStore.index(), outBuf -> {}));
+    }
+
+    private static void handleCommitsQuery(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        String filmId = buf.readString();
+
+        server.execute(() -> {
+            MapType graph = FilmCommitStore.list(filmId);
+
+            if (graph == null) {
+                graph = new MapType();
+                graph.putString("film", filmId);
+                graph.putString("head", "");
+                graph.put("commits", new ListType());
+                graph.put("branches", new MapType());
+            }
+
+            TogetherServerNetwork.sendCommits(player, graph, filmId);
+        });
+    }
+
+    private static void handleCommitDiff(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        String filmId = buf.readString();
+        String commitId = buf.readString();
+
+        server.execute(() -> {
+            MapType diff = FilmCommitStore.diff(filmId, commitId);
+
+            if (diff == null) {
+                return;
+            }
+
+            TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_COMMIT_DIFF, (BaseType)diff, outBuf -> {
+                outBuf.writeString(filmId);
+                outBuf.writeString(commitId);
+            });
+        });
+    }
+
+    private static void handleCommitRename(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+            return;
+        }
+
+        String filmId = buf.readString();
+        String commitId = buf.readString();
+        String message = buf.readString(1024);
+
+        server.execute(() -> {
+            /* The message is shared history: only its author and managers may rewrite it,
+             * and the store rejects empty or over-long ones */
+            String author = FilmCommitStore.authorOf(filmId, commitId);
+
+            if (author == null) {
+                return;
+            }
+
+            if (!author.equals(player.getUuid().toString()) && !BbsOpManager.canManage(player)) {
+                return;
+            }
+
+            if (!FilmCommitStore.rename(filmId, commitId, message)) {
+                return;
+            }
+
+            TogetherServerNetwork.broadcastCommitRenamed(server, filmId, commitId, message.trim());
+        });
+    }
+
+    private static void handleCommitRevert(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) /* level 1/2 bypass the gamerule/OP gate: the owner granted editing */) {
+            return;
+        }
+
+        String filmId = buf.readString();
+        String commitId = buf.readString();
+        int mode = buf.readByte();
+
+        server.execute(() -> {
+            /* Reverting writes the old snapshot over the film, so a coop session that owns
+             * the film must not be clobbered mid-take */
+            if (CoopSessionManager.isFilmLockedForEditing(filmId)) {
+                return;
+            }
+
+            if (mode < FilmCommitStore.ROLLBACK_KEEP || mode > FilmCommitStore.RESET_DELETE) {
+                return;
+            }
+
+            MapType snapshot = FilmCommitStore.rollback(filmId, commitId, mode);
+
+            if (snapshot == null) {
+                return;
+            }
+
+            Film film = new Film();
+
+            film.fromData((BaseType)snapshot);
+
+            MapType reverted = (MapType)film.toData();
+
+            playerEditingFilm.put(player.getUuid(), filmId);
+            BBSMod.getFilms().save(filmId, reverted);
+            lastSavedFilmSnapshots.put(filmId, reverted);
+
+            BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, new ArrayList<String>(), Map.of("commit", commitId, "rollback", String.valueOf(mode)));
+
+            /* The dropped commits must disappear from everyone's graph, so the whole list goes out */
+            TogetherServerNetwork.broadcastCommits(server, filmId, FilmCommitStore.list(filmId));
+            TogetherServerNetwork.broadcastFilmSaved(server, filmId, reverted);
+            TogetherServerNetwork.broadcastFilmSelections(server);
+            TogetherServerNetwork.broadcastReplaySelections(server, filmId);
+        });
+    }
+
+    /**
+     * Commit the film as it is on disk right now. The author presses a button in the film editor;
+     * nothing is committed behind their back. Everyone sees the new node immediately.
+     */
+    private static void handleCommitCreate(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
+            return;
+        }
+
+        String filmId = buf.readString();
+        String message = buf.readString(FilmCommit.MAX_MESSAGE * 2);
+
+        server.execute(() -> {
+            Film film = BBSMod.getFilms().load(filmId);
+
+            if (film == null) {
+                return;
+            }
+
+            MapType data = (MapType) film.toData();
+            FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), message);
+
+            if (commit == null) {
+                return;
+            }
+
+            /* The film on disk is the committed state from now on, so the next save's baseline
+             * is this, not whatever the last automatic save left behind */
+            lastSavedFilmSnapshots.put(filmId, data);
+
+            BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, new ArrayList<String>(), Map.of("commit", commit.id));
+
+            TogetherServerNetwork.broadcastCommitAdded(server, filmId, commit);
+        });
+    }
+
+    /** Branch off one commit without touching the film. */
+    private static void handleBranchCreate(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
+            return;
+        }
+
+        String filmId = buf.readString();
+        String name = buf.readString(FilmCommit.MAX_BRANCH * 2);
+        String commitId = buf.readString();
+
+        server.execute(() -> {
+            if (!FilmCommitStore.createBranch(filmId, name, commitId)) {
+                return;
+            }
+
+            TogetherServerNetwork.broadcastCommits(server, filmId, FilmCommitStore.list(filmId));
+        });
+    }
+
+    /** Check a branch out: the film goes back to that branch's head, and commits follow it. */
+    private static void handleBranchCheckout(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
+            return;
+        }
+
+        String filmId = buf.readString();
+        String branch = buf.readString(FilmCommit.MAX_BRANCH * 2);
+
+        server.execute(() -> {
+            /* Same reason as reverting: a coop take owns the film */
+            if (CoopSessionManager.isFilmLockedForEditing(filmId)) {
+                return;
+            }
+
+            MapType snapshot = FilmCommitStore.checkout(filmId, branch);
+
+            if (snapshot == null) {
+                return;
+            }
+
+            playerEditingFilm.put(player.getUuid(), filmId);
+            BBSMod.getFilms().save(filmId, snapshot);
+            lastSavedFilmSnapshots.put(filmId, snapshot);
+
+            BehaviorLogManager.record(player, BehaviorType.EDIT.id, BehaviorType.SUB_EDIT_FILM, filmId, new ArrayList<String>(), Map.of("branch", branch));
+
+            TogetherServerNetwork.broadcastFilmSaved(server, filmId, snapshot);
+            TogetherServerNetwork.broadcastCommits(server, filmId, FilmCommitStore.list(filmId));
+            TogetherServerNetwork.broadcastFilmSelections(server);
+            TogetherServerNetwork.broadcastReplaySelections(server, filmId);
+        });
+    }
+
+    private static void broadcastCommits(MinecraftServer server, String filmId, MapType graph) {
+        for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
+            TogetherServerNetwork.sendCommits(recipient, graph, filmId);
+        }
+    }
+
+    private static void sendCommits(ServerPlayerEntity recipient, MapType graph, String filmId) {
+        TogetherServerNetwork.crusherFor(recipient).send((PlayerEntity)recipient, CLIENT_COMMITS, (BaseType)graph, outBuf -> outBuf.writeString(filmId));
+    }
+
+    private static void broadcastCommitAdded(MinecraftServer server, String filmId, FilmCommit commit) {
+        for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
+            TogetherServerNetwork.crusherFor(recipient).send((PlayerEntity)recipient, CLIENT_COMMIT_ADDED, (BaseType)commit.toData(), outBuf -> outBuf.writeString(filmId));
+        }
+    }
+
+    private static void broadcastCommitRenamed(MinecraftServer server, String filmId, String commitId, String message) {
+        for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
+            PacketByteBuf outBuf = PacketByteBufs.create();
+            outBuf.writeString(filmId);
+            outBuf.writeString(commitId);
+            outBuf.writeString(message);
+            ServerPlayNetworking.send(recipient, (Identifier)CLIENT_COMMIT_RENAMED, outBuf);
+        }
     }
 
     /* Behavior log */

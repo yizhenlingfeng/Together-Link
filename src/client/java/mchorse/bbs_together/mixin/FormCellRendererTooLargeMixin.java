@@ -2,11 +2,15 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.forms.ModelForm;
+import mchorse.bbs_mod.forms.forms.ParticleForm;
+import mchorse.bbs_mod.forms.forms.VideoForm;
+import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.utils.FontRenderer;
 import mchorse.bbs_mod.ui.forms.FormCellRenderer;
 import mchorse.bbs_mod.ui.utils.cells.CellState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.sync.OversizedAssets;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,6 +18,13 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * Marks a morph cell whose asset is too big to sync: red tint plus a "too large" label.
+ *
+ * <p>Models are labelled by aggregated model size (a model is many files, none of which may be
+ * over the limit on its own); videos and particles are labelled by the single over-size file
+ * behind them, the same registry the lists and the texture grid use.</p>
+ */
 @Environment(EnvType.CLIENT)
 @Mixin(value = FormCellRenderer.class, remap = false)
 public abstract class FormCellRendererTooLargeMixin
@@ -24,16 +35,58 @@ public abstract class FormCellRendererTooLargeMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private static void together$paintTooLarge(UIContext context, Form form, int x, int y, int w, int h, CellState state, CallbackInfo ci)
     {
-        if (!(form instanceof ModelForm modelForm)) return;
-        String id = modelForm.model.get();
-        if (id == null || !TogetherClientNetwork.tooLargeModels.contains(id)) return;
+        String label = together$label(form);
+
+        if (label == null)
+        {
+            return;
+        }
 
         context.batcher.gradientVBox(x, y, x + w, y + h, TOP_RED, BOT_RED);
 
         FontRenderer font = context.batcher.getFont();
-        String label = "模型过大";
         int tx = x + (w - font.getWidth(label)) / 2;
         int ty = y + (h - font.getHeight()) / 2;
         context.batcher.text(label, tx, ty, 0xFFFFFFFF, true);
+    }
+
+    private static String together$label(Form form)
+    {
+        if (form instanceof ModelForm modelForm)
+        {
+            String id = modelForm.model.get();
+
+            return id != null && TogetherClientNetwork.tooLargeModels.contains(id) ? "模型过大" : null;
+        }
+
+        if (OversizedAssets.isEmpty())
+        {
+            return null;
+        }
+
+        Link link = null;
+
+        if (form instanceof VideoForm videoForm)
+        {
+            link = videoForm.video.get();
+        }
+        else if (form instanceof ParticleForm particleForm)
+        {
+            String effect = particleForm.effect.get();
+
+            if (effect != null && !effect.isEmpty() && OversizedAssets.sizeOf("particles/" + effect + ".json") != null)
+            {
+                return "文件过大";
+            }
+
+            link = particleForm.texture.get();
+        }
+
+        if (link == null)
+        {
+            return null;
+        }
+
+        return OversizedAssets.sizeOf(link.toString()) != null ? "文件过大" : null;
     }
 }

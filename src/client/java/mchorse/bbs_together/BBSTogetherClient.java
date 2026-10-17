@@ -9,6 +9,7 @@ import mchorse.bbs_mod.api.client.events.RegisterL10nEvent;
 import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.ui.UIServerBehaviorsPanel;
+import mchorse.bbs_together.ui.commits.CommitUi;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 
@@ -28,5 +29,10 @@ implements BBSAddonMod {
     public void onRegisterDashboardPanels(RegisterDashboardPanelsEvent event) {
         /* Lands after BBS's own panels (last: the audio editor), per the plan */
         event.dashboard.getPanels().registerPanel(new UIServerBehaviorsPanel(event.dashboard), mchorse.bbs_mod.l10n.L10n.lang("bbs_together.behaviors.title"), Icons.SERVER);
+
+        /* The commit graph is a tab of the film editor (next to the film tabs) and a dock panel next
+         * to the properties panel, so it is not a dashboard panel of its own and has no task bar
+         * icon: the film editor owns it. */
+        CommitUi.install(event.dashboard);
     }
 }

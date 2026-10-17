@@ -33,8 +33,15 @@
                    "UIClipsMixin",
                    "UIFormCategoryModelSizeMixin",
                    "FormCellRendererTooLargeMixin",
+                   "TextureCellRendererOversizedMixin",
+                   "UIListOversizedMixin",
+                   "UILikeableStringListOversizedMixin",
                    "ModelManagerMixin",
-                   "UIBaseMenuCoopPopupMixin"
+                   "UIBaseMenuCoopPopupMixin",
+                   "UIFilmPanelCommitsMixin",
+                   "UIPanelTopBarCommitsMixin",
+                   "UIDataDashboardPanelCommitsMixin",
+                   "UITabListCommitsMixin"
                ],
     "injectors":  {
                       "defaultRequire":  1

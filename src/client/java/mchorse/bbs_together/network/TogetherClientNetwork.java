@@ -19,12 +19,14 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -75,6 +77,7 @@ import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
 import mchorse.bbs_together.sync.AssetSyncTracker;
+import mchorse.bbs_together.ui.commits.FilmCommitClient;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -402,6 +405,11 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_END, (client, handler, buf, resp) -> CoopClient.handleEnd(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_MOUSE, (client, handler, buf, resp) -> CoopClient.handleMouse(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_BEGIN, (client, handler, buf, resp) -> CoopClient.handleBegin(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_INDEX, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitIndexPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitsPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_ADDED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitAddedPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_DIFF, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitDiffPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRenamedPacket(client, buf));
         isBBSTogetherOnServer = true;
         BBSTogetherFix28Client.registerReceivers();
         BBSTogetherFixReplayStructure.registerClientReceiver();
@@ -427,6 +435,7 @@ public class TogetherClientNetwork {
         assetDownloadFinishedAt = 0L;
         tooLargeModels.clear();
         localOnlyModels.clear();
+        mchorse.bbs_together.sync.OversizedAssets.clear();
         pendingSwapFilmId = null;
         pendingSwapFrom = -1;
         pendingSwapTo = -1;
@@ -824,6 +833,17 @@ public class TogetherClientNetwork {
                     }
                     long maxBytes = TogetherClientNetwork.clientMaxAssetBytes();
                     TogetherClientNetwork.tooLargeModels.clear();
+                    /* Over-size assets are advertised but never transferred (a 700 MB video would
+                     * hold the link for minutes and get us dropped). Remembering them lets every
+                     * picker, grid and list paint the entry as "too large" instead of showing a
+                     * hole where a file should be — and the stubs below keep the name present. */
+                    mchorse.bbs_together.sync.OversizedAssets.clear();
+                    for (Map.Entry<String, Long> oversized : serverSizeMap.entrySet()) {
+                        Long oversizedSize = oversized.getValue();
+                        if (oversizedSize != null && oversizedSize.longValue() > maxBytes) {
+                            mchorse.bbs_together.sync.OversizedAssets.mark(oversized.getKey(), oversizedSize.longValue());
+                        }
+                    }
                     /* Models present locally but absent from the server manifest were never uploaded.
                        Only compute this when a non-empty manifest was received, or an un-synced server
                        would wrongly mark every local model as local-only. */
@@ -875,6 +895,17 @@ public class TogetherClientNetwork {
                             String relPath = (String) entry.getKey();
                             Long fileSize = serverSizeMap.get(relPath);
                             if (fileSize != null && fileSize > maxBytes) {
+                                /* Too large to ever arrive: write the stub so BBS can still list
+                                 * the entry (and the UI can label it), instead of leaving a hole.
+                                 * Models are the exception: a model folder is discovered through
+                                 * its config.json, so a stub for any *other* model file would
+                                 * resurrect a half-model (mesh without textures) — the exact
+                                 * bug behind "模型同步了但没有材质". For models only config.json
+                                 * is stubbed, and the rest is left to the "模型过大" cell. */
+                                if (relPath.startsWith("models/") && !relPath.endsWith("/config.json")) {
+                                    continue;
+                                }
+                                TogetherClientNetwork.ensureOversizedPlaceholder(assetsPath, relPath);
                                 continue;
                             }
                             File localFile = new File(assetsFolder, relPath.replace("/", File.separator));
@@ -930,6 +961,14 @@ public class TogetherClientNetwork {
                             try {
                                 String relativePath = assetsPath.relativize((Path)localPath).toString().replace(File.separator, "/");
                                 if (TogetherClientNetwork.isLocalTransferTemp(relativePath)) {
+                                    return;
+                                }
+                                /* An over-size server asset was replaced locally by a stub (see
+                                 * ensureOversizedPlaceholder). Pushing that stub back would
+                                 * overwrite the real file with zero bytes, so skip it here; the
+                                 * server keeps the only full copy and the client keeps the label. */
+                                Long serverSize = (Long)serverSizeMap.get(relativePath);
+                                if (serverSize != null && serverSize.longValue() > upMaxBytes) {
                                     return;
                                 }
                                 String serverSha1 = (String)serverSha1Map.get(relativePath);
@@ -1399,6 +1438,12 @@ public class TogetherClientNetwork {
                         if (size > maxBytes) {
                             String modelId = together$extractModelId(relativePath);
                             if (modelId != null) TogetherClientNetwork.tooLargeModels.add(modelId);
+                            mchorse.bbs_together.sync.OversizedAssets.mark(relativePath, size);
+                            /* Same rule as the manifest pass: never stub a non-config model file,
+                             * or a half-model (mesh without textures) shows up. */
+                            if (!(relativePath.startsWith("models/") && !relativePath.endsWith("/config.json"))) {
+                                TogetherClientNetwork.ensureOversizedPlaceholder(assetsFolder.toPath(), relativePath);
+                            }
                             continue;
                         }
                         File dest = new File(assetsFolder, relativePath.replace("/", File.separator));
@@ -1592,8 +1637,9 @@ public class TogetherClientNetwork {
     }
 
     /** The one asset size ceiling shared by both directions: a file above it is neither
-     * downloaded nor uploaded. The server hides such files from the manifest too, so normally
-     * this only guards against a server that still advertises them. 0 means "no ceiling". */
+     * downloaded nor uploaded. The server still advertises such files (so the client can show
+     * them as "too large" instead of hiding them), but no bytes ever travel for them. 0 means
+     * "no ceiling". */
     public static long clientMaxAssetBytes() {
         int mb = TogetherSettings.getAssetSyncMaxMb();
         if (mb <= 0) {
@@ -1601,6 +1647,45 @@ public class TogetherClientNetwork {
         }
         if (mb > 2048) mb = 2048;
         return (long) mb * 1024L * 1024L;
+    }
+
+    /** 1x1 transparent PNG: a stub image that still decodes, so the texture browser lists it
+     * (and labels it) instead of failing to load a zero-byte file. */
+    private static final byte[] PLACEHOLDER_PNG = Base64.getDecoder().decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+
+    /**
+     * Creates a stub for an over-size asset so the entry keeps existing on disk.
+     *
+     * <p>No bytes are transferred for such a file (that is what the limit is for), but a missing
+     * file is also missing from every picker: the user just sees a hole and cannot tell "not
+     * synced yet" from "too big to sync at all". A stub with the right name and extension lets
+     * BBS list the entry, while {@code OversizedAssets} makes the UI paint it dimmed with
+     * {@code 文件尺寸过大 · 700 MB}. An existing real file is never touched.</p>
+     */
+    public static void ensureOversizedPlaceholder(Path assetsRoot, String relativePath) {
+        if (assetsRoot == null || relativePath == null || relativePath.isEmpty()) {
+            return;
+        }
+        try {
+            Path dest = assetsRoot.resolve(relativePath.replace("/", File.separator));
+            if (Files.exists(dest)) {
+                return;
+            }
+            Path parent = dest.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            String name = dest.getFileName().toString().toLowerCase(Locale.ROOT);
+            byte[] content = name.endsWith(".json") ? new byte[]{ '{', '}' } : (name.endsWith(".png") ? PLACEHOLDER_PNG : new byte[0]);
+            Files.write(dest, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            /* Our own write must not look like an edit, or the watcher would resync, find the
+             * stub "changed" and start a diff loop on a file that can never converge. */
+            mchorse.bbs_together.sync.SelfWriteGuard.record(dest);
+        }
+        catch (Exception e) {
+            /* A stub is cosmetic — never let it break the sync diff. */
+        }
     }
 
     /** "models/foo/bar/textures/x.png" -> "foo/bar". Returns null for non-model paths. */
@@ -2484,6 +2569,138 @@ public class TogetherClientNetwork {
                 behaviorDataStamp++;
             });
         });
+    }
+
+    /* Film commits */
+
+    public static void sendCommitIndex() {
+        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_INDEX, PacketByteBufs.create());
+    }
+
+    public static void sendCommitsQuery(String filmId) {
+        if (!isBBSTogetherOnServer || filmId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMITS_QUERY, (PacketByteBuf)buf);
+    }
+
+    public static void sendCommitDiff(String filmId, String commitId) {
+        if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(commitId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_DIFF, (PacketByteBuf)buf);
+    }
+
+    public static void sendCommitRename(String filmId, String commitId, String message) {
+        if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(commitId);
+        buf.writeString(message == null ? "" : message);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_RENAME, (PacketByteBuf)buf);
+    }
+
+    public static void sendCommitRevert(String filmId, String commitId, int mode) {
+        if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(commitId);
+        buf.writeByte(mode);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_REVERT, (PacketByteBuf)buf);
+    }
+
+    public static void sendCommitCreate(String filmId, String message) {
+        if (!isBBSTogetherOnServer || filmId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(message == null ? "" : message);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_CREATE, (PacketByteBuf)buf);
+    }
+
+    public static void sendBranchCreate(String filmId, String name, String commitId) {
+        if (!isBBSTogetherOnServer || filmId == null || name == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(name);
+        buf.writeString(commitId == null ? "" : commitId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BRANCH_CREATE, (PacketByteBuf)buf);
+    }
+
+    public static void sendBranchCheckout(String filmId, String branch) {
+        if (!isBBSTogetherOnServer || filmId == null || branch == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(branch);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BRANCH_CHECKOUT, (PacketByteBuf)buf);
+    }
+
+    private static void handleCommitIndexPacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            if (!data.isMap()) {
+                return;
+            }
+            client.execute(() -> FilmCommitClient.setIndex(data.asMap()));
+        });
+    }
+
+    private static void handleCommitsPacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            String filmId = packetByteBuf.readString();
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            if (!data.isMap()) {
+                return;
+            }
+            client.execute(() -> FilmCommitClient.setGraph(filmId, data.asMap()));
+        });
+    }
+
+    private static void handleCommitAddedPacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            String filmId = packetByteBuf.readString();
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            if (!data.isMap()) {
+                return;
+            }
+            client.execute(() -> FilmCommitClient.addCommit(filmId, data.asMap()));
+        });
+    }
+
+    private static void handleCommitDiffPacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            String filmId = packetByteBuf.readString();
+            String commitId = packetByteBuf.readString();
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            if (!data.isMap()) {
+                return;
+            }
+            client.execute(() -> FilmCommitClient.setDiff(filmId, commitId, data.asMap()));
+        });
+    }
+
+    private static void handleCommitRenamedPacket(MinecraftClient client, PacketByteBuf buf) {
+        String filmId = buf.readString();
+        String commitId = buf.readString();
+        String message = buf.readString(1024);
+        client.execute(() -> FilmCommitClient.renameCommit(filmId, commitId, message));
     }
 
     private static UIDashboard getDashboardIfOpen() {

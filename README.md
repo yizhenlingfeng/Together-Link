@@ -26,6 +26,15 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - **影片列表/重命名/删除同步**：新增、重命名、删除影片时列表在所有客户端刷新。
 - **回放合并**：支持多人录制的回放片段合并到同一时间线。
 
+### 影片提交（版本历史）
+- **提交**：影片编辑页「影片节点」页签里填写提交信息后点「提交」，服务器为该影片记录一份快照与差异，存在 `<存档>/bbs/films/_commits/` 下，每部影片最多保留 300 条。
+- **提交图**：横轴按影片分列，节点是提交、连线是父子关系；连线固定暗灰色，颜色只用来区分节点；当前分支所在的提交有高亮描边，一眼看出影片现在停在哪。
+- **单个提交颜色**：右键提交节点或右键菜单「提交颜色（短 id）」，用 BBS 自带调色盘取色，颜色只存在本机 `config/bbs_together_commit_colors.json`，不同步给其他人。
+- **撤回 / 回退**：「撤回至此提交」把影片退到该提交的父提交，「回退到此节点」退到该提交本身；两者都弹窗询问「删除相关提交」还是「留在历史里」，选留则旧提交仍在图上可见。
+- **分支**：右键「从此处新建分支」，页签顶部显示当前分支；「切换分支」把影片内容切到目标分支的头部，提交图随之更新。
+- **编辑器里的提交栏**：「影片节点」页签和影片编辑页共用同一个面板，另外在右下角「Properties」组里加了一个「提交」小页签：上面是提交图，下面是提交信息与操作按钮，可拖动分隔条调整大小。
+- **服务端权威**：提交、撤回、回退、切分支全部由服务器落盘后广播，所有客户端同步刷新；影片未解锁或改到一半的写入会被拒绝。
+
 ### 录制同步
 - **一键录制开关**：服务器管理员可通过命令同时控制多名玩家开始/停止录制。
 - **主录制协调**：指定一名"主录制"玩家，其时间线作为基准，其他玩家的录制片段在主录制结束后自动对齐合并。
@@ -123,7 +132,46 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 
 ---
 
+## 影片提交模块（实现说明）
+
+### 服务端
+- `src/main/java/mchorse/bbs_together/commits/FilmCommit.java`：一条提交（id、父提交、分支、信息、作者、时间、类型）。
+- `src/main/java/mchorse/bbs_together/commits/FilmCommitStore.java`：磁盘存档与全部操作。目录 `<存档>/bbs/films/_commits/<影片>/`，`index.dat` 记分支与提交列表，`commits/` 存快照、`diffs/` 存差异；提供 `commit`、`list`、`diff`、`rollback`（四种模式：撤回保留/删除、回退保留/删除）、`createBranch`、`checkout`、`rename`。
+- `TogetherServerNetwork.java` 的提交处理器：校验影片是否被锁、参数是否合法，改盘后广播 `c_commits` / `c_commit_added` / `c_commit_index`，并写入行为日志。
+
+### 协议（`bbs_together` 命名空间）
+`c/s_commit_index`、`c/s_commits`、`c/s_commit_diff`、`c/s_commit_create`、`c/s_commit_rename`、`c/s_commit_revert`（带 mode 字节）、`s_branch_create`、`s_branch_checkout`、`c_commit_added`、`c_commit_renamed`。
+
+### 客户端
+- `network/TogetherClientNetwork.java`：发送与接收上述包。
+- `ui/commits/FilmCommitClient.java`：客户端缓存（索引、各影片提交图、提交差异），`version()` 变一次刷新一次界面。
+- `ui/commits/CommitUi.java`：入口（打开「影片节点」页签、顶栏图标）与撤回/回退确认弹窗。
+- `ui/commits/UICommitsPanel.java`：「影片节点」页本身——左侧有提交的影片列表，右侧提交图，底部选中提交的详情与差异。
+- `ui/commits/UIFilmCommitsView.java`：嵌在影片编辑页「Properties」组里的「提交」页，提交图 + 提交信息 + 操作按钮栏。
+- `ui/commits/UICommitGraph.java`：提交图绘制、命中检测、右键菜单、右键取色。
+- `ui/commits/UICommitActions.java`：底部按钮栏（提交、新建分支、切换分支、撤回）。
+- `ui/commits/UICommitInfo.java`：选中提交的详情、重命名与差异对比。
+- `ui/commits/UICommitRollbackOverlay.java`：撤回/回退的二选一确认弹窗。
+- `ui/commits/CommitColors.java`：每个提交的颜色，存 `config/bbs_together_commit_colors.json`。
+
+### 注入（4 个 mixin，共 7 处）
+- `mixin/UIFilmPanelCommitsMixin.java`：在影片编辑页挂上「提交」dock 页、顶栏图标和「影片节点」页签内容。
+- `mixin/UIPanelTopBarCommitsMixin.java`：页签条为顶栏图标让出位置。
+- `mixin/UIDataDashboardPanelCommitsMixin.java`：让影片编辑页的 `showTab` / `getOpenId` / `saveOpen` 认这个伪数据 id。
+- `mixin/UITabListCommitsMixin.java`：伪数据 id 的页签文字。
+- 新增注入都收在 `src/client/resources/bbs-together.client.mixins.json` 的 client 列表里。
+
+设计与取舍过程见 [`docs/影片提交图-计划.md`](docs/影片提交图-计划.md)。
+
+---
+
 ## 更新日志
+
+### v1.7.5
+- 新增影片提交（版本历史）：「影片节点」页签按影片展示提交图，可提交、撤回、回退、建分支、切分支，提交可单独改色
+- 影片编辑页「Properties」组内新增「提交」小页签，提交图与提交信息就地查看，不用离开编辑页
+- 撤回 / 回退改为一事一议：弹窗选择「删除相关提交」还是「保留在历史里」，不再伪造一条「撤回至 X」的提交
+- 提交图连线固定暗灰色，节点用颜色区分，当前影片所在提交加高亮描边
 
 ### v1.7.4
 - 新增合作录制：右键「录制回放」按钮邀请玩家，对方通过右上角置顶弹窗（快捷键可在 BBS 设置的「影片控制器」分类修改）同意后进入选回放房间；全员认领回放后由发起者开始录制，各成员可中途停止，全员交卷后服务器自动合并并广播
