@@ -1,6 +1,5 @@
 package mchorse.bbs_together.network;
 
-import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
@@ -10,6 +9,7 @@ import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
+import mchorse.bbs_together.commits.FilmBranchStore;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.PacketByteBuf;
@@ -75,6 +75,8 @@ public final class CoopSessionManager {
         public final long id;
         public final String filmId;
         public final UUID host;
+        /** Branch the host was on when the session was created; every member must share it. */
+        public String branch;
         /** Host + everyone who accepted, in join order. */
         public final Map<UUID, Member> members = new LinkedHashMap<>();
         /** Players invited but not (yet) accepted. */
@@ -142,21 +144,31 @@ public final class CoopSessionManager {
     }
 
     /**
-     * Whether the film is under coop control right now (active session, or the post-merge
-     * grace window): server-side film writes from clients must be refused.
+     * Whether one branch of the film is under coop control right now (active session, or the
+     * post-merge grace window): server-side writes to that branch must be refused.
      */
-    public static boolean isFilmLockedForEditing(String filmId) {
-        if (filmId == null) {
+    public static boolean isFilmLockedForEditing(String filmId, String branch) {
+        if (filmId == null || branch == null) {
             return false;
         }
 
-        if (filmSessions.containsKey(filmId)) {
-            return true;
+        Long sessionId = filmSessions.get(filmId);
+
+        if (sessionId != null) {
+            CoopSession session = sessions.get(sessionId);
+
+            if (session != null && branch.equals(session.branch)) {
+                return true;
+            }
         }
 
-        Long expiry = filmLocks.get(filmId);
+        Long expiry = filmLocks.get(lockKey(filmId, branch));
 
         return expiry != null && expiry > System.currentTimeMillis();
+    }
+
+    private static String lockKey(String filmId, String branch) {
+        return filmId + '\t' + branch;
     }
 
     /* =====================================================================================
@@ -243,7 +255,8 @@ public final class CoopSessionManager {
             return;
         }
 
-        Film film = BBSMod.getFilms().load(filmId);
+        String branch = FilmBranchStore.branchOf(filmId, hostId);
+        Film film = FilmBranchStore.working(filmId, branch);
 
         if (film == null) {
             sendChat(host, "bbs_together.coop.error.no_film");
@@ -279,12 +292,20 @@ public final class CoopSessionManager {
                 return;
             }
 
+            /* A coop take records into one film branch: all members must see the same replay
+             * list and write the merged takes back to that branch. */
+            if (!FilmBranchStore.branchOf(filmId, target).equals(branch)) {
+                sendChat(host, "bbs_together.coop.error.branch");
+                return;
+            }
+
             targetPlayers.add(player);
         }
 
         CoopSession session = new CoopSession(nextId++, filmId, hostId);
 
         session.replayCount = replayCount;
+        session.branch = branch;
         session.members.put(hostId, new Member(hostId, host.getGameProfile().getName()));
         session.deadline = System.currentTimeMillis() + inviteDurationMs();
 
@@ -426,7 +447,7 @@ public final class CoopSessionManager {
         }
 
         /* Re-validate against the live film: replays could have been touched since claiming. */
-        Film film = BBSMod.getFilms().load(session.filmId);
+        Film film = FilmBranchStore.working(session.filmId, session.branch);
 
         if (film == null || film.replays.getList().size() < session.replayCount) {
             end(server, session, END_HOST_DISBAND);
@@ -536,7 +557,7 @@ public final class CoopSessionManager {
             return;
         }
 
-        Film film = BBSMod.getFilms().load(session.filmId);
+        Film film = FilmBranchStore.working(session.filmId, session.branch);
 
         if (film != null) {
             List<Replay> replays = film.replays.getList();
@@ -555,7 +576,8 @@ public final class CoopSessionManager {
 
             MapType filmData = (MapType) film.toData();
 
-            BBSMod.getFilms().save(session.filmId, filmData);
+            FilmBranchStore.setWorking(session.filmId, session.branch, filmData);
+            FilmBranchStore.save(session.filmId, session.branch);
 
             /* Push the authoritative merged film to every session participant
              * unconditionally: broadcastFilmSaved only reaches players who are editing
@@ -570,11 +592,11 @@ public final class CoopSessionManager {
                 ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
 
                 if (p != null) {
-                    TogetherServerNetwork.broadcastFilmSavedToAll(server, p, session.filmId, filmData);
+                    TogetherServerNetwork.broadcastFilmSavedToAll(server, p, session.filmId, session.branch, filmData);
                 }
             }
 
-            TogetherServerNetwork.broadcastFilmSaved(server, session.filmId, filmData);
+            TogetherServerNetwork.broadcastFilmSaved(server, session.filmId, session.branch, filmData);
 
             /* One audit row for the whole session, attributed to the host when online. */
             ServerPlayerEntity actor = server.getPlayerManager().getPlayer(session.host);
@@ -677,7 +699,7 @@ public final class CoopSessionManager {
         /* Keep refusing client-side film writes for a grace window: members' local copies
          * are stale until the merge broadcast lands (and members outside the film screen
          * only get it through the unconditional push above). */
-        filmLocks.put(session.filmId, System.currentTimeMillis() + FILM_LOCK_GRACE_MS);
+        filmLocks.put(lockKey(session.filmId, session.branch), System.currentTimeMillis() + FILM_LOCK_GRACE_MS);
 
         Set<UUID> participants = new HashSet<>();
 
@@ -710,7 +732,7 @@ public final class CoopSessionManager {
 
     /** Pushes the full room state to host + members (the room UI is fully server-driven). */
     private static void broadcastRoom(MinecraftServer server, CoopSession session) {
-        Film film = BBSMod.getFilms().load(session.filmId);
+        Film film = FilmBranchStore.working(session.filmId, session.branch);
         List<String> labels = new ArrayList<>();
 
         if (film != null) {

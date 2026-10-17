@@ -19,6 +19,7 @@
     "bbs_together.coop.error.film_busy": "[BBSTogether] 该影片已有进行中的录制会话。",
     "bbs_together.coop.error.no_record": "[BBSTogether] 被邀请的所有玩家都需要影片编辑与录制权限。",
     "bbs_together.coop.error.no_film": "[BBSTogether] 服务器上不存在该影片。",
+    "bbs_together.coop.error.branch": "[BBSTogether] 被邀请的玩家必须与你处于同一影片分支。",
     "bbs_together.coop.error.not_enough_replays": "[BBSTogether] 影片的回放数量不足（每位参与者需要一个回放）。",
     "bbs_together.coop.error.offline": "[BBSTogether] 被邀请的玩家不在线。",
     "bbs_together.coop.notify.merged": "[BBSTogether] 合作录制已合并进影片。",

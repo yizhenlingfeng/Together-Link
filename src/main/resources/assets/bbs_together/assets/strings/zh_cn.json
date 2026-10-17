@@ -160,6 +160,7 @@
   "bbs_together.commits.branch_create": "新建分支",
   "bbs_together.commits.branch_checkout": "检出",
   "bbs_together.commits.branch_here": "从此处新建分支（%s）",
+  "bbs_together.commits.branch_checkout_here": "检出此提交所在分支（%s）",
   "bbs_together.commits.revert_selected": "撤回选中提交",
   "bbs_together.commits.revert_title": "撤回提交",
   "bbs_together.commits.revert_message": "撤回会把影片恢复到这条提交之前的版本。这个提交要一起删掉，还是留在历史里？",

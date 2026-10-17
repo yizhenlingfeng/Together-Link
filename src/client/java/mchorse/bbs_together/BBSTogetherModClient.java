@@ -22,6 +22,7 @@ implements ClientModInitializer {
         BBSTogetherUndoGuard.register();
         BBSSettings.primaryColor.postCallback((value, fromFile) -> TogetherClientNetwork.sendPlayerColor((Integer)BBSSettings.primaryColor.get()));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            TogetherClientNetwork.tickCommitColors();
             if (client.world != null) {
                 TogetherClientNetwork.interpolateCursors(client.getLastFrameDuration());
             }

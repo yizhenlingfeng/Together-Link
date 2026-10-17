@@ -6,6 +6,8 @@ import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.utils.UISplitter;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.network.TogetherEditSyncQueue;
 
 import java.util.function.Supplier;
 
@@ -126,6 +128,14 @@ public class UIFilmCommitsView extends UIElement
 
         menu.action(Icons.REFRESH, L10n.lang("bbs_together.commits.reset"), () -> CommitUi.confirmReset(context, node.filmId, node.commit.id));
         menu.action(Icons.ADD, L10n.lang("bbs_together.commits.branch_here").format(node.commit.shortId()), () -> this.actions.wantBranchAt(node.commit.id));
+
+        if (!node.commit.branch.isEmpty())
+        {
+            menu.action(Icons.RIGHTLOAD, L10n.lang("bbs_together.commits.branch_checkout_here").format(node.commit.branch), () -> {
+                TogetherEditSyncQueue.flushNow(CommitUi.filmPanel());
+                TogetherClientNetwork.sendBranchCheckout(node.filmId, node.commit.branch);
+            });
+        }
 
         menu.action(Icons.COLOR, L10n.lang("bbs_together.commits.commit_color").format(node.commit.shortId()), () -> this.graph.openCommitColor(context, node.filmId, node.commit.id, node.x, node.y));
     }

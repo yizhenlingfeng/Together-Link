@@ -56,6 +56,22 @@ public final class TogetherEditSyncQueue {
             return;
         }
         lastFlush = now;
+        sendAll(panel);
+    }
+
+    /**
+     * Drain now, ignoring the 100 ms throttle. Branch checkout needs every queued edit of the
+     * old branch on the server before the film is replaced with the new branch.
+     */
+    public static void flushNow(UIFilmPanel panel) {
+        if (QUEUE.isEmpty() || !TogetherClientNetwork.isConnected() || BBSTogetherFix22.isApplyingRemoteSync()) {
+            return;
+        }
+        lastFlush = System.currentTimeMillis();
+        sendAll(panel);
+    }
+
+    private static void sendAll(UIFilmPanel panel) {
         if (panel == null || panel.getData() == null) {
             QUEUE.clear();
             return;

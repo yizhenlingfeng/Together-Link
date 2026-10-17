@@ -78,7 +78,10 @@ public final class BBSTogetherFix28Client {
         lastLeaveSnapshotFilmId = string;
         lastLeaveSnapshotAt = l;
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_LEAVE_SNAPSHOT, film.toData(), class_25402 -> class_25402.writeString(string));
+            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_LEAVE_SNAPSHOT, film.toData(), class_25402 -> {
+                class_25402.writeString(string);
+                class_25402.writeString(TogetherClientNetwork.filmBranch(string));
+            });
         }
         catch (ReflectiveOperationException reflectiveOperationException) {
             reflectiveOperationException.printStackTrace();
@@ -90,7 +93,10 @@ public final class BBSTogetherFix28Client {
             return;
         }
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, film.toData(), class_25402 -> class_25402.writeString(string));
+            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, film.toData(), class_25402 -> {
+                class_25402.writeString(string);
+                class_25402.writeString(TogetherClientNetwork.filmBranch(string));
+            });
         }
         catch (ReflectiveOperationException reflectiveOperationException) {
             reflectiveOperationException.printStackTrace();
@@ -102,7 +108,10 @@ public final class BBSTogetherFix28Client {
             return;
         }
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, film.toData(), class_25402 -> class_25402.writeString(string));
+            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, film.toData(), class_25402 -> {
+                class_25402.writeString(string);
+                class_25402.writeString(TogetherClientNetwork.filmBranch(string));
+            });
         }
         catch (ReflectiveOperationException reflectiveOperationException) {
             reflectiveOperationException.printStackTrace();

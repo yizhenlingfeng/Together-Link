@@ -146,6 +146,38 @@ public final class FilmCommitClient
 
         GRAPHS.put(filmId, graph);
 
+        /* The graph now carries a per-player current branch/head; a head snapshot cached for
+         * the previous branch would describe the wrong working changes. */
+        HEADS.remove(filmId);
+        HEAD_IDS.remove(filmId);
+
+        changed();
+    }
+
+    /** The branch this client is on, pushed per player by the server. */
+    public static void setCurrentBranch(String filmId, String branch)
+    {
+        Graph graph = GRAPHS.get(filmId);
+
+        if (graph == null || branch == null || branch.isEmpty() || branch.equals(graph.current))
+        {
+            return;
+        }
+
+        graph.current = branch;
+
+        /* graph.head is "the head this player's working changes diff against", not the
+         * film's default-branch head. */
+        String head = graph.branches.get(branch);
+
+        if (head != null)
+        {
+            graph.head = head;
+        }
+
+        HEADS.remove(filmId);
+        HEAD_IDS.remove(filmId);
+
         changed();
     }
 
@@ -174,7 +206,11 @@ public final class FilmCommitClient
             graph.branches.put(commit.branch, commit.id);
         }
 
-        graph.head = commit.id;
+        /* Another branch's commit must not become the head of this player's branch. */
+        if (commit.branch != null && commit.branch.equals(graph.current))
+        {
+            graph.head = commit.id;
+        }
 
         changed();
     }
@@ -196,6 +232,29 @@ public final class FilmCommitClient
 
             changed();
         }
+    }
+
+    /** Apply the server's colour for one commit; the graph reads it on the next frame. */
+    public static void setColor(String filmId, String commitId, int color)
+    {
+        Graph graph = GRAPHS.get(filmId);
+
+        if (graph == null)
+        {
+            return;
+        }
+
+        FilmCommit commit = graph.find(commitId);
+
+        if (commit == null || commit.color == color)
+        {
+            return;
+        }
+
+        commit.color = color;
+
+        /* Deliberately no version bump: a rebuild recreates every node and would drop the
+         * selection for a purely cosmetic change. The graph draws commit.color every frame. */
     }
 
     public static void setDiff(String filmId, String commitId, MapType data)

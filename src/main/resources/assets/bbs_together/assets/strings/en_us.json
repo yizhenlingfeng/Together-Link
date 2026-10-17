@@ -161,6 +161,7 @@
   "bbs_together.commits.branch_create": "New branch",
   "bbs_together.commits.branch_checkout": "Check out",
   "bbs_together.commits.branch_here": "New branch here (%s)",
+  "bbs_together.commits.branch_checkout_here": "Check out this commit's branch (%s)",
   "bbs_together.commits.revert_selected": "Revert selected commit",
   "bbs_together.commits.revert_title": "Revert commit",
   "bbs_together.commits.revert_message": "Reverting restores the film to the version before this commit. Should the commit be dropped from the history, or kept?",

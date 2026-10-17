@@ -11,7 +11,8 @@ import java.util.List;
  *
  * <p>The id is content addressed: the snapshot, the parents, the author and the time go into the
  * hash, the message does not. Renaming a commit therefore rewrites {@link #message} only, and the
- * node keeps its place in the graph, its parents and its id.</p>
+ * node keeps its place in the graph, its parents and its id. The colour works the same way: it is
+ * stored next to the commit, but it is not part of the hash.</p>
  */
 public final class FilmCommit
 {
@@ -53,6 +54,13 @@ public final class FilmCommit
     /** Summary of the change, as produced by {@link FilmDiffBuilder}. */
     public MapType stats = new MapType();
 
+    /**
+     * Colour of the node in the graph (ARGB), or {@code 0} when nobody has recoloured it.
+     * The value lives on the server with the commit, so every player reads the same colour;
+     * {@code 0} lets the client fall back to gray or to a colour saved by an older version.
+     */
+    public int color = 0;
+
     public String shortId()
     {
         return this.id.length() > SHORT_ID ? this.id.substring(0, SHORT_ID) : this.id;
@@ -85,6 +93,7 @@ public final class FilmCommit
         map.putString("message", this.message);
         map.putInt("kind", this.kind);
         map.put("stats", this.stats);
+        map.putInt("color", this.color);
 
         return map;
     }
@@ -102,6 +111,8 @@ public final class FilmCommit
         commit.message = map.getString("message");
         commit.kind = map.getInt("kind");
         commit.stats = map.getMap("stats");
+        /* Index files written before colours existed simply have no key */
+        commit.color = map.getInt("color", 0);
 
         ListType parents = map.getList("parents");
 

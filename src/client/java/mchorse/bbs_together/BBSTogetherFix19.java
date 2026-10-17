@@ -95,6 +95,7 @@ public final class BBSTogetherFix19 {
             }
             packetCrusher.send((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_RECORDING_FINISHED, baseType, class_25402 -> {
                 class_25402.writeString(string);
+                class_25402.writeString(TogetherClientNetwork.filmBranch(string));
                 class_25402.writeInt(n);
             });
         }

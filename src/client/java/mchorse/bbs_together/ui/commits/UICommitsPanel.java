@@ -115,6 +115,13 @@ public class UICommitsPanel extends UIDashboardPanel
         }
 
         menu.action(Icons.REFRESH, L10n.lang("bbs_together.commits.reset"), () -> CommitUi.confirmReset(context, filmId, commitId));
+
+        if (!node.commit.branch.isEmpty())
+        {
+            menu.action(Icons.RIGHTLOAD, L10n.lang("bbs_together.commits.branch_checkout_here").format(node.commit.branch),
+                () -> TogetherClientNetwork.sendBranchCheckout(filmId, node.commit.branch));
+        }
+
         menu.action(Icons.COLOR, L10n.lang("bbs_together.commits.commit_color").format(node.commit.shortId()), () -> this.graph.openCommitColor(context, filmId, commitId, node.x, node.y));
     }
 

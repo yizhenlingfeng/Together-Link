@@ -19,6 +19,7 @@
     "bbs_together.coop.error.film_busy": "[BBSTogether] This film already has an active recording session.",
     "bbs_together.coop.error.no_record": "[BBSTogether] Everyone invited needs film editing and recording permission.",
     "bbs_together.coop.error.no_film": "[BBSTogether] That film does not exist on the server.",
+    "bbs_together.coop.error.branch": "[BBSTogether] Everyone invited must be on the same film branch as you.",
     "bbs_together.coop.error.not_enough_replays": "[BBSTogether] The film needs at least one replay per participant.",
     "bbs_together.coop.error.offline": "[BBSTogether] One of the invited players is not online.",
     "bbs_together.coop.notify.merged": "[BBSTogether] Cooperative recording merged into the film.",

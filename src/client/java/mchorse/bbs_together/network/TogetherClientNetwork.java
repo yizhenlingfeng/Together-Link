@@ -63,6 +63,7 @@ import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.IUIKeyframeGraph;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.UIKeyframeDopeSheet;
 import mchorse.bbs_mod.utils.DataPath;
+import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_mod.utils.clips.Clips;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
@@ -74,9 +75,11 @@ import mchorse.bbs_together.BBSTogetherFix33Client;
 import mchorse.bbs_together.BBSTogetherFix45;
 import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import mchorse.bbs_together.TogetherSettings;
+import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
 import mchorse.bbs_together.sync.AssetSyncTracker;
+import mchorse.bbs_together.ui.commits.CommitColors;
 import mchorse.bbs_together.ui.commits.CommitUi;
 import mchorse.bbs_together.ui.commits.FilmCommitClient;
 import net.fabricmc.api.EnvType;
@@ -106,6 +109,15 @@ public class TogetherClientNetwork {
     public static final ConcurrentHashMap<String, Map<Integer, List<UUID>>> replaySelections = new ConcurrentHashMap();
     public static final ConcurrentHashMap<String, Map<Integer, UUID>> replayFormLocks = new ConcurrentHashMap();
     public static final ConcurrentHashMap<UUID, String> playersInFilmScreen = new ConcurrentHashMap();
+    /** Film id -> branch this client currently holds for it (server-driven). */
+    private static final ConcurrentHashMap<String, String> filmBranches = new ConcurrentHashMap<>();
+    /** Film id -> player -> commit id currently selected in that film's graph. */
+    private static final ConcurrentHashMap<String, ConcurrentHashMap<UUID, String>> commitSelections = new ConcurrentHashMap<>();
+    /** Film id -> player -> commit id where that player's branch currently sits. */
+    private static final ConcurrentHashMap<String, ConcurrentHashMap<UUID, String>> playerCommitPositions = new ConcurrentHashMap<>();
+    /** Film id -> "branch\trequestTime" while a personal checkout waits for its full film. */
+    private static final ConcurrentHashMap<String, String> pendingBranchCheckouts = new ConcurrentHashMap<>();
+    private static final long BRANCH_CHECKOUT_TIMEOUT_MS = 5000L;
     public static volatile boolean damageControlActive = false;
     public static volatile boolean recordingSessionActive = false;
     public static volatile int assetDownloadTotal = 0;
@@ -136,6 +148,14 @@ public class TogetherClientNetwork {
     public static volatile long behaviorDataStamp = 0;
     /** 0 = normal (follow settings), 1 = download-only resync, 2 = upload-only resync. */
     private static volatile int resyncMode = 0;
+
+    /* Commit colours are server-side now; these only smooth the trip there. */
+    /** Last colour picked per commit, waiting for the picker to go quiet. */
+    private static final Map<String, PendingCommitColor> pendingCommitColors = new LinkedHashMap<>();
+    private static volatile long pendingCommitColorAt = 0L;
+    private static final long COMMIT_COLOR_DEBOUNCE_MS = 250L;
+    /** Legacy local colours already pushed once, so a graph refresh does not resend them. */
+    private static final java.util.Set<String> migratedCommitColors = ConcurrentHashMap.newKeySet();
 
     /* ---- A2: local SHA-1 cache (mtime+size keyed) ------------------------------------- */
 
@@ -389,6 +409,7 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_FILE, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetFilePacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_HINT, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetHintPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH_STATE, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmBranchStatePacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SAVED_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSavedSyncPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DATA_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmDataSyncPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_UNDO_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleUndoRejectedPacket(client, buf));
@@ -412,6 +433,9 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_DIFF, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitDiffPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_HEAD, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitHeadPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRenamedPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitSelectionsPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COMMIT_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerCommitPositionsPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_COLOR, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitColorPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
         isBBSTogetherOnServer = true;
         BBSTogetherFix28Client.registerReceivers();
@@ -424,6 +448,10 @@ public class TogetherClientNetwork {
         playerColors.clear();
         playerCursors.clear();
         filmSelections.clear();
+        filmBranches.clear();
+        commitSelections.clear();
+        playerCommitPositions.clear();
+        pendingBranchCheckouts.clear();
         replaySelections.clear();
         replayFormLocks.clear();
         playersInFilmScreen.clear();
@@ -451,6 +479,9 @@ public class TogetherClientNetwork {
         downloadRetries.clear();
         PENDING_DOWNLOADS.clear();
         ignoredTransfers.clear();
+        pendingCommitColors.clear();
+        pendingCommitColorAt = 0L;
+        migratedCommitColors.clear();
         synchronized (lastReportedSha1) {
             lastReportedSha1.clear();
         }
@@ -497,6 +528,54 @@ public class TogetherClientNetwork {
 
     public static boolean isConnected() {
         return isBBSTogetherOnServer;
+    }
+
+    /** Branch this client currently holds for a film, or empty when unknown yet. */
+    public static String filmBranch(String filmId) {
+        String branch = filmId == null ? null : filmBranches.get(filmId);
+        return branch == null ? "" : branch;
+    }
+
+    private static void setFilmBranch(String filmId, String branch) {
+        if (filmId == null || filmId.isEmpty()) {
+            return;
+        }
+        String previous;
+        if (branch == null || branch.isEmpty()) {
+            previous = filmBranches.remove(filmId);
+        } else {
+            previous = filmBranches.put(filmId, branch);
+            /* Keep the commit graph's current branch in sync even if the following
+             * c_commits packet is delayed or lost: commits must target this branch. */
+            FilmCommitClient.setCurrentBranch(filmId, branch);
+        }
+        /* Replay indices and form locks are branch-specific; keep the previous branch's
+         * markers out of the newly loaded editor. */
+        if (previous != null && !previous.equals(branch)) {
+            replaySelections.remove(filmId);
+            replayFormLocks.remove(filmId);
+        }
+    }
+
+    /** Branch a checkout is waiting for, or null when none is pending (or it expired). */
+    private static String pendingCheckoutBranch(String filmId) {
+        String pending = filmId == null ? null : pendingBranchCheckouts.get(filmId);
+        if (pending == null) {
+            return null;
+        }
+        int tab = pending.indexOf('\t');
+        long at;
+        try {
+            at = Long.parseLong(tab < 0 ? pending : pending.substring(tab + 1));
+        } catch (NumberFormatException e) {
+            pendingBranchCheckouts.remove(filmId);
+            return null;
+        }
+        if (System.currentTimeMillis() - at > BRANCH_CHECKOUT_TIMEOUT_MS) {
+            pendingBranchCheckouts.remove(filmId);
+            return null;
+        }
+        return tab < 0 ? pending : pending.substring(0, tab);
     }
 
     public static void interpolateCursors(float delta) {
@@ -2077,6 +2156,7 @@ public class TogetherClientNetwork {
         }
         sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_RECORDING_FINISHED, replay.toData(), buf -> {
             buf.writeString(filmId);
+            buf.writeString(filmBranch(filmId));
             buf.writeInt(replayIndex);
         });
     }
@@ -2085,14 +2165,20 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer || film == null || filmId == null) {
             return;
         }
-        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_SAVE_SYNC, film.toData(), buf -> buf.writeString(filmId));
+        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_SAVE_SYNC, film.toData(), buf -> {
+            buf.writeString(filmId);
+            buf.writeString(filmBranch(filmId));
+        });
     }
 
     public static void sendMasterRecordingDone(String filmId, Film film) {
         if (!isBBSTogetherOnServer || film == null || filmId == null) {
             return;
         }
-        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_MASTER_DONE, film.toData(), buf -> buf.writeString(filmId));
+        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_MASTER_DONE, film.toData(), buf -> {
+            buf.writeString(filmId);
+            buf.writeString(filmBranch(filmId));
+        });
     }
 
     public static void sendSyncData(String filmId, BaseValue value) {
@@ -2106,6 +2192,7 @@ public class TogetherClientNetwork {
             for (String s : path.strings) {
                 buf.writeString(s);
             }
+            buf.writeString(filmBranch(filmId));
         });
     }
 
@@ -2122,6 +2209,7 @@ public class TogetherClientNetwork {
             for (String s : pathStrings) {
                 buf.writeString(s);
             }
+            buf.writeString(filmBranch(filmId));
         });
     }
 
@@ -2141,6 +2229,7 @@ public class TogetherClientNetwork {
             for (String s : pathStrings) {
                 buf.writeString(s);
             }
+            buf.writeString(filmBranch(filmId));
         });
     }
 
@@ -2184,6 +2273,7 @@ public class TogetherClientNetwork {
                 buf.writeBytes(expected);
                 buf.writeBoolean(c.checkable);
             }
+            buf.writeString(filmBranch(filmId));
         });
     }
 
@@ -2203,51 +2293,120 @@ public class TogetherClientNetwork {
         return mc.player != null && !owner.equals(mc.player.getUuid());
     }
 
+    private static void handleFilmBranchStatePacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            String filmId = packetByteBuf.readString();
+            String branch = packetByteBuf.readString(FilmCommit.MAX_BRANCH * 2);
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+
+            if (data == null || !data.isMap()) {
+                return;
+            }
+
+            client.execute(() -> TogetherClientNetwork.applyFilmBranchState(filmId, branch, data));
+        });
+    }
+
+    /** A branch state is authoritative: always replace the local film and branch, no matter
+     * how long ago the checkout was clicked or what the pending timer says. */
+    private static void applyFilmBranchState(String filmId, String branch, BaseType data) {
+        pendingBranchCheckouts.remove(filmId);
+
+        if (branch != null && !branch.isEmpty()) {
+            setFilmBranch(filmId, branch);
+        }
+
+        applyFullFilmPacket(filmId, data, true);
+    }
+
     private static void handleFilmSavedSyncPacket(MinecraftClient client, PacketByteBuf buf) {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
             String filmId = packetByteBuf.readString();
             String saverName = packetByteBuf.readString();
+            String branch = packetByteBuf.isReadable() ? packetByteBuf.readString(FilmCommit.MAX_BRANCH * 2) : "";
             BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
             if (!data.isMap()) {
                 return;
             }
-            client.execute(() -> lambda$handleFilmSavedSyncPacket$42(filmId, data, saverName));
+            client.execute(() -> lambda$handleFilmSavedSyncPacket$42(filmId, data, saverName, branch));
         });
     }
 
-    private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName) {
+    private static void lambda$handleFilmSavedSyncPacket$42(String filmId, BaseType data, String saverName, String branch) {
+        String pending = TogetherClientNetwork.pendingCheckoutBranch(filmId);
+        String previous = TogetherClientNetwork.filmBranch(filmId);
+        if (branch != null && !branch.isEmpty()) {
+            /* Accept the new branch the checkout is waiting for, or the branch we already
+             * hold (a normal save / a failed checkout). Anything else is an in-flight packet
+             * from the branch we just left. */
+            if (!previous.isEmpty() && !branch.equals(previous) && !branch.equals(pending)) {
+                return;
+            }
+            if (pending != null && branch.equals(pending)) {
+                pendingBranchCheckouts.remove(filmId);
+            }
+        } else if (pending != null) {
+            return;
+        }
+        boolean branchChange = branch != null && !branch.isEmpty()
+            && (previous.isEmpty() || !previous.equals(branch));
+        if (branch != null && !branch.isEmpty()) {
+            /* The server only sends a branch's data to players on that branch; a checkout
+             * arrives through the same packet, so accepting it also moves our local branch. */
+            setFilmBranch(filmId, branch);
+        }
+
+        applyFullFilmPacket(filmId, data, branchChange);
+    }
+
+    /** Apply one complete film copy to the open editor, or just the local/hidden copy. */
+    private static void applyFullFilmPacket(String filmId, BaseType data, boolean force) {
         UIDashboard dashboard = getDashboardIfOpen();
         UIFilmPanel panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
         boolean visible = panel != null && panel.getData() != null && ((Film)panel.getData()).getId().equals(filmId) && panel.isVisible();
+
         if (visible) {
-            applyFilmDataUpdate(panel, data.asMap());
+            /* A branch switch/initial load is authoritative even when the incoming branch has
+             * no camera clips; the old guards only make sense for same-branch live updates. */
+            applyFilmDataUpdate(panel, data.asMap(), force);
             together_notifyFilmSyncApplied(panel, filmId);
             return;
         }
+
         UIDashboard created = BBSModClient.getDashboardIfCreated();
         UIFilmPanel hiddenPanel = created == null ? null : (UIFilmPanel)created.getPanel(UIFilmPanel.class);
+
         if (hiddenPanel != null && hiddenPanel.getData() != null && ((Film)hiddenPanel.getData()).getId().equals(filmId)) {
             together_applyHiddenFilmDataUpdate(hiddenPanel, data.asMap());
         }
+
         together_saveReceivedFilm(filmId, data.asMap());
     }
 
     private static void applyFilmDataUpdate(UIFilmPanel panel, MapType data) {
-        together_applyFullFilmDataUpdate(panel, data, true);
+        applyFilmDataUpdate(panel, data, false);
+    }
+
+    private static void applyFilmDataUpdate(UIFilmPanel panel, MapType data, boolean force) {
+        together_applyFullFilmDataUpdate(panel, data, true, force);
     }
 
     private static void together_applyFullFilmDataUpdate(UIFilmPanel panel, MapType data, boolean announce) {
+        together_applyFullFilmDataUpdate(panel, data, announce, false);
+    }
+
+    private static void together_applyFullFilmDataUpdate(UIFilmPanel panel, MapType data, boolean announce, boolean force) {
         List<Integer> cameraSel = together_copyClipSelection(panel.cameraEditor);
         List<Integer> actionSel = together_copyClipSelection(panel.actionEditor);
         Map<String, List<Integer>> keyframeSel = together_copyKeyframeSelection(panel);
         Film film = (Film)panel.getData();
         int currentIdx = together_getCurrentReplayIndex(panel, film);
-        if (together_wouldClearLocalCamera(film, data)) {
+        if (!force && together_wouldClearLocalCamera(film, data)) {
             return;
         }
         Film incoming = new Film();
         incoming.fromData((BaseType)data);
-        if (together_clipCount(film.camera) > 0 && together_clipCount(incoming.camera) == 0) {
+        if (!force && together_clipCount(film.camera) > 0 && together_clipCount(incoming.camera) == 0) {
             return;
         }
         int remappedIdx = together_remapReplayIndex(film.replays.getList(), incoming.replays.getList(), currentIdx);
@@ -2290,6 +2449,9 @@ public class TogetherClientNetwork {
             }
             catch (Exception exception) {
             }
+            filmBranches.remove(filmId);
+            commitSelections.remove(filmId);
+            playerCommitPositions.remove(filmId);
             UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
             UIFilmPanel uIFilmPanel = panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
             if (panel != null) {
@@ -2308,6 +2470,18 @@ public class TogetherClientNetwork {
                 BBSMod.getFilms().rename(oldId, newId);
             }
             catch (Exception exception) {
+            }
+            String branch = filmBranches.remove(oldId);
+            if (branch != null) {
+                filmBranches.put(newId, branch);
+            }
+            ConcurrentHashMap<UUID, String> oldSelections = commitSelections.remove(oldId);
+            if (oldSelections != null) {
+                commitSelections.put(newId, oldSelections);
+            }
+            ConcurrentHashMap<UUID, String> oldPositions = playerCommitPositions.remove(oldId);
+            if (oldPositions != null) {
+                playerCommitPositions.put(newId, oldPositions);
             }
             UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
             UIFilmPanel uIFilmPanel = panel = dashboard == null ? null : (UIFilmPanel)dashboard.getPanel(UIFilmPanel.class);
@@ -2622,6 +2796,124 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_RENAME, (PacketByteBuf)buf);
     }
 
+    /** Tell the server which commit this player is looking at (empty commit clears it). */
+    public static void sendCommitSelection(String filmId, String commitId) {
+        if (!isBBSTogetherOnServer || filmId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(commitId == null ? "" : commitId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_SELECTION, (PacketByteBuf)buf);
+    }
+
+    /** Players (other than the local one, filtered by the caller) looking at a commit. */
+    public static List<UUID> commitWatchers(String filmId, String commitId) {
+        Map<UUID, String> selections = filmId == null ? null : commitSelections.get(filmId);
+
+        if (selections == null || commitId == null || commitId.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        ArrayList<UUID> watchers = new ArrayList<>();
+
+        for (Map.Entry<UUID, String> entry : selections.entrySet()) {
+            if (commitId.equals(entry.getValue())) {
+                watchers.add(entry.getKey());
+            }
+        }
+
+        return watchers;
+    }
+
+    /** Players whose current branch head is this commit. */
+    public static List<UUID> commitPositions(String filmId, String commitId) {
+        Map<UUID, String> positions = filmId == null ? null : playerCommitPositions.get(filmId);
+
+        if (positions == null || commitId == null || commitId.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        ArrayList<UUID> players = new ArrayList<>();
+
+        for (Map.Entry<UUID, String> entry : positions.entrySet()) {
+            if (commitId.equals(entry.getValue())) {
+                players.add(entry.getKey());
+            }
+        }
+
+        return players;
+    }
+
+    /** Player name for the face renderer's offline fallback; empty when unknown. */
+    public static String playerName(UUID uuid) {
+        try {
+            MinecraftClient mc = MinecraftClient.getInstance();
+
+            if (uuid == null || mc.getNetworkHandler() == null) {
+                return "";
+            }
+
+            net.minecraft.client.network.PlayerListEntry entry = mc.getNetworkHandler().getPlayerListEntry(uuid);
+
+            return entry == null ? "" : entry.getProfile().getName();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * Queue a colour picked in the graph. The colour picker fires its callback on every drag
+     * step, and each send costs the server an index write plus a broadcast, so the actual
+     * packet leaves in {@link #tickCommitColors()} once the user has been quiet for a moment.
+     */
+    public static void queueCommitColor(String filmId, String commitId, int color) {
+        if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        pendingCommitColors.put(filmId + '\t' + commitId, new PendingCommitColor(filmId, commitId, Colors.opaque(color)));
+        pendingCommitColorAt = System.currentTimeMillis();
+    }
+
+    /** Flush the last queued colour of each commit after the picker has been quiet. */
+    public static void tickCommitColors() {
+        if (pendingCommitColors.isEmpty() || System.currentTimeMillis() - pendingCommitColorAt < COMMIT_COLOR_DEBOUNCE_MS) {
+            return;
+        }
+
+        ArrayList<PendingCommitColor> batch = new ArrayList<>(pendingCommitColors.values());
+
+        pendingCommitColors.clear();
+
+        for (PendingCommitColor pending : batch) {
+            sendCommitColor(pending.filmId, pending.commitId, pending.color);
+        }
+    }
+
+    public static void sendCommitColor(String filmId, String commitId, int color) {
+        if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(commitId);
+        buf.writeInt(color);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_COLOR, (PacketByteBuf)buf);
+    }
+
+    /** One colour waiting for the debounce in {@link #tickCommitColors()}. */
+    private static final class PendingCommitColor {
+        final String filmId;
+        final String commitId;
+        final int color;
+
+        PendingCommitColor(String filmId, String commitId, int color) {
+            this.filmId = filmId;
+            this.commitId = commitId;
+            this.color = color;
+        }
+    }
+
     public static void sendCommitRevert(String filmId, String commitId, int mode) {
         if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
             return;
@@ -2664,6 +2956,7 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer || filmId == null || branch == null || MinecraftClient.getInstance().player == null) {
             return;
         }
+        pendingBranchCheckouts.put(filmId, branch + '\t' + System.currentTimeMillis());
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeString(branch);
@@ -2683,11 +2976,19 @@ public class TogetherClientNetwork {
     private static void handleCommitsPacket(MinecraftClient client, PacketByteBuf buf) {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
             String filmId = packetByteBuf.readString();
+            String branch = packetByteBuf.isReadable() ? packetByteBuf.readString(FilmCommit.MAX_BRANCH * 2) : "";
             BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
             if (!data.isMap()) {
                 return;
             }
-            client.execute(() -> FilmCommitClient.setGraph(filmId, data.asMap()));
+            client.execute(() -> {
+                FilmCommitClient.setGraph(filmId, data.asMap());
+                if (branch != null && !branch.isEmpty()) {
+                    FilmCommitClient.setCurrentBranch(filmId, branch);
+                    TogetherClientNetwork.setFilmBranch(filmId, branch);
+                }
+                TogetherClientNetwork.migrateLegacyCommitColors(filmId);
+            });
         });
     }
 
@@ -2731,6 +3032,85 @@ public class TogetherClientNetwork {
         String commitId = buf.readString();
         String message = buf.readString(1024);
         client.execute(() -> FilmCommitClient.renameCommit(filmId, commitId, message));
+    }
+
+    private static void handleCommitColorPacket(MinecraftClient client, PacketByteBuf buf) {
+        String filmId = buf.readString(512);
+        String commitId = buf.readString(64);
+        int color = buf.readInt();
+
+        client.execute(() -> {
+            FilmCommitClient.setColor(filmId, commitId, color);
+            /* Mirror it into the legacy local file: it is the fallback shown while an older
+             * server (or a commit that predates server-side colours) has no colour. */
+            CommitColors.set(filmId, commitId, color);
+        });
+    }
+
+    private static void handleCommitSelectionsPacket(MinecraftClient client, PacketByteBuf buf) {
+        String filmId = buf.readString(512);
+        int count = buf.readInt();
+        HashMap<UUID, String> selections = new HashMap<>();
+
+        for (int i = 0; i < count && i < 256; ++i) {
+            selections.put(buf.readUuid(), buf.readString(64));
+        }
+
+        client.execute(() -> {
+            if (selections.isEmpty()) {
+                commitSelections.remove(filmId);
+            } else {
+                commitSelections.put(filmId, new ConcurrentHashMap<>(selections));
+            }
+        });
+    }
+
+    private static void handlePlayerCommitPositionsPacket(MinecraftClient client, PacketByteBuf buf) {
+        String filmId = buf.readString(512);
+        int count = buf.readInt();
+        HashMap<UUID, String> positions = new HashMap<>();
+
+        for (int i = 0; i < count && i < 256; ++i) {
+            positions.put(buf.readUuid(), buf.readString(64));
+        }
+
+        client.execute(() -> {
+            if (positions.isEmpty()) {
+                playerCommitPositions.remove(filmId);
+            } else {
+                playerCommitPositions.put(filmId, new ConcurrentHashMap<>(positions));
+            }
+        });
+    }
+
+    /**
+     * Colours picked before they moved server-side still sit in
+     * {@code config/bbs_together_commit_colors.json}. Push each one once, but only while the
+     * server still shows the commit as uncoloured: a colour that another player already set
+     * is the shared truth and must not be overwritten by an old local file.
+     */
+    private static void migrateLegacyCommitColors(String filmId) {
+        FilmCommitClient.Graph graph = FilmCommitClient.graph(filmId);
+
+        if (graph == null) {
+            return;
+        }
+
+        for (FilmCommit commit : graph.commits) {
+            if (commit.color != 0) {
+                continue;
+            }
+
+            int local = CommitColors.get(filmId, commit.id);
+
+            if (local == CommitColors.DEFAULT) {
+                continue;
+            }
+
+            if (migratedCommitColors.add(filmId + '\t' + commit.id)) {
+                sendCommitColor(filmId, commit.id, local);
+            }
+        }
     }
 
     private static void handleCommitRejectedPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -2784,6 +3164,7 @@ public class TogetherClientNetwork {
 
     private static void handleFilmDataSyncPacket(MinecraftClient client, PacketByteBuf buf) {
         String filmId = buf.readString();
+        String branch = buf.readString(FilmCommit.MAX_BRANCH * 2);
         int pathSize = buf.readInt();
         ArrayList<String> path = new ArrayList<String>();
         for (int i = 0; i < pathSize; ++i) {
@@ -2793,7 +3174,20 @@ public class TogetherClientNetwork {
         byte[] bytes = new byte[dataLen];
         buf.readBytes(bytes);
         BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
-        client.execute(() -> TogetherClientNetwork.together_applyIncomingFilmDataSync(filmId, path, data));
+        client.execute(() -> {
+            String known = TogetherClientNetwork.filmBranch(filmId);
+            if (known.isEmpty()) {
+                /* Wait for the branch's full film: a delta before it would be applied to
+                 * whatever film happens to be loaded locally. */
+                return;
+            }
+            if (!known.equals(branch)) {
+                /* In-flight delta from the branch we just left (or the new one arriving
+                 * before its full film). */
+                return;
+            }
+            TogetherClientNetwork.together_applyIncomingFilmDataSync(filmId, path, data);
+        });
     }
 
     private static boolean applyAtPath(BaseValueGroup current, List<String> path, int depth, BaseType data) {

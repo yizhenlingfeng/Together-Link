@@ -11,6 +11,8 @@ import mchorse.bbs_mod.ui.utils.Scroll;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.ui.UIPlayerFaceRenderer;
+import net.minecraft.client.MinecraftClient;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -21,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * The graph itself: one column per film, and inside a film one lane per branch, like git's
@@ -73,6 +76,8 @@ public class UICommitGraph extends UIElement
     private final List<Node> nodes = new ArrayList<Node>();
 
     private Node selected;
+    /** Film whose graph the local selection belongs to, for the collaboration cursor. */
+    private String selectionFilm = "";
     private int version = -1;
     /** Everything under the header: rows and lanes scroll, the header itself stays put. */
     private final Area body = new Area();
@@ -131,14 +136,9 @@ public class UICommitGraph extends UIElement
         this.rebuild();
     }
 
-    /** Branch a new commit of {@code filmId} lands on: the selected commit's branch, else the film's. */
+    /** Branch a new commit of {@code filmId} lands on: the branch this player is checked out on. */
     public String commitBranch(String filmId)
     {
-        if (this.selected != null && (filmId.isEmpty() || filmId.equals(this.selected.filmId)) && !this.selected.commit.branch.isEmpty())
-        {
-            return this.selected.commit.branch;
-        }
-
         FilmCommitClient.Graph graph = FilmCommitClient.graph(filmId);
 
         return graph == null ? "" : graph.current;
@@ -151,18 +151,51 @@ public class UICommitGraph extends UIElement
 
     public void select(Node node)
     {
-        this.selected = node;
+        if (node != null)
+        {
+            this.selected = node;
+            this.selectionFilm = node.filmId;
+            /* Picking a row is an explicit request to look at it: don't let a later rebuild
+             * snap the view back to the newest commit at the bottom. */
+            this.pinned = false;
+        }
+        else
+        {
+            if (this.selectionFilm.isEmpty() && this.selected != null)
+            {
+                this.selectionFilm = this.selected.filmId;
+            }
+
+            this.selected = null;
+        }
 
         /* A null node means the click landed on empty space: the listener clears the details. */
         if (this.listener != null)
         {
             this.listener.onSelect(node);
         }
+
+        if (!this.selectionFilm.isEmpty())
+        {
+            TogetherClientNetwork.sendCommitSelection(this.selectionFilm, node == null ? "" : node.commit.id);
+
+            if (node == null)
+            {
+                this.selectionFilm = "";
+            }
+        }
     }
 
     /** Rebuild the flattened node list from the cache; called when the cache version changed. */
     public void rebuild()
     {
+        /* A rebuild recreates every Node, so remember what the user had picked by id and
+         * re-attach the selection afterwards; otherwise every refresh jumps to the newest
+         * commit at the bottom. */
+        String previousFilm = this.selected == null ? "" : this.selected.filmId;
+        String previousCommit = this.selected == null ? "" : this.selected.commit.id;
+        boolean hadSelection = this.selected != null;
+
         this.nodes.clear();
         this.columnOrder.clear();
 
@@ -280,9 +313,32 @@ public class UICommitGraph extends UIElement
 
         this.version = FilmCommitClient.version();
 
+        if (!previousCommit.isEmpty())
+        {
+            for (Node node : this.nodes)
+            {
+                if (previousCommit.equals(node.commit.id) && previousFilm.equals(node.filmId))
+                {
+                    this.selected = node;
+
+                    break;
+                }
+            }
+        }
+
         if (this.selected != null && !this.nodes.contains(this.selected))
         {
             this.selected = this.nodes.isEmpty() ? null : this.nodes.get(0);
+        }
+        else if (hadSelection && this.selected == null)
+        {
+            this.selected = this.nodes.isEmpty() ? null : this.nodes.get(0);
+        }
+
+        /* The details pane may still hold the pre-rebuild Node; hand it the restored one. */
+        if (this.listener != null)
+        {
+            this.listener.onSelect(this.selected);
         }
 
         this.updateScroll();
@@ -678,7 +734,7 @@ public class UICommitGraph extends UIElement
             int top = node.y - NODE / 2;
             int right = node.x + NODE / 2 + 1;
             int bottom = node.y + NODE / 2 + 1;
-            int color = CommitColors.get(node.filmId, node.commit.id);
+            int color = this.commitColor(node.filmId, node.commit);
 
             if (node.active)
             {
@@ -702,7 +758,11 @@ public class UICommitGraph extends UIElement
                 context.batcher.outline(left - 3, top - 3, right + 3, bottom + 3, Colors.WHITE);
             }
 
-            String text = this.fit(context, node.commit.shortId() + "  " + node.commit.message, Math.max(24, this.columnX(node.column) + this.columnWidth() - this.textX(node) - 8));
+            List<UUID> watchers = this.watchers(node);
+            int avatarSpace = this.avatarSpace(watchers);
+            int rowRight = this.columnX(node.column) + this.columnWidth() - 12;
+            int textRight = rowRight - 4 - avatarSpace;
+            String text = this.fit(context, node.commit.shortId() + "  " + node.commit.message, Math.max(24, textRight - this.textX(node)));
             int textY = node.y - context.batcher.getFont().getHeight() / 2;
 
             context.batcher.textShadow(text, this.textX(node), textY, node.active ? RowStyle.textColor(lit) : RowStyle.textColor(lit, Colors.GRAY));
@@ -710,14 +770,125 @@ public class UICommitGraph extends UIElement
             /* Branch name next to the commit that is its head, like git's decoration */
             if (node.tip)
             {
+                String branch = node.commit.branch;
                 int tagX = this.textX(node) + context.batcher.getFont().getWidth(text) + 8;
+                int tagWidth = 10 + context.batcher.getFont().getWidth(branch);
 
-                if (tagX + 40 < this.columnX(node.column) + this.columnWidth())
+                if (tagX + tagWidth <= rowRight - 4 - avatarSpace)
                 {
                     context.batcher.box(tagX, node.y - 1, tagX + 3, node.y + 2, node.active ? accent : Colors.GRAY);
-                    context.batcher.textShadow(node.commit.branch, tagX + 7, textY, node.active ? Colors.GRAY : RowStyle.textColor(false, Colors.GRAY));
+                    context.batcher.textShadow(branch, tagX + 7, textY, node.active ? Colors.GRAY : RowStyle.textColor(false, Colors.GRAY));
                 }
             }
+
+            this.renderWatchers(context, node, rowTop, watchers);
+        }
+    }
+
+    /** Commit avatars, like the server behavior list: everyone looking at this commit. */
+    private static final int WATCHER_SIZE = 10;
+    private static final int WATCHER_GAP = 1;
+    private static final int WATCHER_MAX = 4;
+
+    /** Everyone at or looking at this commit, with the local player first so their own face stays visible. */
+    private List<UUID> watchers(Node node)
+    {
+        UUID local = MinecraftClient.getInstance().player == null ? null : MinecraftClient.getInstance().player.getUuid();
+        List<UUID> selected = TogetherClientNetwork.commitWatchers(node.filmId, node.commit.id);
+        ArrayList<UUID> positions = new ArrayList<UUID>(TogetherClientNetwork.commitPositions(node.filmId, node.commit.id));
+
+        /* The server's position packet needs a film selection/editor; the local player's own
+         * branch head is known from the graph even when they only opened the commits tab. */
+        if (local != null && !positions.contains(local) && node.commit.id.equals(this.currentCommit(node.filmId)))
+        {
+            positions.add(local);
+        }
+
+        if (selected.isEmpty() && positions.isEmpty())
+        {
+            return selected;
+        }
+
+        /* Position comes first: if many players are on one commit, the ones who actually sit
+         * there keep their avatars before the ones merely looking at it. */
+        ArrayList<UUID> all = new ArrayList<UUID>();
+
+        for (UUID uuid : positions)
+        {
+            if (!all.contains(uuid))
+            {
+                all.add(uuid);
+            }
+        }
+
+        for (UUID uuid : selected)
+        {
+            if (!all.contains(uuid))
+            {
+                all.add(uuid);
+            }
+        }
+
+        if (all.size() <= 1)
+        {
+            return all;
+        }
+
+        if (local == null || !all.contains(local))
+        {
+            return all;
+        }
+
+        ArrayList<UUID> watchers = new ArrayList<UUID>(all.size());
+
+        watchers.add(local);
+
+        for (UUID uuid : all)
+        {
+            if (!uuid.equals(local))
+            {
+                watchers.add(uuid);
+            }
+        }
+
+        return watchers;
+    }
+
+    private int avatarSpace(List<UUID> watchers)
+    {
+        int count = Math.min(watchers.size(), WATCHER_MAX);
+
+        return count == 0 ? 0 : count * WATCHER_SIZE + (count - 1) * WATCHER_GAP + 6;
+    }
+
+    private void renderWatchers(UIContext context, Node node, int rowTop, List<UUID> watchers)
+    {
+        int count = Math.min(watchers.size(), WATCHER_MAX);
+
+        if (count == 0)
+        {
+            return;
+        }
+
+        int total = count * WATCHER_SIZE + (count - 1) * WATCHER_GAP;
+        /* Same right edge as the row background (see renderRows), so faces never sit on
+         * top of the scrollbar. */
+        int x = this.columnX(node.column) + this.columnWidth() - 12 - 4 - total;
+        int y = rowTop + (ROW_H - WATCHER_SIZE) / 2;
+
+        for (int i = 0; i < count; i ++)
+        {
+            UUID uuid = watchers.get(i);
+            Integer color = TogetherClientNetwork.playerColors.get(uuid);
+
+            /* Replay-list style: a 10px face with a single opaque player-colour outline. */
+            if (color != null)
+            {
+                context.batcher.box(x - 1, y - 1, x + WATCHER_SIZE + 1, y + WATCHER_SIZE + 1, color | 0xFF000000);
+            }
+
+            UIPlayerFaceRenderer.draw(context.batcher, TogetherClientNetwork.playerName(uuid), uuid, x, y, WATCHER_SIZE);
+            x += WATCHER_SIZE + WATCHER_GAP;
         }
     }
 
@@ -766,6 +937,23 @@ public class UICommitGraph extends UIElement
         return "";
     }
 
+    /** Explicit colour, else a legacy local colour, else the theme: a fresh branch/commit is
+     * born in the UI accent instead of a dead gray. */
+    private int commitColor(String filmId, FilmCommit commit)
+    {
+        if (commit.color != 0)
+        {
+            return commit.color;
+        }
+
+        if (CommitColors.has(filmId, commit.id))
+        {
+            return CommitColors.get(filmId, commit.id);
+        }
+
+        return BBSSettings.primaryColor();
+    }
+
     /**
      * The full colour editor BBS opens for a colour property: HSV/RGB fields, hex input and the
      * saved colours. The context menu's "commit colour" item opens this one.
@@ -777,9 +965,14 @@ public class UICommitGraph extends UIElement
             return;
         }
 
-        UIColorPicker picker = new UIColorPicker((color) -> CommitColors.set(filmId, commitId, color));
+        FilmCommit commit = FilmCommitClient.commit(filmId, commitId);
+        int current = commit == null ? BBSSettings.primaryColor() : this.commitColor(filmId, commit);
 
-        picker.setColor(CommitColors.get(filmId, commitId));
+        /* The server owns the colour: the picker only queues it (debounced while dragging),
+         * and the graph repaints when the server echoes the stored value back. */
+        UIColorPicker picker = new UIColorPicker((color) -> TogetherClientNetwork.queueCommitColor(filmId, commitId, color));
+
+        picker.setColor(current);
 
         context.menu.overlay.add(picker);
         picker.setup(context.globalX(x), context.globalY(y));

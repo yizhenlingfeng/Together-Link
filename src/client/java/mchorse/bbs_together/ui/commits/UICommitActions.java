@@ -8,6 +8,7 @@ import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
 import mchorse.bbs_mod.ui.framework.elements.input.text.UITextbox;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.network.TogetherEditSyncQueue;
 
 import java.util.function.Supplier;
 
@@ -149,6 +150,9 @@ public class UICommitActions extends UIElement
             return;
         }
 
+        /* Push still-queued edits of the old branch before the film is replaced with the new
+         * branch, otherwise they would later be applied to the wrong branch on the server. */
+        TogetherEditSyncQueue.flushNow(CommitUi.filmPanel());
         TogetherClientNetwork.sendBranchCheckout(film, name);
     }
 

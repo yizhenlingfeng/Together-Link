@@ -15,11 +15,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Colour of each commit, picked by the user in the commit graph.
+ * Local mirror and fallback of commit colours.
  *
- * <p>The choice is kept on this client only (it is a reading aid, not part of the film), in
- * {@code config/bbs_together_commit_colors.json}. Every commit starts gray; the connecting lines
- * stay dark gray so a colour the user picked is the one thing that stands out.</p>
+ * <p>Colours now live on the server with the commit ({@code FilmCommit.color}) and are
+ * broadcast, so every player sees the same graph. This file still holds colours picked by
+ * versions that kept them on the client only: they are shown while the server has no colour
+ * for that commit yet, and the network layer pushes them to the server once (see
+ * {@code TogetherClientNetwork#migrateLegacyCommitColors}). Server updates are mirrored back
+ * here, so the file also keeps working as a fallback when an older server never sends one.</p>
  */
 public final class CommitColors
 {
@@ -41,6 +44,14 @@ public final class CommitColors
         Integer color = COLORS.get(key(filmId, commitId));
 
         return color == null ? DEFAULT : color;
+    }
+
+    /** Whether this commit has an explicit legacy/local colour (not just the default). */
+    public static boolean has(String filmId, String commitId)
+    {
+        load();
+
+        return COLORS.containsKey(key(filmId, commitId));
     }
 
     public static void set(String filmId, String commitId, int color)

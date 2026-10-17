@@ -13,6 +13,7 @@ import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.utils.clips.Clips;
 import mchorse.bbs_mod.utils.factory.IFactory;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
+import mchorse.bbs_together.commits.FilmBranchStore;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.MinecraftServer;
@@ -22,7 +23,11 @@ public final class BBSTogetherFix18 {
     }
 
     public static void mergeRecordingFinished(String string, int n, BaseType baseType, MinecraftServer minecraftServer) {
-        Film film = (Film)BBSMod.getFilms().load(string);
+        mergeRecordingFinished(string, n, baseType, minecraftServer, FilmBranchStore.defaultBranch(string));
+    }
+
+    public static void mergeRecordingFinished(String string, int n, BaseType baseType, MinecraftServer minecraftServer, String branch) {
+        Film film = FilmBranchStore.working(string, branch);
         if (film == null || baseType == null || !baseType.isMap()) {
             return;
         }
@@ -32,10 +37,9 @@ public final class BBSTogetherFix18 {
         }
         BBSTogetherFix18.mergeReplayData((Replay)list.get(n), baseType.asMap());
         MapType mapType = (MapType)film.toData();
-        BBSMod.getFilms().save(string, mapType);
-        for (ServerPlayerEntity class_32222 : minecraftServer.getPlayerManager().getPlayerList()) {
-            TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
-        }
+        FilmBranchStore.setWorking(string, branch, mapType);
+        FilmBranchStore.save(string, branch);
+        TogetherServerNetwork.broadcastFilmSaved(minecraftServer, string, branch, mapType);
     }
 
     public static void mergeReplayData(Replay replay, MapType mapType) {

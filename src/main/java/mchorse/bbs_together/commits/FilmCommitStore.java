@@ -5,11 +5,13 @@ import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.ListType;
 import mchorse.bbs_mod.data.types.MapType;
+import mchorse.bbs_mod.utils.colors.Colors;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -65,8 +67,8 @@ public final class FilmCommitStore
         public final Map<String, String> branches = new HashMap<String, String>();
 
         /**
-         * Branch that new commits are appended to, i.e. the branch the film currently is. Starts
-         * at {@link #BRANCH_MAIN} and only changes when someone checks another branch out.
+         * Branch the main BBS film file follows (the default branch). Personal checkouts live
+         * in {@link FilmBranchStore} and never move this value.
          */
         public String current = BRANCH_MAIN;
 
@@ -74,14 +76,6 @@ public final class FilmCommitStore
         {
             this.filmId = filmId;
             this.folder = folder;
-        }
-
-        /** Head of the branch the film is on. */
-        public String currentHead()
-        {
-            String id = this.branches.get(this.current);
-
-            return id == null ? this.branches.get(BRANCH_MAIN) : id;
         }
 
         /** Head of one branch, or {@code null} when that branch does not exist. */
@@ -106,11 +100,6 @@ public final class FilmCommitStore
             }
 
             return null;
-        }
-
-        public String head()
-        {
-            return this.currentHead();
         }
     }
 
@@ -187,6 +176,8 @@ public final class FilmCommitStore
 
                 if (!commit.id.isEmpty())
                 {
+                    /* Normalise old indexes after a film rename */
+                    commit.filmId = store.filmId;
                     store.commits.add(commit);
                 }
             }
@@ -483,36 +474,6 @@ public final class FilmCommitStore
         return true;
     }
 
-    /**
-     * Put the film back to the head of a branch and make that branch the one new commits go to,
-     * like checking a branch out. The caller writes the returned data into the film file.
-     *
-     * @return the film as it was at that branch's head, or {@code null} when there is no such branch
-     */
-    public static synchronized MapType checkout(String filmId, String branch)
-    {
-        Store store = get(filmId);
-
-        if (store == null)
-        {
-            return null;
-        }
-
-        String head = store.branchHead(branch);
-        MapType data = snapshot(store, head);
-
-        if (data == null)
-        {
-            return null;
-        }
-
-        store.current = branch;
-        save(store);
-
-        return data;
-    }
-
-
     /* How far to go back, and what to do with the commits that are left behind */
 
     /** Put the film back to the parent of a commit, and keep that commit in the history. */
@@ -602,9 +563,9 @@ public final class FilmCommitStore
 
         store.branches.put(branch, to);
 
-        /* The film holds this branch's data now: keep the highlight and the next commit's
-         * diff baseline on the same branch */
-        store.current = branch;
+        /* Only the target branch's head moves; the film's default branch (the branch the main
+         * BBS file follows) must stay where it is, otherwise rolling one branch back would
+         * change which branch non-branch-aware views see. */
 
         if (!removed.isEmpty())
         {
@@ -672,6 +633,29 @@ public final class FilmCommitStore
         return commit == null ? null : commit.authorId;
     }
 
+    /** Head commit of one branch, or {@code null} when that branch does not exist. */
+    public static synchronized String branchHead(String filmId, String branch)
+    {
+        Store store = get(filmId);
+
+        return store == null ? null : store.branchHead(branch);
+    }
+
+    /** Branch one commit was made on, or {@code null} when it is unknown. */
+    public static synchronized String branchOfCommit(String filmId, String commitId)
+    {
+        Store store = get(filmId);
+
+        if (store == null)
+        {
+            return null;
+        }
+
+        FilmCommit commit = store.find(commitId);
+
+        return commit == null ? null : commit.branch;
+    }
+
     /**
      * Add one commit on top of {@code head}, on {@code branch}, which becomes the branch the
      * film is on.
@@ -732,7 +716,8 @@ public final class FilmCommitStore
 
         store.commits.add(commit);
         store.branches.put(commit.branch, commit.id);
-        store.current = commit.branch;
+        /* A commit only advances its own branch. The film's default branch is the one the
+         * main BBS file follows and is managed by FilmBranchStore, not by every commit. */
 
         trim(store);
         save(store);
@@ -803,6 +788,41 @@ public final class FilmCommitStore
     }
 
     /**
+     * Recolour one commit. The colour is graph metadata, not film data: it is stored in the
+     * index and never touches the snapshot, the diff or the content-addressed commit id.
+     *
+     * @return {@code true} when the commit exists, even when the colour did not actually
+     *         change — the caller then broadcasts the value it asked for, so resetting a
+     *         commit to {@link Colors#GRAY} reaches clients that still cache a local colour
+     */
+    public static synchronized boolean setColor(String filmId, String commitId, int color)
+    {
+        Store store = get(filmId);
+
+        if (store == null)
+        {
+            return false;
+        }
+
+        FilmCommit commit = store.find(commitId);
+
+        if (commit == null)
+        {
+            return false;
+        }
+
+        int opaque = Colors.opaque(color);
+
+        if (commit.color != opaque)
+        {
+            commit.color = opaque;
+            save(store);
+        }
+
+        return true;
+    }
+
+    /**
      * The whole graph of one film, ready to be put into a packet: branch heads plus every commit
      * in order. Diffs are not included, they are fetched per commit.
      */
@@ -818,7 +838,8 @@ public final class FilmCommitStore
         MapType map = new MapType();
 
         map.putString("film", filmId);
-        map.putString("head", store.head() == null ? "" : store.head());
+        String defaultHead = store.branchHead(store.current);
+        map.putString("head", defaultHead == null ? "" : defaultHead);
         map.putString("current", store.current);
 
         ListType commits = new ListType();
@@ -846,6 +867,108 @@ public final class FilmCommitStore
     public static synchronized void unload()
     {
         STORES.clear();
+    }
+
+    /** Delete one film's whole history folder (film deleted). */
+    public static synchronized void deleteFilm(String filmId)
+    {
+        if (filmId == null || filmId.isEmpty())
+        {
+            return;
+        }
+
+        STORES.remove(filmId);
+        File base = baseFolder();
+
+        if (base != null)
+        {
+            deleteRecursively(new File(base, filmId));
+        }
+    }
+
+    /**
+     * Move a film's history folder after BBS renamed the film. The caller is responsible for
+     * the main film file; this only keeps {@code _commits/<film>} and its cached store in sync.
+     */
+    public static synchronized void renameFilm(String oldId, String newId)
+    {
+        if (oldId == null || newId == null || oldId.isEmpty() || newId.isEmpty() || oldId.equals(newId))
+        {
+            return;
+        }
+
+        File base = baseFolder();
+
+        if (base != null)
+        {
+            File from = new File(base, oldId);
+            File to = new File(base, newId);
+
+            if (to.exists())
+            {
+                /* Never overwrite another film's history because BBS allowed a rename to it. */
+                System.err.println("[BBSTogether] Film commit folder already exists for " + newId + "; leaving " + oldId + " untouched");
+
+                return;
+            }
+
+            if (from.isDirectory())
+            {
+                try
+                {
+                    to.getParentFile().mkdirs();
+                    Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
+                catch (IOException e)
+                {
+                    System.err.println("[BBSTogether] Failed to move film commits from " + oldId + " to " + newId + ": " + e);
+                }
+            }
+        }
+
+        Store old = STORES.remove(oldId);
+
+        if (old != null && base != null)
+        {
+            Store renamed = new Store(newId, new File(base, newId));
+
+            renamed.commits.addAll(old.commits);
+            renamed.branches.putAll(old.branches);
+            renamed.current = old.current;
+
+            for (FilmCommit commit : renamed.commits)
+            {
+                commit.filmId = newId;
+            }
+
+            STORES.put(newId, renamed);
+            save(renamed);
+        }
+        else
+        {
+            /* Force a reload from the moved folder next time it is opened */
+            STORES.remove(newId);
+        }
+    }
+
+    private static void deleteRecursively(File file)
+    {
+        if (file == null || !file.exists())
+        {
+            return;
+        }
+
+        File[] children = file.listFiles();
+
+        if (children != null)
+        {
+            for (File child : children)
+            {
+                deleteRecursively(child);
+            }
+        }
+
+        file.delete();
     }
 
     /* Helpers */

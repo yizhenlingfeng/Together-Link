@@ -8,12 +8,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
+import mchorse.bbs_together.commits.FilmBranchStore;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
 import mchorse.bbs_together.BBSTogetherFix28;
 import mchorse.bbs_together.network.TogetherServerNetwork;
@@ -56,21 +56,24 @@ public final class BBSTogetherFix28Server {
             ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
-                minecraftServer.execute(() -> BBSTogetherFix28Server.handleLeaveSnapshot(minecraftServer, class_32222, string, byArray));
+                String branch = class_25402.isReadable() ? class_25402.readString(128) : "";
+                minecraftServer.execute(() -> BBSTogetherFix28Server.handleLeaveSnapshot(minecraftServer, class_32222, string, branch, byArray));
             });
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
-                minecraftServer.execute(() -> BBSTogetherFix28Server.handleStructureSnapshot(minecraftServer, string, byArray));
+                String branch = class_25402.isReadable() ? class_25402.readString(128) : "";
+                minecraftServer.execute(() -> BBSTogetherFix28Server.handleStructureSnapshot(minecraftServer, class_32222, string, branch, byArray));
             });
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
-                minecraftServer.execute(() -> BBSTogetherFix28Server.handleRecordingBaselineSnapshot(string, byArray));
+                String branch = class_25402.isReadable() ? class_25402.readString(128) : "";
+                minecraftServer.execute(() -> BBSTogetherFix28Server.handleRecordingBaselineSnapshot(class_32222, string, branch, byArray));
             });
         });
     }
@@ -85,29 +88,6 @@ public final class BBSTogetherFix28Server {
         return server != null && !server.isStopping() && !server.isStopped();
     }
 
-    private static void safeSaveFilm(String filmId, MapType data) {
-        // Windows 上 .dat 偶尔被瞬时占用导致 save 失败，重试短间隔几次，避免电影数据丢盘
-        for (int i = 0; i < 3; ++i) {
-            try {
-                BBSMod.getFilms().save(filmId, data);
-                return;
-            }
-            catch (Exception e) {
-                if (i == 2) {
-                    // BBS 2.6 backup may fail for new films; ignore
-                    return;
-                }
-                try {
-                    Thread.sleep(100L * (i + 1));
-                }
-                catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        }
-    }
-
     private static void handleJoinRequest(MinecraftServer minecraftServer, ServerPlayerEntity class_32222, String string2) {
         UUID uUID = class_32222.getUuid();
         BBSTogetherFix28Server.removeFromAllEntryOrders(uUID);
@@ -117,39 +97,11 @@ public final class BBSTogetherFix28Server {
             return;
         }
         BBSTogetherFix28Server.pruneOffline(minecraftServer);
-        ServerPlayerEntity class_32223 = BBSTogetherFix28Server.chooseSnapshotSource(minecraftServer, uUID, string2);
         ACTIVE_FILM_EDITORS.put(uUID, string2);
-        FILM_ENTRY_ORDER.computeIfAbsent(string2, string -> new LinkedHashSet()).add(uUID);
-        if (class_32223 != null) {
-            PacketByteBuf class_25402 = PacketByteBufs.create();
-            class_25402.writeUuid(uUID);
-            class_25402.writeString(string2);
-            ServerPlayNetworking.send((ServerPlayerEntity)class_32223, (Identifier)BBSTogetherFix28.CLIENT_FILM_JOIN_SOURCE_REQUEST, (PacketByteBuf)class_25402);
-        }
-    }
-
-    private static ServerPlayerEntity chooseSnapshotSource(MinecraftServer minecraftServer, UUID requester, String filmId) {
-        ArrayList<ServerPlayerEntity> players = new ArrayList<ServerPlayerEntity>(minecraftServer.getPlayerManager().getPlayerList());
-        Map<UUID, String> selections = BBSTogetherFix28Server.getTogetherFilmSelections();
-        for (ServerPlayerEntity player : players) {
-            UUID playerId = player.getUuid();
-            if (playerId.equals(requester) || !filmId.equals(selections.get(playerId)) || !filmId.equals(ACTIVE_FILM_EDITORS.get(playerId))) continue;
-            return player;
-        }
-        LinkedHashSet<UUID> order = FILM_ENTRY_ORDER.get(filmId);
-        for (ServerPlayerEntity player : players) {
-            UUID playerId = player.getUuid();
-            if (playerId.equals(requester) || order == null || !order.contains(playerId) || !filmId.equals(ACTIVE_FILM_EDITORS.get(playerId))) continue;
-            return player;
-        }
-        if (order != null) {
-            for (UUID playerId : order) {
-                ServerPlayerEntity player;
-                if (playerId.equals(requester) || !filmId.equals(ACTIVE_FILM_EDITORS.get(playerId)) || (player = minecraftServer.getPlayerManager().getPlayer(playerId)) == null) continue;
-                return player;
-            }
-        }
-        return null;
+        FILM_ENTRY_ORDER.computeIfAbsent(string2, film -> new LinkedHashSet()).add(uUID);
+        /* The server owns every branch's working copy. Asking another client for a snapshot
+         * would hand the newcomer that player's branch, not theirs. */
+        TogetherServerNetwork.sendFilmBranchState(minecraftServer, class_32222, string2);
     }
 
     private static Map<UUID, String> getTogetherFilmSelections() {
@@ -178,10 +130,11 @@ public final class BBSTogetherFix28Server {
                 return;
             }
             MapType mapType = baseType.asMap();
-            safeSaveFilm(string, mapType);
+            String branch = FilmBranchStore.branchOf(string, uUID);
+            BBSTogetherFix28Server.saveBranchSnapshot(string, branch, mapType);
             ServerPlayerEntity class_32222 = minecraftServer.getPlayerManager().getPlayer(uUID);
             if (class_32222 != null) {
-                TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
+                TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, branch, mapType);
             }
         }
         catch (Exception e) {
@@ -189,8 +142,14 @@ public final class BBSTogetherFix28Server {
         }
     }
 
-    private static void handleLeaveSnapshot(MinecraftServer minecraftServer, ServerPlayerEntity class_32222, String string, byte[] byArray) {
+    private static void handleLeaveSnapshot(MinecraftServer minecraftServer, ServerPlayerEntity class_32222, String string, String sentBranch, byte[] byArray) {
         if (class_32222 == null || string == null || string.isEmpty() || byArray == null) {
+            return;
+        }
+        String branch = FilmBranchStore.branchOf(string, class_32222.getUuid());
+        if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+            /* A snapshot from the branch this player just left; it must not replace the
+             * working copy of the branch they are on now. */
             return;
         }
         ACTIVE_FILM_EDITORS.remove(class_32222.getUuid(), string);
@@ -199,16 +158,14 @@ public final class BBSTogetherFix28Server {
             return;
         }
         MapType mapType = baseType.asMap();
-        BBSMod.getFilms().save(string, mapType);
-        if (BBSTogetherFix28Server.hasOtherEditor(class_32222.getUuid(), string)) {
+        BBSTogetherFix28Server.saveBranchSnapshot(string, branch, mapType);
+        if (BBSTogetherFix28Server.hasOtherEditor(class_32222.getUuid(), string, branch)) {
             return;
         }
-        for (ServerPlayerEntity class_32223 : minecraftServer.getPlayerManager().getPlayerList()) {
-            TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32223, string, mapType);
-        }
+        TogetherServerNetwork.broadcastFilmSaved(minecraftServer, string, branch, mapType);
     }
 
-    private static void handleStructureSnapshot(MinecraftServer minecraftServer, String string, byte[] byArray) {
+    private static void handleStructureSnapshot(MinecraftServer minecraftServer, ServerPlayerEntity player, String string, String sentBranch, byte[] byArray) {
         if (!isServerAlive(minecraftServer) || string == null || string.isEmpty() || byArray == null) {
             return;
         }
@@ -218,14 +175,16 @@ public final class BBSTogetherFix28Server {
                 return;
             }
             MapType mapType = baseType.asMap();
-            Film film = (Film)BBSMod.getFilms().load(string);
+            String branch = FilmBranchStore.branchOf(string, player.getUuid());
+            if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+                return;
+            }
+            Film film = FilmBranchStore.working(string, branch);
             Film film2 = new Film();
             film2.fromData((BaseType)mapType);
-            BBSTogetherFix28Server.remapReplaySelections(string, film, film2);
-            safeSaveFilm(string, mapType);
-            for (ServerPlayerEntity class_32222 : minecraftServer.getPlayerManager().getPlayerList()) {
-                TogetherServerNetwork.broadcastFilmSavedToAll(minecraftServer, class_32222, string, mapType);
-            }
+            BBSTogetherFix28Server.remapReplaySelections(string, branch, film, film2);
+            BBSTogetherFix28Server.saveBranchSnapshot(string, branch, mapType);
+            TogetherServerNetwork.broadcastFilmSaved(minecraftServer, string, branch, mapType);
             TogetherServerNetwork.broadcastReplaySelections(minecraftServer, string);
         }
         catch (Exception e) {
@@ -233,7 +192,13 @@ public final class BBSTogetherFix28Server {
         }
     }
 
-    private static void handleRecordingBaselineSnapshot(String string, byte[] byArray) {
+    /** Save a client snapshot into its branch workspace; the default branch also updates the main file. */
+    private static void saveBranchSnapshot(String filmId, String branch, MapType data) {
+        FilmBranchStore.setWorking(filmId, branch, data);
+        FilmBranchStore.save(filmId, branch);
+    }
+
+    private static void handleRecordingBaselineSnapshot(ServerPlayerEntity player, String string, String sentBranch, byte[] byArray) {
         if (string == null || string.isEmpty() || byArray == null) {
             return;
         }
@@ -247,18 +212,23 @@ public final class BBSTogetherFix28Server {
             return;
         }
         RECORDING_BASELINE_ACCEPTED_AT.put(string, l);
-        safeSaveFilm(string, baseType.asMap());
+        String branch = FilmBranchStore.branchOf(string, player.getUuid());
+        if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+            return;
+        }
+        BBSTogetherFix28Server.saveBranchSnapshot(string, branch, baseType.asMap());
     }
 
-    private static boolean hasOtherEditor(UUID uUID, String string) {
+    private static boolean hasOtherEditor(UUID uUID, String string, String branch) {
         for (Map.Entry<UUID, String> entry : ACTIVE_FILM_EDITORS.entrySet()) {
             if (entry.getKey().equals(uUID) || !string.equals(entry.getValue())) continue;
+            if (!branch.equals(FilmBranchStore.branchOf(string, entry.getKey()))) continue;
             return true;
         }
         return false;
     }
 
-    private static void remapReplaySelections(String string, Film film, Film film2) {
+    private static void remapReplaySelections(String string, String branch, Film film, Film film2) {
         Map map;
         Object object;
         if (film == null || film2 == null) {
@@ -283,7 +253,7 @@ public final class BBSTogetherFix28Server {
         synchronized (object) {
             for (Map.Entry<UUID, Integer> entry : new ArrayList<Map.Entry<UUID, Integer>>(map.entrySet())) {
                 UUID uUID = entry.getKey();
-                if (!string.equals(map2.get(uUID))) continue;
+                if (!string.equals(map2.get(uUID)) || !branch.equals(FilmBranchStore.branchOf(string, uUID))) continue;
                 int n = entry.getValue();
                 int n2 = BBSTogetherFix28Server.remapReplayIndex(list, list2, n);
                 map.remove(uUID);
