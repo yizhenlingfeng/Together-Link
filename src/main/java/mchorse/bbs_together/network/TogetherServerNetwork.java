@@ -70,6 +70,9 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_SYNC_PREF = new Identifier("bbs_together", "s_sync_pref");
     /** C2S (crusher): client reports its local asset inventory {path: sha1} for push filtering. */
     public static final Identifier SERVER_ASSET_REPORT = new Identifier("bbs_together", "s_asset_report");
+    /** A1/A2: incremental variant of {@link #SERVER_ASSET_REPORT} — only the paths that changed,
+     * an empty sha1 meaning "I no longer own this". Absent on old clients (they keep the full map). */
+    public static final Identifier SERVER_ASSET_REPORT_DELTA = new Identifier("bbs_together", "s_asset_report_delta");
     /** C2S (crusher): client reports its local film inventory {filmId: sha1} for on-demand film sync. */
     public static final Identifier SERVER_FILM_INVENTORY = new Identifier("bbs_together", "s_film_inventory");
     public static final Identifier CLIENT_PLAYER_COLORS = new Identifier("bbs_together", "c_player_colors");
@@ -80,16 +83,27 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_REPLAY_SWAP = new Identifier("bbs_together", "c_replay_swap");
     public static final Identifier CLIENT_TOGGLE_RECORDING = new Identifier("bbs_together", "c_toggle_recording");
     /**
-     * Absolute server-side safety cap on a single synced asset (2 GB). Each client independently
-     * chooses its own upload/download ceiling via {@code TogetherSettings.assetMaxSizeMb}; this
-     * hard cap exists only so a misbehaving client can't buffer a multi-GB file and blow up the
-     * server heap.
+     * Absolute server-side safety cap on a single synced asset (2 GB). Normal size limits come
+     * from {@code TogetherSettings.getAssetSyncMaxMb()} (the shared sync ceiling); this hard cap
+     * exists only so a misbehaving client can't buffer a multi-GB file and blow up the server
+     * heap.
      */
     public static long maxAssetBytes() {
         return 2048L * 1024L * 1024L;
     }
 
+    /** Largest file the manifest advertises, in bytes; 0 means "advertise everything". */
+    public static long syncMaxBytes() {
+        int mb = TogetherSettings.getAssetSyncMaxMb();
+        return mb <= 0 ? 0L : (long)mb * 1024L * 1024L;
+    }
+
     public static final Identifier CLIENT_ASSET_MANIFEST = new Identifier("bbs_together", "c_asset_manifest");
+    /** B4: "these assets changed" hint, {@code path -> sha1:size}; replaces pushing whole
+     * files to everyone, so an upload costs the server a few dozen bytes per peer instead of
+     * one full copy per peer (a 50 MB model uploaded to a 4 player server used to be sent 3
+     * more times, all of it inside the player's game connection). */
+    public static final Identifier CLIENT_ASSET_HINT = new Identifier("bbs_together", "c_asset_hint");
     public static final Identifier CLIENT_ASSET_FILE = new Identifier("bbs_together", "c_asset_file");
     public static final Identifier CLIENT_FILM_SCREENS = new Identifier("bbs_together", "c_film_screens");
     public static final Identifier CLIENT_MERGE_REPLAYS = new Identifier("bbs_together", "c_merge_replays");
@@ -191,6 +205,16 @@ public class TogetherServerNetwork {
     /** A1: (absolute path -> mtime/size/sha1) cache so manifest walks only hash changed files. */
     private static final ConcurrentHashMap<String, HashCacheEntry> assetHashCache = new ConcurrentHashMap();
 
+    /* ---- E1: asset transfer counters, for /bbstogether diag ---------------------------- */
+    private static final java.util.concurrent.atomic.AtomicLong assetBytesSent = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong assetTasksSent = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong assetRequestsSeen = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong assetPendingDropped = new java.util.concurrent.atomic.AtomicLong();
+
+    /** B4: changed assets waiting to be announced (relativePath -> "sha1:size"), coalesced. */
+    private static final ConcurrentHashMap<String, String> pendingAssetHints = new ConcurrentHashMap<>();
+    private static final AtomicBoolean assetHintPending = new AtomicBoolean(false);
+
     /**
      * Tombstones for approved model deletions: model id -> expiry (epoch ms). Auto-sync
      * clients diff by sha1, so without this a model deleted from the server would be
@@ -275,6 +299,7 @@ public class TogetherServerNetwork {
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SYNC_PREF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSyncPref(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReport(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REPORT_DELTA, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReportDelta(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_INVENTORY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmInventory(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_SCREEN, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmScreen(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_RECORDING_FINISHED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRecordingFinished(server, player, buf));
@@ -335,8 +360,61 @@ public class TogetherServerNetwork {
         }
         assetSendQueues.clear();
         assetDrainActive.clear();
+        pendingAssetHints.clear();
+        assetHintPending.set(false);
+        AssetEgressBudget.reset();
+        assetBytesSent.set(0L);
+        assetTasksSent.set(0L);
+        assetRequestsSeen.set(0L);
+        assetPendingDropped.set(0L);
         CoopSessionManager.reset();
         BBSTogetherFix28Server.resetState();
+    }
+
+    /**
+     * E1: one-line-per-fact asset transfer report for {@code /bbstogether diag}.
+     *
+     * <p>Everything here answers "is the link being saturated by assets right now, and who is
+     * waiting": the shared budget, how much it actually used, how deep the per-player queues
+     * are, and whether anyone asked for pushes at all.</p>
+     */
+    public static java.util.List<String> diagLines(MinecraftServer server) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        long rate = AssetEgressBudget.rateBytesPerSec();
+        lines.add("§6[BBS Together] 资产出口诊断");
+        lines.add("§7预算: §f" + (rate <= 0L ? "不限速（0）" : (rate / 1024L) + " KiB/s (" + (rate / 1024L / 1024.0D) + " MiB/s)"));
+        lines.add("§7当前可用: §f" + (AssetEgressBudget.availableBytes() / 1024L) + " KiB");
+        int queued = 0;
+        boolean anyQueue = false;
+        if (server != null) {
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                LinkedBlockingQueue<AssetSendTask> q = assetSendQueues.get(p.getUuid());
+                if (q == null) {
+                    continue;
+                }
+                int n = q.size();
+                if (n <= 0) {
+                    continue;
+                }
+                anyQueue = true;
+                queued += n;
+                lines.add("§7  " + p.getGameProfile().getName() + ": §f" + n + " 个文件排队" + (assetDrainActive.containsKey(p.getUuid()) ? "（正在发送）" : "（空闲，等待排程）"));
+            }
+        }
+        if (!anyQueue) {
+            lines.add("§7排队: §f无待发资产");
+        }
+        else {
+            lines.add("§7排队合计: §f" + queued + " 个文件");
+        }
+        lines.add("§7本次运行已发: §f" + (assetBytesSent.get() / 1024L / 1024L) + " MiB / " + assetTasksSent.get() + " 个文件");
+        lines.add("§7已处理下载请求: §f" + assetRequestsSeen.get() + " 个路径");
+        lines.add("§7节流参数: §f间隔 " + sendIntervalMs() + " ms / 分批 " + (sendBatchBytes() / 1024L) + " KiB（每玩家）");
+        long syncMax = syncMaxBytes();
+        lines.add("§7清单体积上限: §f" + (syncMax <= 0L ? "不限（所有文件都会同步）" : (syncMax / 1024L / 1024L) + " MiB（更大的文件不同步，留在服务器上）"));
+        lines.add("§7丢包: §f" + assetPendingDropped.get() + " 个文件（队列超长被丢弃，见 asset.queue");
+        lines.add("§7提示: §f预算 0 表示关闭限速；2048 KiB/s 约等于为心跳留出余量的家用上行；单玩家上限仍由上面的节流参数决定");
+        return lines;
     }
 
     public static void clearPlayerState(ServerPlayerEntity player, MinecraftServer server) {
@@ -652,6 +730,8 @@ public class TogetherServerNetwork {
             try {
                 final MapType manifest = new MapType();
                 StringBuilder fingerprint = new StringBuilder();
+                final long syncMaxBytes = TogetherServerNetwork.syncMaxBytes();
+                final java.util.concurrent.atomic.AtomicLong skipped = new java.util.concurrent.atomic.AtomicLong();
                 Files.walkFileTree(assetsPath, (FileVisitor<? super Path>)new SimpleFileVisitor<Path>(){
 
                     @Override
@@ -659,11 +739,21 @@ public class TogetherServerNetwork {
                         if (!attrs.isRegularFile()) {
                             return FileVisitResult.CONTINUE;
                         }
+                        /* Huge media (screen recordings in particular) must not be part of the
+                         * automatic sync: one 700 MB video is enough to saturate a link for
+                         * minutes on first join and get the client dropped by the 30 s read
+                         * timeout. They stay on the server; raise/zero asset_sync_max_mb to
+                         * sync them anyway. */
+                        if (syncMaxBytes > 0L && attrs.size() > syncMaxBytes) {
+                            skipped.incrementAndGet();
+                            return FileVisitResult.CONTINUE;
+                        }
                         String relativePath = assetsPath.relativize(file).toString().replace(File.separator, "/");
-                        /* ".bbsup" files are transient multi-slice upload temps: they may be
+                        /* ".bbsup" / ".bbspart" are transient multi-slice temps: they may be
                          * deleted or promoted at any moment, so never advertise them or
-                         * clients will request a file that vanishes mid-transfer. */
-                        if (relativePath.endsWith(".bbsup")) {
+                         * clients will request a file that vanishes mid-transfer (and the
+                         * half-written bytes would be shipped to every peer). */
+                        if (mchorse.bbs_together.utils.AssetPaths.isTransferTemp(relativePath)) {
                             return FileVisitResult.CONTINUE;
                         }
                         /* Manifest entries carry "<sha1>:<sizeBytes>:<mtimeMillis>" so clients can
@@ -730,12 +820,17 @@ public class TogetherServerNetwork {
             paths.add(buf.readString());
         }
         recordDownloadBehavior(player, paths);
+        assetRequestsSeen.addAndGet(paths.size());
         Thread thread = new Thread(() -> {
             File assetsFolder = BBSMod.getAssetsFolder();
             for (String relativePath : paths) {
                 File file;
-                if (relativePath.contains("..") || relativePath.startsWith("/") || relativePath.endsWith(".bbsup") || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile()) continue;
+                if (!mchorse.bbs_together.utils.AssetPaths.isPublishable(relativePath) || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile()) continue;
                 if (file.length() > TogetherServerNetwork.maxAssetBytes() || file.length() == 0) continue;
+                /* The manifest no longer advertises these, but an old client (or a hand written
+                 * request) can still ask for them: keep the shared ceiling enforced here too. */
+                long syncMax = TogetherServerNetwork.syncMaxBytes();
+                if (syncMax > 0L && file.length() > syncMax) continue;
                 String sha1 = "";
                 try {
                     sha1 = TogetherServerNetwork.sha1OfPathCached(file.toPath(), file);
@@ -748,9 +843,29 @@ public class TogetherServerNetwork {
         thread.start();
     }
 
+    /** Last time we told a player their upload was rejected (throttles the chat spam). */
+    private static final java.util.concurrent.ConcurrentHashMap<UUID, Long> uploadRejectNoticeAt = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * A level-0 player's upload is dropped right here, silently — the client still shows a
+     * completed upload, so half a model can end up "synced" in their eyes while the server
+     * never received a byte. Say it out loud (throttled) instead of failing mute.
+     */
+    private static void noticeUploadRejected(MinecraftServer server, ServerPlayerEntity player) {
+        long now = System.currentTimeMillis();
+        Long last = uploadRejectNoticeAt.get(player.getUuid());
+        if (last != null && now - last.longValue() < 30_000L) {
+            return;
+        }
+        uploadRejectNoticeAt.put(player.getUuid(), now);
+        String message = "[BBS Together] 上传被拒绝：你的 BBS 权限是只读（等级 0），刚上传的资产没有写入服务器。请管理员用 /bbsop 给你授权后再上传。";
+        server.execute(() -> player.sendMessage(Text.literal(message), false));
+    }
+
     private static void handleAssetUpload(MinecraftServer server, ServerPlayerEntity uploader, PacketByteBuf buf) {
         /* Read-only (level 0) players may never upload, even if the gamerule would allow panels. */
         if (!BbsOpManager.isAllowed(uploader, BbsOpDomain.UPLOAD)) {
+            TogetherServerNetwork.noticeUploadRejected(server, uploader);
             return;
         }
         TogetherServerNetwork.crusherFor(uploader).receive(buf, (bytes, packetByteBuf) -> {
@@ -772,6 +887,12 @@ public class TogetherServerNetwork {
                 return;
             }
             if (bytes == null || totalSize > TogetherServerNetwork.maxAssetBytes()) {
+                return;
+            }
+            /* Same shared ceiling on the way in: a file we would never advertise back to
+             * clients is not worth storing either. */
+            long uploadSyncMax = TogetherServerNetwork.syncMaxBytes();
+            if (uploadSyncMax > 0L && totalSize > uploadSyncMax) {
                 return;
             }
             File assetsFolder = BBSMod.getAssetsFolder();
@@ -839,8 +960,8 @@ public class TogetherServerNetwork {
         });
     }
 
-    /** Post-upload bookkeeping: cache the hash, log the behavior, then push to everyone who
-     * wants pushes (B1) and does not already own the identical file (B2). */
+    /** Post-upload bookkeeping: cache the hash, log the behavior, then announce the change to
+     * everyone who wants pushes (B4) instead of sending them a full copy unasked. */
     private static void finalizeUpload(MinecraftServer server, ServerPlayerEntity uploader, String relativePath, Path target, long size, String sha1, boolean changed) {
         try {
             TogetherServerNetwork.cacheAssetHash(target, Files.getLastModifiedTime(target).toMillis(), target.toFile().length(), sha1);
@@ -853,16 +974,65 @@ public class TogetherServerNetwork {
             return;
         }
         scheduleAssetsChangedPing(server, uploader);
-        server.execute(() -> {
-            for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
-                if (other.getUuid().equals(uploader.getUuid())) continue;
-                Boolean pref = playerReceivePush.get(other.getUuid());
-                if (pref != null && !pref.booleanValue()) continue;
-                Map<String, String> owned = playerOwnedAssets.get(other.getUuid());
-                if (!sha1.isEmpty() && owned != null && sha1.equalsIgnoreCase(owned.get(relativePath))) continue;
-                TogetherServerNetwork.enqueueAssetSend(server, other, new AssetSendTask(relativePath, target.toFile(), size, sha1, true));
+        queueAssetHint(server, uploader, relativePath, sha1, size);
+    }
+
+    /**
+     * B4: announce that {@code relativePath} changed, coalesced over ~2s.
+     *
+     * <p>The old behaviour was to stream the whole file to every other player. That is the
+     * single most expensive thing the mod did: one upload became one download per peer, on
+     * links that already cannot separate asset bytes from keepalives. A hint is ~40 bytes and
+     * the peers pull only what they lack, when they can absorb it (their request then goes
+     * through the same budget as everything else).</p>
+     */
+    private static void queueAssetHint(MinecraftServer server, ServerPlayerEntity uploader, String relativePath, String sha1, long size) {
+        if (sha1 == null || sha1.isEmpty() || relativePath == null) {
+            return;
+        }
+        pendingAssetHints.put(relativePath, sha1 + ":" + size);
+        if (!assetHintPending.compareAndSet(false, true)) {
+            return;
+        }
+        final UUID uploaderId = uploader.getUuid();
+        ASSET_CHANGE_SCHEDULER.schedule(() -> {
+            assetHintPending.set(false);
+            HashMap<String, String> hints = new HashMap<>(pendingAssetHints);
+            pendingAssetHints.clear();
+            if (hints.isEmpty()) {
+                return;
             }
-        });
+            try {
+                server.execute(() -> {
+                    File assetsFolder = BBSMod.getAssetsFolder();
+                    for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+                        if (other.getUuid().equals(uploaderId)) continue;
+                        Boolean pref = playerReceivePush.get(other.getUuid());
+                        if (pref != null && !pref.booleanValue()) continue;
+                        /* Clients from before B4 cannot parse a hint; they keep the old behaviour
+                         * of being sent the file, so mixed-version servers still work. */
+                        boolean hintCapable = ServerPlayNetworking.canSend(other, CLIENT_ASSET_HINT);
+                        Map<String, String> owned = playerOwnedAssets.get(other.getUuid());
+                        MapType payload = new MapType();
+                        for (Map.Entry<String, String> e : hints.entrySet()) {
+                            String entry = e.getValue();
+                            String hintSha1 = entry.substring(0, entry.indexOf(':'));
+                            if (owned != null && hintSha1.equalsIgnoreCase(owned.get(e.getKey()))) continue;
+                            if (hintCapable) {
+                                payload.putString(e.getKey(), entry);
+                                continue;
+                            }
+                            File legacy = new File(assetsFolder, e.getKey().replace("/", File.separator));
+                            if (!legacy.isFile() || legacy.length() <= 0L) continue;
+                            TogetherServerNetwork.enqueueAssetSend(server, other, new AssetSendTask(e.getKey(), legacy, legacy.length(), hintSha1, true));
+                        }
+                        if (!hintCapable || payload.keys().isEmpty()) continue;
+                        TogetherServerNetwork.crusherFor(other).send((PlayerEntity)other, CLIENT_ASSET_HINT, (BaseType)payload, null);
+                    }
+                });
+            }
+            catch (Exception ignored) {}
+        }, 2000L, TimeUnit.MILLISECONDS);
     }
 
     /** Auto sync: ~2s after an accepted upload changes server assets, ping everyone but the
@@ -886,10 +1056,22 @@ public class TogetherServerNetwork {
         }, 2000L, TimeUnit.MILLISECONDS);
     }
 
+    /** Generous: a full "download everything" on a big repo is ~1500 files, so this only ever
+     * trips on a runaway loop, never on a legitimate bulk pull. */
+    private static final int ASSET_QUEUE_MAX = 4096;
+
     private static void enqueueAssetSend(MinecraftServer server, ServerPlayerEntity player, AssetSendTask task) {
         UUID uuid = player.getUuid();
         LinkedBlockingQueue<AssetSendTask> queue = assetSendQueues.computeIfAbsent(uuid, k -> new LinkedBlockingQueue());
+        /* E1: a client that asks for thousands of files must not grow this queue without
+         * bound — each entry holds a File and the drain thread is rate limited anyway. The
+         * client retries through the manifest diff, so dropping the excess is safe. */
+        if (queue.size() >= ASSET_QUEUE_MAX) {
+            assetPendingDropped.incrementAndGet();
+            return;
+        }
         queue.add(task);
+        assetTasksSent.incrementAndGet();
         AtomicBoolean draining = assetDrainActive.computeIfAbsent(uuid, k -> new AtomicBoolean(false));
         if (draining.compareAndSet(false, true)) {
             Thread drainThread = new Thread(() -> {
@@ -922,7 +1104,9 @@ public class TogetherServerNetwork {
         }
     }
 
-    /** A5: stream one asset as slice batches, pacing between batches (see sendIntervalMs). */
+    /** A5: stream one asset as slice batches, pacing between batches (see sendIntervalMs).
+     * B1: every batch first reserves its bytes from the server-wide egress budget, so several
+     * players pulling at once share one ceiling instead of multiplying the per-player pacing. */
     private static void sendTaskInBatches(MinecraftServer server, ServerPlayerEntity player, AssetSendTask task) {
         long interval = Math.max(0L, TogetherServerNetwork.sendIntervalMs());
         final long batchBytes = Math.max(30_720L, TogetherServerNetwork.sendBatchBytes());
@@ -930,11 +1114,16 @@ public class TogetherServerNetwork {
         if (size <= 0) {
             return;
         }
+        AssetEgressBudget.sync();
         final int totalSlices = (int)Math.max(1L, (size + batchBytes - 1L) / batchBytes);
         try {
             for (int seq = 0; seq < totalSlices; ++seq) {
                 final int fSeq = seq;
                 final int fTotal = totalSlices;
+                long budgetWaitNs = AssetEgressBudget.reserve((int)Math.min(batchBytes, size - (long)seq * batchBytes));
+                if (budgetWaitNs > 0L) {
+                    Thread.sleep(budgetWaitNs / 1_000_000L);
+                }
                 server.execute(() -> {
                     try {
                         if (!server.getPlayerManager().getPlayerList().contains(player)) {
@@ -956,6 +1145,7 @@ public class TogetherServerNetwork {
                              * uploads this is the uploader's edit time (just stamped). */
                             outBuf.writeLong(task.file.lastModified());
                         });
+                        assetBytesSent.addAndGet(slice.length);
                     }
                     catch (Exception e) {
                         e.printStackTrace();
@@ -1067,6 +1257,43 @@ public class TogetherServerNetwork {
                     owned.put(key, report.getString(key));
                 }
                 server.execute(() -> playerOwnedAssets.put(player.getUuid(), owned));
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** A1/A2: incremental inventory. Same payload shape as {@link #handleAssetReport}, but an entry
+     * with an empty sha1 means the client dropped that path, and everything else is merged in. */
+    private static void handleAssetReportDelta(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            if (bytes == null) {
+                return;
+            }
+            try {
+                BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+                if (!data.isMap()) {
+                    return;
+                }
+                MapType report = data.asMap();
+                Map<String, String> updates = new HashMap<String, String>();
+                ArrayList<String> removals = new ArrayList<String>();
+                for (String key : report.keys()) {
+                    String sha1 = report.getString(key);
+                    if (sha1 == null || sha1.isEmpty()) {
+                        removals.add(key);
+                    } else {
+                        updates.put(key, sha1);
+                    }
+                }
+                server.execute(() -> {
+                    Map<String, String> owned = playerOwnedAssets.computeIfAbsent(player.getUuid(), k -> new HashMap<String, String>());
+                    owned.putAll(updates);
+                    for (String key : removals) {
+                        owned.remove(key);
+                    }
+                });
             }
             catch (Exception e) {
                 e.printStackTrace();

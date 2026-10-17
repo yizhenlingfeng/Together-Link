@@ -50,6 +50,14 @@ public class TogetherCommands {
         });
         dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("record").then(target)));
 
+        /* E1: /bbstogether diag — where the asset bytes are going right now. */
+        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("diag").executes(ctx -> {
+            for (String line : TogetherServerNetwork.diagLines(ctx.getSource().getServer())) {
+                ctx.getSource().sendFeedback(() -> Text.literal(line), false);
+            }
+            return 1;
+        })));
+
         /* /bbsop <player> [level] — set or query a player's BBS edit permission (0 = read-only). */
         RequiredArgumentBuilder<ServerCommandSource, EntitySelector> bbsopTarget = CommandManager.argument("targets", EntityArgumentType.players());
         /* No level argument -> query current level. */
@@ -117,6 +125,22 @@ public class TogetherCommands {
             BbsOpManager.syncToAll(source.getServer());
             return players.size();
         }))));
-        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbsop").requires(src -> src.hasPermissionLevel(2))).then(bbsopTarget));
+        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbsop").requires(TogetherCommands::canUseBbsOp)).then(bbsopTarget));
+    }
+
+    /**
+     * /bbsop gate: server console (or command blocks), vanilla OP level 2+ (the server
+     * owner), or a player whose BBS op level is 2. Everyone else — including plain
+     * vanilla OPs of lower level and BBS level-1 editors — is rejected.
+     */
+    private static boolean canUseBbsOp(ServerCommandSource source) {
+        if (!source.isExecutedByPlayer()) {
+            return true;
+        }
+        if (source.hasPermissionLevel(2)) {
+            return true;
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        return BbsOpManager.get(player.getUuid()) == BbsOpManager.LEVEL_ADMIN;
     }
 }

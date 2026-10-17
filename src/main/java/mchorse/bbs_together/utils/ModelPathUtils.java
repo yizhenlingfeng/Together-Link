@@ -49,21 +49,32 @@ public class ModelPathUtils
 
         if (slash < 0)
         {
-            /* "foo.bbmodel" -> "foo" */
-            return stripExtension(after);
+            /* "foo.bbmodel" -> "foo", "foo.geo.json" -> "foo" */
+            return stripModelExtension(after);
         }
 
-        String file = after.substring(slash + 1);
         String folder = after.substring(0, slash);
 
-        if (file.contains("."))
+        /* Never strip anything off the folder: a folder name may legitimately contain a dot
+         * ("Steve 9.0 Model"), and stripping there used to collapse unrelated model folders
+         * into the same id ("PBR_ALL/Steve 9"), which then tripped the per-model size caps
+         * on the wrong model and left folders holding nothing but config.json. */
+        return folder;
+    }
+
+    /** Strip the model file extensions (including the double ones BBS uses). */
+    private static String stripModelExtension(String file)
+    {
+        if (file.endsWith(".geo.json"))
         {
-            /* "foo/bar.bbmodel" -> "foo", "foo/bar/config.json" -> "foo/bar" (folder has no dot) */
-            return stripExtension(folder);
+            return file.substring(0, file.length() - ".geo.json".length());
+        }
+        if (file.endsWith(".bbs.json"))
+        {
+            return file.substring(0, file.length() - ".bbs.json".length());
         }
 
-        /* "foo/bar/textures" (a folder, rare) -> "foo/bar" */
-        return folder;
+        return stripExtension(file);
     }
 
     /**

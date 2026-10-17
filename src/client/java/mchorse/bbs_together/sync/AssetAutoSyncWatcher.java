@@ -22,8 +22,8 @@ import mchorse.bbs_together.network.TogetherClientNetwork;
 /**
  * Auto sync (client side): watches the local assets folder and nudges the client network
  * to re-diff against the server manifest when files change, so local edits upload without
- * pressing the upload button. Events are debounced by a quiet period; files written by our
- * own downloads/pushes are naturally no-ops (their hashes already match the manifest).
+ * pressing the upload button. Events are debounced by a quiet period; files this client wrote
+ * itself are filtered out by {@link SelfWriteGuard} so downloads cannot re-trigger a sync.
  */
 @Environment(EnvType.CLIENT)
 public class AssetAutoSyncWatcher {
@@ -102,6 +102,11 @@ public class AssetAutoSyncWatcher {
             String name = child.getFileName() == null ? "" : child.getFileName().toString();
             /* Skip our own in-flight transfer temps; they never become assets. */
             if (name.endsWith(".bbspart") || name.endsWith(".bbsup")) {
+                continue;
+            }
+            /* D1: a file we just wrote ourselves is not a local edit — going through with it would
+             * schedule a full manifest round trip for every downloaded asset. */
+            if (SelfWriteGuard.isSelfWrite(child)) {
                 continue;
             }
             relevant = true;
