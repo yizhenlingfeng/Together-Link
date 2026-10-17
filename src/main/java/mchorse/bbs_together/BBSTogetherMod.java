@@ -18,6 +18,9 @@ implements ModInitializer {
         CommandRegistrationCallback.EVENT.register(TogetherCommands::register);
         ServerPlayConnectionEvents.JOIN.register((handler, packetSender, server) -> {
             server.execute(() -> {
+                /* Before the permission syncs below, so the first join already learns the level */
+                BbsOpManager.onPlayerJoin(server, handler.player);
+
                 /* B4: the asset manifest is client-pulled now — the client sends its cached
                  * manifest fingerprint right after joining, and identical manifests cost a
                  * round trip instead of a full re-send. */

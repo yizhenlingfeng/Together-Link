@@ -378,15 +378,17 @@ public final class FilmCommitStore
     /* Recording */
 
     /**
-     * Record the film as it is now, on the branch the film is on. Called when the author presses
-     * the commit button, so the history is what the authors decided to keep, not every save.
+     * Record the film as it is now, on {@code branch}. The client picks the branch from the
+     * commit the author is looking at, so committing never requires a checkout first; an
+     * unknown branch falls back to the branch the film is on.
      *
      * @param filmId id of the film (may contain folders, like the film files themselves)
      * @param data   the film as it should be committed
+     * @param branch branch the commit goes on, {@code null} to use the branch the film is on
      * @return the new commit, or {@code null} when nothing changed since the branch head
      */
     public static synchronized FilmCommit commit(String filmId, MapType data, String authorId,
-        String authorName, long now, String message)
+        String authorName, long now, String message, String branch)
     {
         Store store = get(filmId);
 
@@ -395,7 +397,14 @@ public final class FilmCommitStore
             return null;
         }
 
-        FilmCommit head = store.find(store.currentHead());
+        String target = branch == null ? "" : branch.trim();
+
+        if (!store.branches.containsKey(target))
+        {
+            target = store.current;
+        }
+
+        FilmCommit head = store.find(store.branches.get(target));
         MapType headData = head == null ? null : snapshot(store, head.id);
 
         if (headData != null && BaseType.equals(headData, data))
@@ -410,7 +419,7 @@ public final class FilmCommitStore
             trimmed = trimmed.substring(0, FilmCommit.MAX_MESSAGE);
         }
 
-        return write(store, data, head, authorId, authorName, now, FilmCommit.KIND_MANUAL, trimmed);
+        return write(store, data, head, authorId, authorName, now, FilmCommit.KIND_MANUAL, trimmed, target);
     }
 
     /** Whether {@code name} can be used as a branch name. */
@@ -593,6 +602,10 @@ public final class FilmCommitStore
 
         store.branches.put(branch, to);
 
+        /* The film holds this branch's data now: keep the highlight and the next commit's
+         * diff baseline on the same branch */
+        store.current = branch;
+
         if (!removed.isEmpty())
         {
             for (String id : removed)
@@ -660,12 +673,13 @@ public final class FilmCommitStore
     }
 
     /**
-     * Add one commit on top of {@code head}, on the branch the film is currently on.
+     * Add one commit on top of {@code head}, on {@code branch}, which becomes the branch the
+     * film is on.
      *
      * @param head the branch head the commit hangs off, or {@code null} for the first commit
      */
     private static FilmCommit write(Store store, MapType data, FilmCommit head, String authorId,
-        String authorName, long now, int kind, String message)
+        String authorName, long now, int kind, String message, String branch)
     {
         MapType before = head == null ? null : snapshot(store, head.id);
         MapType diff = FilmDiffBuilder.diff(before, data);
@@ -673,7 +687,7 @@ public final class FilmCommitStore
         FilmCommit commit = new FilmCommit();
 
         commit.filmId = store.filmId;
-        commit.branch = store.current;
+        commit.branch = branch;
         commit.authorId = authorId == null ? "" : authorId;
         commit.authorName = authorName == null ? "" : authorName;
         commit.time = now;
@@ -718,6 +732,7 @@ public final class FilmCommitStore
 
         store.commits.add(commit);
         store.branches.put(commit.branch, commit.id);
+        store.current = commit.branch;
 
         trim(store);
         save(store);

@@ -1,10 +1,13 @@
 package mchorse.bbs_together.ui.commits;
 
+import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
+import mchorse.bbs_mod.ui.framework.elements.overlay.UIMessageOverlayPanel;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.commits.FilmCommitStore;
@@ -43,11 +46,38 @@ public final class CommitUi
         return TAB_ID.equals(id);
     }
 
+    /** The dashboard's film editor panel, opened or not. Null until a film was opened once. */
+    public static UIFilmPanel filmPanel()
+    {
+        UIDashboard dashboard = CommitUi.dashboard;
+
+        return dashboard == null ? null : dashboard.getPanels().getPanel(UIFilmPanel.class);
+    }
+
     /**
-     * Opens the commit tab of the film editor, showing every film. The film id only focuses the
-     * graph; the tab itself is shared by all films, the same way the panel that holds the film tabs
-     * is.
+     * The editor's live film, saved or not, when it is the one with this id. The full screen
+     * tab draws the same bar without the panel being an ancestor, hence the fallback.
      */
+    public static Film liveFilm(UIElement from, String filmId)
+    {
+        if (filmId == null || filmId.isEmpty())
+        {
+            return null;
+        }
+
+        UIFilmPanel panel = from == null ? null : from.getAncestor(UIFilmPanel.class);
+
+        if (panel == null)
+        {
+            panel = filmPanel();
+        }
+
+        Film film = panel == null ? null : (Film) panel.getData();
+
+        return film != null && filmId.equals(film.getId()) ? film : null;
+    }
+
+    /** Opens the commits tab of the film editor; the film id only focuses the graph. */
     public static boolean openFilm(String filmId)
     {
         if (dashboard == null)
@@ -69,10 +99,7 @@ public final class CommitUi
         return true;
     }
 
-    /**
-     * Asks how to undo one commit: either it disappears from the history, or it stays there while
-     * the film and the branch go back to the commit before it.
-     */
+    /** Asks whether the commit disappears from the history, or stays while the branch moves back. */
     public static void confirmRevert(UIContext context, String filmId, String commitId)
     {
         UIOverlay.addOverlay(context, new UICommitRollbackOverlay(
@@ -84,10 +111,7 @@ public final class CommitUi
             .build());
     }
 
-    /**
-     * Asks how to go back to one commit: the commits after it can be dropped from the branch, or
-     * stay in the history while the branch head moves back to the commit that was picked.
-     */
+    /** Asks whether the commits after it are dropped, or the branch head only moves back. */
     public static void confirmReset(UIContext context, String filmId, String commitId)
     {
         UIOverlay.addOverlay(context, new UICommitRollbackOverlay(
@@ -97,6 +121,23 @@ public final class CommitUi
             .choice(L10n.lang("bbs_together.commits.reset_delete"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.RESET_DELETE))
             .choice(L10n.lang("bbs_together.commits.reset_keep"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.RESET_KEEP))
             .build());
+    }
+
+    /** Show why a commit request produced no commit instead of leaving the button silent. */
+    public static void showRejected(int reason)
+    {
+        UIFilmPanel films = CommitUi.filmPanel();
+        UIContext context = films == null ? null : films.getContext();
+
+        if (context == null)
+        {
+            return;
+        }
+
+        UIOverlay.addOverlay(context, new UIMessageOverlayPanel(
+            L10n.lang("bbs_together.commits.reject_title"),
+            L10n.lang(reason == 0 ? "bbs_together.commits.reject_none" : "bbs_together.commits.reject_failed")
+        ));
     }
 
     /**

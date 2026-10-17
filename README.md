@@ -27,13 +27,14 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - **回放合并**：支持多人录制的回放片段合并到同一时间线。
 
 ### 影片提交（版本历史）
-- **提交**：影片编辑页「影片节点」页签里填写提交信息后点「提交」，服务器为该影片记录一份快照与差异，存在 `<存档>/bbs/films/_commits/` 下，每部影片最多保留 300 条。
-- **提交图**：横轴按影片分列，节点是提交、连线是父子关系；连线固定暗灰色，颜色只用来区分节点；当前分支所在的提交有高亮描边，一眼看出影片现在停在哪。
-- **单个提交颜色**：右键提交节点或右键菜单「提交颜色（短 id）」，用 BBS 自带调色盘取色，颜色只存在本机 `config/bbs_together_commit_colors.json`，不同步给其他人。
-- **撤回 / 回退**：「撤回至此提交」把影片退到该提交的父提交，「回退到此节点」退到该提交本身；两者都弹窗询问「删除相关提交」还是「留在历史里」，选留则旧提交仍在图上可见。
-- **分支**：右键「从此处新建分支」，页签顶部显示当前分支；「切换分支」把影片内容切到目标分支的头部，提交图随之更新。
-- **编辑器里的提交栏**：「影片节点」页签和影片编辑页共用同一个面板，另外在右下角「Properties」组里加了一个「提交」小页签：上面是提交图，下面是提交信息与操作按钮，可拖动分隔条调整大小。
-- **服务端权威**：提交、撤回、回退、切分支全部由服务器落盘后广播，所有客户端同步刷新；影片未解锁或改到一半的写入会被拒绝。
+- **提交**：在影片编辑页的「提交」页填写提交信息后提交。服务器为该影片记录一份快照与差异，存于 `<存档>/bbs/films/_commits/<影片>/`，每部影片最多保留 300 条。提交落在选中提交所在的分支上；未选中时落在影片当前分支，按钮显示「提交到 <分支名>」，因此无需先切换分支（切换分支会重载影片内容）。客户端会把编辑器中尚未保存的影片数据一并发送，刚改完关键帧轨道不保存直接提交也能记下改动。提交没有产生新记录时（与分支最新提交内容相同，或影片数据读写失败）服务器回传原因并弹窗提示。
+- **提交图**：横轴按影片分列，节点为提交、连线为父子关系，连线恒为暗灰色。纵轴按时间自上而下排列，最旧在上、最新在下，视图默认吸附最新提交，翻看历史后滚回底部会重新吸附。影片当前分支线上的提交为实心并带高亮描边；其余（回退时保留的提交、影片未停留的分支）为空心灰字。当前提交所在行常驻淡主题色底与左侧色条，即使选中其他提交也能看出影片停在哪里。行样式、滚动条与滚轮行为与 BBS 列表一致。
+- **提交详情**：按 BBS 属性面板样式逐行列出提交 id、类型、分支、作者、时间，以及剪辑与关键帧的增删改统计和各段差异，内容多时可滚动。未选中提交时，此处改为显示编辑器影片相对当前分支头的未提交改动，约每秒刷新一次；影片未在编辑器中打开时会提示先打开。
+- **撤回 / 回退**：「撤回至此提交」把影片退到该提交的父提交，「回退到此节点」退到该提交本身；两者都弹窗询问删除相关提交还是保留在历史里。回退到其他分支上的提交时，影片、分支指针与高亮一并切换。
+- **分支**：右键节点「从此处新建分支」；页签顶部显示当前分支；「切换分支」把影片内容切到目标分支的头部。
+- **编辑页内的提交页**：影片编辑页「Properties」组新增「提交」小页签，自上而下为提交图、提交详情（或未提交改动）、提交信息与操作按钮。详情栏顶边为可拖动的分隔条，悬停显示上下箭头，双击复位为默认高度，拖动结果记入编辑器布局设置。
+- **单个提交颜色**：右键提交节点选择「提交颜色」，用 BBS 调色盘取色，颜色仅保存于本机 `config/bbs_together_commit_colors.json`。
+- **服务端权威**：提交、撤回、回退、切换分支均由服务器落盘后广播，所有客户端同步刷新。
 
 ### 录制同步
 - **一键录制开关**：服务器管理员可通过命令同时控制多名玩家开始/停止录制。
@@ -81,7 +82,8 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - 撤销同步到服务器时按路径携带期望基线（`s_undo_sync`）做校验，他人已改过的内容会被拒绝并回推服务器现状（`c_undo_rejected`），杜绝"Ctrl+Z 一键回滚他人修改"。
 
 ### BBS 权限等级（bbsop）
-- **三级权限**：0 级仅浏览（可浏览、可下载，不可编辑、不可上传）、1 级编辑者（默认可编辑全部内容）、2 级管理员（可编辑全部内容并管理他人权限）。玩家进服默认 0 级。
+- **三级权限**：0 级仅浏览（可浏览、可下载，不可编辑、不可上传）、1 级编辑者（默认可编辑全部内容）、2 级管理员（可编辑全部内容并管理他人权限）。除服主外，玩家进服默认 0 级。
+- **服主默认 2 级**：单人 / LAN 存档由集成服务器按主机 GameProfile 识别开服者，首次进服自动获得 2 级；专用服没有「开服玩家」这一玩家身份，因此在 `bbsop.json` 尚无任何等级记录时，把第一个进服的玩家视为服主并授予 2 级（仅一次）。该授予以记录为准：一旦存有该玩家的等级（包括用 `/bbsop` 调成 0/1），进服不再覆盖，也不会自动恢复。
 - **功能域**：伪装、影片、模型方块、粒子、模型编辑器、纹理、音频编辑器、资产上传八个域，服务端写包与客户端 UI 全部按域判定。
 - **录制子权限**：影片域下的隐藏子域「录制」，控制回放录制（录制按钮、录制快捷键、`/bbstogether record` 远程触发）与影片预览的「录制视频/截图」按钮。它不占「修改可编辑行为」菜单的顶层项——鼠标悬停「影片」行时在右侧弹出「录制：允许/禁止」小按钮切换；服务端在录制数据包与动作录制两条通道复核。
 - **1 级域白名单**：管理员可对 1 级玩家逐域"允许/禁止"；首次禁止即进入白名单模式（其余全开），空白名单 = 全部禁止。
@@ -136,25 +138,26 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 
 ### 服务端
 - `src/main/java/mchorse/bbs_together/commits/FilmCommit.java`：一条提交（id、父提交、分支、信息、作者、时间、类型）。
-- `src/main/java/mchorse/bbs_together/commits/FilmCommitStore.java`：磁盘存档与全部操作。目录 `<存档>/bbs/films/_commits/<影片>/`，`index.dat` 记分支与提交列表，`commits/` 存快照、`diffs/` 存差异；提供 `commit`、`list`、`diff`、`rollback`（四种模式：撤回保留/删除、回退保留/删除）、`createBranch`、`checkout`、`rename`。
-- `TogetherServerNetwork.java` 的提交处理器：校验影片是否被锁、参数是否合法，改盘后广播 `c_commits` / `c_commit_added` / `c_commit_index`，并写入行为日志。
+- `src/main/java/mchorse/bbs_together/commits/FilmCommitStore.java`：磁盘存档与全部操作。目录 `<存档>/bbs/films/_commits/<影片>/`，`index.bin` 记分支与提交列表，`s/` 存快照、`d/` 存差异；提供 `commit`、`list`、`diff`、`rollback`（四种模式：撤回保留/删除、回退保留/删除）、`createBranch`、`checkout`、`rename`。
+- `src/main/java/mchorse/bbs_together/commits/FilmDiffBuilder.java`：按剪辑、关键帧、字段生成提交差异与统计，客户端复用同一份实现计算未提交改动。
+- `TogetherServerNetwork.java` 的提交处理器：校验权限、参数与影片锁，落盘后广播 `c_commits` / `c_commit_added` / `c_commit_index` / `c_commit_rejected`，并写入行为日志。
 
 ### 协议（`bbs_together` 命名空间）
-`c/s_commit_index`、`c/s_commits`、`c/s_commit_diff`、`c/s_commit_create`、`c/s_commit_rename`、`c/s_commit_revert`（带 mode 字节）、`s_branch_create`、`s_branch_checkout`、`c_commit_added`、`c_commit_renamed`。
+`c/s_commit_index`、`c/s_commits`、`c/s_commit_diff`、`c/s_commit_head`、`c/s_commit_create`、`c/s_commit_rename`、`c/s_commit_revert`（带 mode 字节）、`s_branch_create`、`s_branch_checkout`、`c_commit_added`、`c_commit_renamed`、`c_commit_rejected`（带原因字节）。
 
 ### 客户端
 - `network/TogetherClientNetwork.java`：发送与接收上述包。
-- `ui/commits/FilmCommitClient.java`：客户端缓存（索引、各影片提交图、提交差异），`version()` 变一次刷新一次界面。
-- `ui/commits/CommitUi.java`：入口（打开「影片节点」页签、顶栏图标）与撤回/回退确认弹窗。
-- `ui/commits/UICommitsPanel.java`：「影片节点」页本身——左侧有提交的影片列表，右侧提交图，底部选中提交的详情与差异。
-- `ui/commits/UIFilmCommitsView.java`：嵌在影片编辑页「Properties」组里的「提交」页，提交图 + 提交信息 + 操作按钮栏。
+- `ui/commits/FilmCommitClient.java`：客户端缓存（索引、各影片提交图、提交差异、分支头快照），`version()` 变一次刷新一次界面。
+- `ui/commits/CommitUi.java`：入口（打开「影片节点」页签、顶栏图标、编辑页提交页）、撤回/回退确认与提交被拒提示。
+- `ui/commits/UICommitsPanel.java`：「影片节点」页本身——左侧有提交的影片列表，右侧提交图，底部选中提交的详情。
+- `ui/commits/UIFilmCommitsView.java`：嵌在影片编辑页「Properties」组里的「提交」页，提交图、详情（含未提交改动）与操作按钮栏。
 - `ui/commits/UICommitGraph.java`：提交图绘制、命中检测、右键菜单、右键取色。
 - `ui/commits/UICommitActions.java`：底部按钮栏（提交、新建分支、切换分支、撤回）。
-- `ui/commits/UICommitInfo.java`：选中提交的详情、重命名与差异对比。
+- `ui/commits/UICommitInfo.java`：选中提交的详情、未提交改动、重命名与差异展示。
 - `ui/commits/UICommitRollbackOverlay.java`：撤回/回退的二选一确认弹窗。
 - `ui/commits/CommitColors.java`：每个提交的颜色，存 `config/bbs_together_commit_colors.json`。
 
-### 注入（4 个 mixin，共 7 处）
+### 注入（4 个 mixin，共 8 处）
 - `mixin/UIFilmPanelCommitsMixin.java`：在影片编辑页挂上「提交」dock 页、顶栏图标和「影片节点」页签内容。
 - `mixin/UIPanelTopBarCommitsMixin.java`：页签条为顶栏图标让出位置。
 - `mixin/UIDataDashboardPanelCommitsMixin.java`：让影片编辑页的 `showTab` / `getOpenId` / `saveOpen` 认这个伪数据 id。
@@ -170,8 +173,13 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 ### v1.7.5
 - 新增影片提交（版本历史）：「影片节点」页签按影片展示提交图，可提交、撤回、回退、建分支、切分支，提交可单独改色
 - 影片编辑页「Properties」组内新增「提交」小页签，提交图与提交信息就地查看，不用离开编辑页
+- 提交落在选中提交所在的分支，无需先切换分支；编辑器未保存的数据随提交发送，关键帧轨道修改可直接提交
+- 提交无新记录或影片数据读写失败时弹窗说明原因
+- 未选中提交时，详情区显示影片相对分支头的未提交改动
+- 详情栏顶边可拖动调整高度，双击复位，高度记入编辑器布局
+- 服主首次进服默认获得 BBS 2 级
 - 撤回 / 回退改为一事一议：弹窗选择「删除相关提交」还是「保留在历史里」，不再伪造一条「撤回至 X」的提交
-- 提交图连线固定暗灰色，节点用颜色区分，当前影片所在提交加高亮描边
+- 提交图连线固定暗灰色，节点用颜色区分，当前影片所在提交加高亮描边并常驻标记
 
 ### v1.7.4
 - 新增合作录制：右键「录制回放」按钮邀请玩家，对方通过右上角置顶弹窗（快捷键可在 BBS 设置的「影片控制器」分类修改）同意后进入选回放房间；全员认领回放后由发起者开始录制，各成员可中途停止，全员交卷后服务器自动合并并广播

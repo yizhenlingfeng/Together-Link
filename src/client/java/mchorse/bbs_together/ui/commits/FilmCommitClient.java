@@ -56,6 +56,9 @@ public final class FilmCommitClient
 
     private static final Map<String, Graph> GRAPHS = new ConcurrentHashMap<String, Graph>();
     private static final Map<String, MapType> DIFFS = new ConcurrentHashMap<String, MapType>();
+    /** Head snapshots, keyed by film id, together with the head commit they belong to. */
+    private static final Map<String, MapType> HEADS = new ConcurrentHashMap<String, MapType>();
+    private static final Map<String, String> HEAD_IDS = new ConcurrentHashMap<String, String>();
     private static final List<IndexEntry> INDEX = new CopyOnWriteArrayList<IndexEntry>();
 
 
@@ -198,6 +201,28 @@ public final class FilmCommitClient
     public static void setDiff(String filmId, String commitId, MapType data)
     {
         DIFFS.put(filmId + "/" + commitId, data);
+
+        changed();
+    }
+
+    /** The head snapshot the film sits at, or null while it is being fetched. */
+    public static MapType head(String filmId)
+    {
+        Graph graph = graph(filmId);
+        String head = HEAD_IDS.get(filmId);
+
+        if (graph == null || head == null || !head.equals(graph.head))
+        {
+            return null;
+        }
+
+        return HEADS.get(filmId);
+    }
+
+    public static void setHead(String filmId, String head, MapType data)
+    {
+        HEAD_IDS.put(filmId, head);
+        HEADS.put(filmId, data);
 
         changed();
     }

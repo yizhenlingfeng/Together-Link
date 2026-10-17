@@ -5,35 +5,43 @@ import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.input.color.UIColorPicker;
+import mchorse.bbs_mod.ui.framework.elements.utils.RowStyle;
+import mchorse.bbs_mod.ui.utils.Area;
+import mchorse.bbs_mod.ui.utils.Scroll;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The graph itself: one column per film, and inside a film one lane per branch, like git's
- * graph. A commit sits on the lane of the branch it was made on and is connected to its parents;
- * a branch that was started from an older commit therefore leaves the trunk and runs beside it.
+ * graph. A commit sits on the lane of the branch it was made on and is connected to its parents.
  *
- * <p>All shown films share one vertical time axis (newest commit on top), which is what makes
- * two films' timelines comparable at a glance. Edges are drawn as 2px boxes because the batcher
- * has no line primitive.</p>
+ * <p>All shown films share one vertical time axis, drawn like a log: the oldest commit sits on
+ * top and the newest one at the bottom, so the view can stick to the bottom. Edges are drawn as
+ * 2px boxes because the batcher has no line primitive.</p>
  */
 public class UICommitGraph extends UIElement
 {
-    public static final int HEADER = 18;
-    public static final int ROW_H = 20;
+    public static final int HEADER = 20;
+    public static final int ROW_H = 18;
     public static final int NODE = 9;
     /** Horizontal distance between two branch lanes. */
     private static final int LANE = 14;
     private static final int MIN_COLUMN = 220;
     /** Edges never take the colour of a commit: they stay a quiet dark gray underneath. */
     private static final int LINE_COLOR = 0xff4a4a4a;
+    /** Edges of commits the film no longer sits on: quieter still. */
+    private static final int INACTIVE_LINE = 0xff303030;
 
     /** One commit placed in the graph. */
     public static final class Node
@@ -49,6 +57,8 @@ public class UICommitGraph extends UIElement
         /** Rows and lanes of the parents, resolved after every node has a row. */
         public final List<int[]> parents = new ArrayList<int[]>();
         public boolean tip;
+        /** On the film's current line: the head the film sits at, or one of its ancestors. */
+        public boolean active = true;
     }
 
     /** Called when the user picks a node. */
@@ -63,8 +73,15 @@ public class UICommitGraph extends UIElement
     private final List<Node> nodes = new ArrayList<Node>();
 
     private Node selected;
-    private int scroll;
     private int version = -1;
+    /** Everything under the header: rows and lanes scroll, the header itself stays put. */
+    private final Area body = new Area();
+    /** FS' own scroll view: wheel, smoothing, dragging and the scrollbar all come from it. */
+    private final Scroll scroll = new Scroll(this.body, ROW_H);
+    /** Whether the view sticks to the bottom (newest commit) as the history grows. */
+    private boolean pinned = true;
+    /** Scratch list for {@link #segment}: the bands of commits a line has to step around. */
+    private final List<int[]> bands = new ArrayList<int[]>();
 
     /** When set, only this film is drawn (opened from the film editor). */
     private String solo;
@@ -112,6 +129,19 @@ public class UICommitGraph extends UIElement
         this.shown.put(filmId, show);
 
         this.rebuild();
+    }
+
+    /** Branch a new commit of {@code filmId} lands on: the selected commit's branch, else the film's. */
+    public String commitBranch(String filmId)
+    {
+        if (this.selected != null && (filmId.isEmpty() || filmId.equals(this.selected.filmId)) && !this.selected.commit.branch.isEmpty())
+        {
+            return this.selected.commit.branch;
+        }
+
+        FilmCommitClient.Graph graph = FilmCommitClient.graph(filmId);
+
+        return graph == null ? "" : graph.current;
     }
 
     public Node selected()
@@ -187,7 +217,6 @@ public class UICommitGraph extends UIElement
             commits.sort((a, b) -> Long.compare(b.time, a.time));
 
             Map<String, Integer> lanes = new HashMap<String, Integer>();
-            Map<String, String> heads = new HashMap<String, String>();
 
             for (FilmCommit commit : commits)
             {
@@ -196,8 +225,8 @@ public class UICommitGraph extends UIElement
                 node.filmId = filmId;
                 node.commit = commit;
                 node.column = column;
-                node.lane = this.laneOf(commit, lanes, heads);
-                node.tip = heads.get(commit.branch) != null && heads.get(commit.branch).equals(commit.id);
+                node.lane = this.laneOf(commit, lanes);
+                node.tip = this.isTip(graph, commit);
 
                 all.add(node);
                 byId.put(filmId + "/" + commit.id, node);
@@ -206,9 +235,11 @@ public class UICommitGraph extends UIElement
 
         all.sort((a, b) -> Long.compare(b.commit.time, a.commit.time));
 
+        /* The list is newest first, the display is oldest first: rows count down from the
+         * top of the view, so the newest commit ends up on the last row at the bottom */
         for (int i = 0; i < all.size(); i++)
         {
-            all.get(i).row = i;
+            all.get(i).row = all.size() - 1 - i;
         }
 
         for (Node node : all)
@@ -225,6 +256,28 @@ public class UICommitGraph extends UIElement
         }
 
         this.nodes.addAll(all);
+
+        /* Work out which commits are still on the film's line before drawing anything: after a
+         * rollback the dropped commits stay in the graph but must not look current any more */
+        Map<String, Set<String>> lines = new HashMap<String, Set<String>>();
+
+        for (String filmId : this.columnOrder)
+        {
+            FilmCommitClient.Graph graph = FilmCommitClient.graph(filmId);
+
+            if (graph != null)
+            {
+                lines.put(filmId, this.activeIds(graph));
+            }
+        }
+
+        for (Node node : all)
+        {
+            Set<String> line = lines.get(node.filmId);
+
+            node.active = line == null || line.contains(node.commit.id);
+        }
+
         this.version = FilmCommitClient.version();
 
         if (this.selected != null && !this.nodes.contains(this.selected))
@@ -232,14 +285,14 @@ public class UICommitGraph extends UIElement
             this.selected = this.nodes.isEmpty() ? null : this.nodes.get(0);
         }
 
-        this.clampScroll();
+        this.updateScroll();
     }
 
     /**
      * Lane for a commit: its branch's lane, allocated on first sight. Branches keep the order in
      * which their newest commit appeared, so the branch that is being worked on stays leftmost.
      */
-    private int laneOf(FilmCommit commit, Map<String, Integer> lanes, Map<String, String> heads)
+    private int laneOf(FilmCommit commit, Map<String, Integer> lanes)
     {
         Integer lane = lanes.get(commit.branch);
 
@@ -250,13 +303,66 @@ public class UICommitGraph extends UIElement
             lanes.put(commit.branch, lane);
         }
 
-        /* Commits arrive newest first, so the first commit of a branch is its head */
-        if (!heads.containsKey(commit.branch))
+        return lane;
+    }
+
+    /**
+     * Whether this commit is its branch's head, taken from the branch table rather than from the
+     * list order: a rollback that kept the later commits leaves the head below them.
+     */
+    private boolean isTip(FilmCommitClient.Graph graph, FilmCommit commit)
+    {
+        String head = graph.branches.get(commit.branch);
+
+        return head != null && head.equals(commit.id);
+    }
+
+    /** Ids of the commits on the film's current line: its head plus all of its ancestors. */
+    private Set<String> activeIds(FilmCommitClient.Graph graph)
+    {
+        Map<String, FilmCommit> byId = new HashMap<String, FilmCommit>();
+
+        for (FilmCommit commit : graph.commits)
         {
-            heads.put(commit.branch, commit.id);
+            byId.put(commit.id, commit);
         }
 
-        return lane;
+        String head = graph.branches.get(graph.current);
+
+        if (head == null)
+        {
+            head = graph.head;
+        }
+
+        Set<String> active = new HashSet<String>();
+        Deque<String> pending = new ArrayDeque<String>();
+
+        if (head != null && !head.isEmpty())
+        {
+            pending.push(head);
+        }
+
+        while (!pending.isEmpty())
+        {
+            String id = pending.pop();
+
+            if (!active.add(id))
+            {
+                continue;
+            }
+
+            FilmCommit commit = byId.get(id);
+
+            if (commit != null)
+            {
+                for (String parent : commit.parents)
+                {
+                    pending.push(parent);
+                }
+            }
+        }
+
+        return active;
     }
 
     /** Ask for a film's graph, but not more than once every few seconds. */
@@ -272,20 +378,39 @@ public class UICommitGraph extends UIElement
         }
     }
 
-    private void clampScroll()
+    /** Keep the content height and the scroll in sync, and follow the bottom while pinned. */
+    private void updateScroll()
     {
-        int content = HEADER + this.nodes.size() * ROW_H + 8;
-        int max = Math.max(0, content - this.area.h);
+        this.scroll.scrollSize = this.nodes.size() * ROW_H + 8;
+        this.scroll.clamp();
 
-        if (this.scroll > max)
+        /* Sticking to the bottom keeps the newest commit visible while the history grows */
+        if (this.pinned)
         {
-            this.scroll = max;
+            this.scroll.scrollToEnd();
         }
+        else if (this.atEnd())
+        {
+            this.pinned = true;
+        }
+    }
 
-        if (this.scroll < 0)
-        {
-            this.scroll = 0;
-        }
+    /** Whether the view sits at the newest commit, where it attaches itself to the bottom. */
+    private boolean atEnd()
+    {
+        return this.scroll.getScroll() + this.body.h >= this.scroll.scrollSize - 1;
+    }
+
+    @Override
+    public void resize()
+    {
+        super.resize();
+
+        /* Before the first layout the area is empty: Scroll.clamp() then keeps the view at
+         * zero, so nothing jumps while the panel is still being built */
+        this.body.set(this.area.x, this.area.y + HEADER, this.area.w, Math.max(0, this.area.h - HEADER));
+
+        this.updateScroll();
     }
 
     private int columnWidth()
@@ -326,9 +451,23 @@ public class UICommitGraph extends UIElement
         return lanes;
     }
 
+    private int rowTop(int row)
+    {
+        return this.body.y + row * ROW_H - (int) this.scroll.getScroll();
+    }
+
     private int rowY(int row)
     {
-        return this.area.y + HEADER + row * ROW_H + ROW_H / 2 - this.scroll;
+        return this.rowTop(row) + ROW_H / 2;
+    }
+
+    /** Whether the cursor is on this node's row: FS rows light up as a whole, not per marker. */
+    private boolean isHover(UIContext context, Node node, int top)
+    {
+        return this.body.isInside(context.mouseX, context.mouseY)
+            && context.mouseY >= top && context.mouseY < top + ROW_H
+            && context.mouseX >= this.columnX(node.column) - 8
+            && context.mouseX < this.columnX(node.column) + this.columnWidth() - 4;
     }
 
     private void layoutNodes()
@@ -348,64 +487,208 @@ public class UICommitGraph extends UIElement
             this.rebuild();
         }
 
+        /* Smooth scrolling and scrollbar dragging are advanced here, like every FS view */
+        this.scroll.drag(context.mouseX, context.mouseY);
+        this.updateScroll();
         this.layoutNodes();
 
         int header = BBSSettings.color(BBSSettings.chromeSurface(), Colors.A50);
 
         context.batcher.box(this.area.x, this.area.y, this.area.ex(), this.area.y + HEADER, header);
+        context.batcher.box(this.area.x, this.area.y + HEADER - 1, this.area.ex(), this.area.y + HEADER, BBSSettings.dividerColor());
 
         for (int i = 0; i < this.columnOrder.size(); i++)
         {
             String filmId = this.columnOrder.get(i);
             String branch = this.headBranch(filmId);
-            String label = this.shortName(filmId) + (branch.isEmpty() ? "" : " · " + branch);
+            String name = this.shortName(filmId);
+            int x = this.columnX(i);
+            int y = this.area.y + (HEADER - context.batcher.getFont().getHeight()) / 2;
 
-            context.batcher.text(label, this.columnX(i), this.area.y + 5, Colors.LIGHTER_GRAY);
+            context.batcher.textShadow(name, x, y, RowStyle.textColor(true));
+
+            if (!branch.isEmpty())
+            {
+                context.batcher.textShadow("· " + branch, x + context.batcher.getFont().getWidth(name) + 5, y, Colors.GRAY);
+            }
         }
+
+        /* Rows are clipped to the body: the header carries the film labels, so a half drawn
+         * node sitting on top of it would look like a bug */
+        context.batcher.clip(this.body, context);
 
         if (this.nodes.isEmpty())
         {
-            context.batcher.text(L10n.lang("bbs_together.commits.empty").get(), this.area.x + 10, this.area.y + HEADER + 8, Colors.GRAY);
+            String empty = L10n.lang("bbs_together.commits.empty").get();
 
-            super.render(context);
-
-            return;
+            context.batcher.text(empty, this.body.x + (this.body.w - context.batcher.getFont().getWidth(empty)) / 2, this.body.my() - context.batcher.getFont().getHeight() / 2, Colors.GRAY);
+        }
+        else
+        {
+            this.renderRows(context);
+            this.renderEdges(context);
+            this.renderNodes(context);
         }
 
-        /* Edges first, so nodes sit on top of their lines */
+        context.batcher.unclip(context);
+
+        this.scroll.renderScrollbar(context.batcher);
+
+        super.render(context);
+    }
+
+    /** Row washes, the same mark FS puts under every list row: hover, pick and its bar. */
+    private void renderRows(UIContext context)
+    {
+        int accent = BBSSettings.primaryColor();
+
         for (Node node : this.nodes)
         {
-            int x = node.x;
+            int top = this.rowTop(node.row);
+
+            if (top + ROW_H <= this.body.y || top >= this.body.ey())
+            {
+                continue;
+            }
+
+            int x = this.columnX(node.column) - 8;
+            int w = this.columnWidth() - 4;
+            boolean selected = node == this.selected;
+
+            /* Mark where the film sits, so it stays visible when the pick is elsewhere. Laid down
+             * before the pick's own marks, so a selection on the same row outranks it */
+            if (!selected && node.commit.id.equals(this.currentCommit(node.filmId)))
+            {
+                RowStyle.carried(context.batcher, x, top, w, ROW_H);
+                context.batcher.box(x, top, x + 2, top + ROW_H, accent);
+            }
+
+            RowStyle.row(context.batcher, x, top, w, ROW_H, 0, false, this.isHover(context, node, top), selected);
+        }
+    }
+
+    /** Edges first, so nodes sit on top of their lines. */
+    private void renderEdges(UIContext context)
+    {
+        for (Node node : this.nodes)
+        {
+            int color = node.active ? LINE_COLOR : INACTIVE_LINE;
 
             for (int[] parent : node.parents)
             {
                 int parentY = this.rowY(parent[0]);
                 int parentX = this.columnX(node.column) + parent[1] * LANE;
 
-                /* Down from the commit to the parent's row ... */
-                this.line(context, x, node.y, x, parentY, LINE_COLOR);
+                /* Up out of the commit towards the parent's row ... */
+                this.segment(context, node.x, node.y, node.x, parentY, color);
 
-                /* ... then across into the parent's lane */
-                this.line(context, x, parentY, parentX, parentY, LINE_COLOR);
+                /* ... and across into the parent's lane */
+                if (parentX != node.x)
+                {
+                    this.segment(context, node.x, parentY, parentX, parentY, color);
+                }
             }
         }
+    }
 
-        int accent = BBSSettings.primaryColor();
+    /**
+     * Draws a straight edge between two points, but cuts it at every commit it would otherwise
+     * run through. Without this a parent that isn't the row directly above would drag a line
+     * across the hollow squares of the commits in between, which reads as if those commits were
+     * wired into a branch they aren't on.
+     */
+    private void segment(UIContext context, int x1, int y1, int x2, int y2, int color)
+    {
+        boolean vertical = x1 == x2;
+        int fixed = vertical ? x1 : y1;
+        int from = vertical ? y1 : x1;
+        int to = vertical ? y2 : x2;
+        int low = Math.min(from, to);
+        int high = Math.max(from, to);
+
+        List<int[]> bands = this.bands;
+
+        bands.clear();
 
         for (Node node : this.nodes)
         {
-            if (node.y < this.area.y + HEADER - ROW_H || node.y > this.area.ey() + ROW_H)
+            if ((vertical ? node.x : node.y) != fixed)
             {
                 continue;
             }
 
+            int center = vertical ? node.y : node.x;
+            int a = center - NODE / 2;
+            int b = center + NODE / 2 + 1;
+
+            if (b > low && a < high)
+            {
+                bands.add(new int[] {a, b});
+            }
+        }
+
+        bands.sort((a, b) -> Integer.compare(a[0], b[0]));
+
+        int cursor = low;
+
+        for (int[] band : bands)
+        {
+            if (band[0] > cursor)
+            {
+                this.piece(context, vertical, fixed, cursor, band[0], color);
+            }
+
+            cursor = Math.max(cursor, band[1]);
+        }
+
+        if (cursor < high)
+        {
+            this.piece(context, vertical, fixed, cursor, high, color);
+        }
+    }
+
+    private void piece(UIContext context, boolean vertical, int fixed, int from, int to, int color)
+    {
+        if (vertical)
+        {
+            this.line(context, fixed, from, fixed, to, color);
+        }
+        else
+        {
+            this.line(context, from, fixed, to, fixed, color);
+        }
+    }
+
+    private void renderNodes(UIContext context)
+    {
+        int accent = BBSSettings.primaryColor();
+
+        for (Node node : this.nodes)
+        {
+            int rowTop = this.rowTop(node.row);
+
+            if (rowTop + ROW_H <= this.body.y || rowTop >= this.body.ey())
+            {
+                continue;
+            }
+
+            boolean hover = this.isHover(context, node, rowTop);
+            boolean lit = hover || node == this.selected;
             int left = node.x - NODE / 2;
             int top = node.y - NODE / 2;
             int right = node.x + NODE / 2 + 1;
             int bottom = node.y + NODE / 2 + 1;
             int color = CommitColors.get(node.filmId, node.commit.id);
 
-            context.batcher.box(left, top, right, bottom, color);
+            if (node.active)
+            {
+                context.batcher.box(left, top, right, bottom, color);
+            }
+            else
+            {
+                /* Commits the film no longer sits on stay visible, but hollow: switched off */
+                context.batcher.outline(left, top, right, bottom, Colors.mulA(color, 0.35F));
+            }
 
             /* The commit the film file currently sits at gets a glowing stroke, so its place in
              * the history can be found without reading every row */
@@ -419,31 +702,30 @@ public class UICommitGraph extends UIElement
                 context.batcher.outline(left - 3, top - 3, right + 3, bottom + 3, Colors.WHITE);
             }
 
-            String text = node.commit.shortId() + "  " + node.commit.message;
-            int width = this.columnX(node.column) + this.columnWidth() - this.textX(node) - 8;
+            String text = this.fit(context, node.commit.shortId() + "  " + node.commit.message, Math.max(24, this.columnX(node.column) + this.columnWidth() - this.textX(node) - 8));
+            int textY = node.y - context.batcher.getFont().getHeight() / 2;
 
-            context.batcher.text(this.fit(context, text, Math.max(24, width)), this.textX(node), node.y - 4, node == this.selected ? Colors.WHITE : Colors.LIGHTEST_GRAY);
+            context.batcher.textShadow(text, this.textX(node), textY, node.active ? RowStyle.textColor(lit) : RowStyle.textColor(lit, Colors.GRAY));
 
             /* Branch name next to the commit that is its head, like git's decoration */
             if (node.tip)
             {
-                int dot = this.textX(node) + context.batcher.getFont().getWidth(this.fit(context, text, Math.max(24, width))) + 6;
+                int tagX = this.textX(node) + context.batcher.getFont().getWidth(text) + 8;
 
-                if (dot + 40 < this.columnX(node.column) + this.columnWidth())
+                if (tagX + 40 < this.columnX(node.column) + this.columnWidth())
                 {
-                    context.batcher.text("[" + node.commit.branch + "]", dot, node.y - 4, Colors.GRAY);
+                    context.batcher.box(tagX, node.y - 1, tagX + 3, node.y + 2, node.active ? accent : Colors.GRAY);
+                    context.batcher.textShadow(node.commit.branch, tagX + 7, textY, node.active ? Colors.GRAY : RowStyle.textColor(false, Colors.GRAY));
                 }
             }
         }
-
-        super.render(context);
     }
 
     /** Two pixel wide line out of boxes, clipped to the graph's body. */
     private void line(UIContext context, int x1, int y1, int x2, int y2, int color)
     {
-        int top = Math.max(this.area.y + HEADER, Math.min(y1, y2));
-        int bottom = Math.min(this.area.ey(), Math.max(y1, y2) + 1);
+        int top = Math.max(this.body.y, Math.min(y1, y2));
+        int bottom = Math.min(this.body.ey(), Math.max(y1, y2) + 1);
 
         if (top > bottom)
         {
@@ -463,14 +745,14 @@ public class UICommitGraph extends UIElement
         }
     }
 
+    /** The branch the film is on, shown next to the film's name in the header. */
     private String headBranch(String filmId)
     {
-        for (Node node : this.nodes)
+        FilmCommitClient.Graph graph = FilmCommitClient.graph(filmId);
+
+        if (graph != null)
         {
-            if (node.filmId.equals(filmId) && node.tip && node.row == 0)
-            {
-                return node.commit.branch;
-            }
+            return graph.current;
         }
 
         for (Node node : this.nodes)
@@ -545,7 +827,13 @@ public class UICommitGraph extends UIElement
     @Override
     public boolean subMouseClicked(UIContext context)
     {
-        if (context.mouseButton == 0 && this.area.isInside(context))
+        /* The scrollbar comes first: dragging it must not clear the selection */
+        if (context.mouseButton == 0 && this.scroll.mouseClicked(context))
+        {
+            return true;
+        }
+
+        if (context.mouseButton == 0 && this.body.isInside(context))
         {
             Node hit = this.nodeAt(context.mouseX, context.mouseY);
 
@@ -556,6 +844,14 @@ public class UICommitGraph extends UIElement
         }
 
         return super.subMouseClicked(context);
+    }
+
+    @Override
+    public boolean subMouseReleased(UIContext context)
+    {
+        this.scroll.mouseReleased(context);
+
+        return super.subMouseReleased(context);
     }
 
     public Node nodeAt(int x, int y)
@@ -576,10 +872,18 @@ public class UICommitGraph extends UIElement
     @Override
     public boolean subMouseScrolled(UIContext context)
     {
-        if (this.area.isInside(context) && context.mouseWheel != 0D)
+        if (this.body.isInside(context) && context.mouseWheel != 0D)
         {
-            this.scroll -= (int) Math.signum(context.mouseWheel) * ROW_H * 3;
-            this.clampScroll();
+            /* Wheeling up to read older commits detaches the view from the bottom; scrolling
+             * back down to the end attaches it again (atEnd() re-pins it there) */
+            this.pinned = false;
+
+            this.scroll.mouseScroll(context);
+
+            if (this.atEnd())
+            {
+                this.pinned = true;
+            }
 
             return true;
         }

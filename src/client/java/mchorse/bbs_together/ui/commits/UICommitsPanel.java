@@ -56,7 +56,7 @@ public class UICommitsPanel extends UIDashboardPanel
         this.leftHandle.measure(this).onChange(this::layout).range(MIN_SIDE, () -> (float) Math.max(MIN_SIDE, this.area.w - MIN_SIDE));
         this.bottomHandle.measure(this).onChange(this::layout).range(MIN_BOTTOM, () -> (float) Math.max(MIN_BOTTOM, this.area.h - BAR_HEIGHT - 80));
 
-        this.graph.listener = (node) -> this.info.show(node);
+        this.graph.listener = (node) -> this.info.show(this.graph.actionFilm(), node);
         this.graph.context(this::fillGraphMenu);
         this.films.graph = this.graph;
 
@@ -82,6 +82,7 @@ public class UICommitsPanel extends UIDashboardPanel
     public void focusFilm(String filmId)
     {
         this.graph.showOnly(filmId);
+        this.info.film(this.graph.actionFilm());
     }
 
     public void requestAll()
@@ -151,6 +152,7 @@ public class UICommitsPanel extends UIDashboardPanel
             this.films.setList(new ArrayList<FilmCommitClient.IndexEntry>(FilmCommitClient.index()));
             this.films.update();
             this.graph.rebuild();
+            this.info.film(this.graph.actionFilm());
             this.info.refresh();
         }
 

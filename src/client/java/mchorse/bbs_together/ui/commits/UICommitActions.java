@@ -1,5 +1,6 @@
 package mchorse.bbs_together.ui.commits;
 
+import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
@@ -76,8 +77,12 @@ public class UICommitActions extends UIElement
         String film = graph.actionFilm();
         String name = this.branchText();
         UICommitGraph.Node node = graph.selected();
+        String target = film.isEmpty() ? "" : graph.commitBranch(film);
 
         this.commit.setEnabled(!film.isEmpty());
+        this.commit.label = target.isEmpty()
+            ? L10n.lang("bbs_together.commits.commit")
+            : L10n.lang("bbs_together.commits.commit_to").format(target);
         this.branchCreate.setEnabled(!film.isEmpty() && !name.isEmpty());
         this.branchCheckout.setEnabled(!film.isEmpty() && !name.isEmpty());
 
@@ -105,14 +110,19 @@ public class UICommitActions extends UIElement
 
     private void commit()
     {
-        String film = this.graphs.get().actionFilm();
+        UICommitGraph graph = this.graphs.get();
+        String film = graph.actionFilm();
 
         if (film.isEmpty())
         {
             return;
         }
 
-        TogetherClientNetwork.sendCommitCreate(film, this.message.getText());
+        /* The editor's unsaved state goes along with the request, not what the server last
+         * managed to write to disk */
+        Film data = CommitUi.liveFilm(this, film);
+
+        TogetherClientNetwork.sendCommitCreate(film, this.message.getText(), graph.commitBranch(film), data);
         this.message.setText("");
     }
 

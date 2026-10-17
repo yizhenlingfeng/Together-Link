@@ -77,6 +77,7 @@ import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
 import mchorse.bbs_together.sync.AssetSyncTracker;
+import mchorse.bbs_together.ui.commits.CommitUi;
 import mchorse.bbs_together.ui.commits.FilmCommitClient;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -409,7 +410,9 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitsPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_ADDED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitAddedPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_DIFF, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitDiffPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_HEAD, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitHeadPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRenamedPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
         isBBSTogetherOnServer = true;
         BBSTogetherFix28Client.registerReceivers();
         BBSTogetherFixReplayStructure.registerClientReceiver();
@@ -2599,6 +2602,15 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_DIFF, (PacketByteBuf)buf);
     }
 
+    public static void sendCommitHead(String filmId) {
+        if (!isBBSTogetherOnServer || filmId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_HEAD, (PacketByteBuf)buf);
+    }
+
     public static void sendCommitRename(String filmId, String commitId, String message) {
         if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
             return;
@@ -2621,14 +2633,20 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_REVERT, (PacketByteBuf)buf);
     }
 
-    public static void sendCommitCreate(String filmId, String message) {
+    public static void sendCommitCreate(String filmId, String message, String branch, Film film) {
         if (!isBBSTogetherOnServer || filmId == null || MinecraftClient.getInstance().player == null) {
             return;
         }
-        PacketByteBuf buf = PacketByteBufs.create();
-        buf.writeString(filmId);
-        buf.writeString(message == null ? "" : message);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_CREATE, (PacketByteBuf)buf);
+        /* The editor's live state travels with the commit. BBS writes films to disk on its own
+         * schedule, so the copy the server would load can still be the previous commit's, and
+         * committing that either fails the equality check or records what the author never saw. */
+        boolean live = film != null && filmId.equals(film.getId());
+        byte[] payload = live ? DataStorageUtils.writeToBytes(film.toData()) : new byte[0];
+        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_COMMIT_CREATE, payload, buf -> {
+            buf.writeString(filmId);
+            buf.writeString(message == null ? "" : message);
+            buf.writeString(branch == null ? "" : branch);
+        });
     }
 
     public static void sendBranchCreate(String filmId, String name, String commitId) {
@@ -2696,11 +2714,28 @@ public class TogetherClientNetwork {
         });
     }
 
+    private static void handleCommitHeadPacket(MinecraftClient client, PacketByteBuf buf) {
+        crusher.receive(buf, (bytes, packetByteBuf) -> {
+            String filmId = packetByteBuf.readString();
+            String head = packetByteBuf.readString();
+            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            if (!data.isMap()) {
+                return;
+            }
+            client.execute(() -> FilmCommitClient.setHead(filmId, head, data.asMap()));
+        });
+    }
+
     private static void handleCommitRenamedPacket(MinecraftClient client, PacketByteBuf buf) {
         String filmId = buf.readString();
         String commitId = buf.readString();
         String message = buf.readString(1024);
         client.execute(() -> FilmCommitClient.renameCommit(filmId, commitId, message));
+    }
+
+    private static void handleCommitRejectedPacket(MinecraftClient client, PacketByteBuf buf) {
+        int reason = buf.readByte();
+        client.execute(() -> CommitUi.showRejected(reason));
     }
 
     private static UIDashboard getDashboardIfOpen() {

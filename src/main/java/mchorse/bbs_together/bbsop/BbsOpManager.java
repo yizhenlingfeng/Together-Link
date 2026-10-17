@@ -34,7 +34,9 @@ import mchorse.bbs_together.network.TogetherServerNetwork;
  *
  * <p>The server is the final authority: levels live in a {@link ConcurrentHashMap} and are
  * persisted to <code>&lt;world&gt;/bbs/bbsop.json</code>. Every player defaults to level 0
- * (read-only) until explicitly set. A level-1 player may additionally be restricted by a
+ * (read-only) until explicitly set; the world host is defaulted to level 2 on their first
+ * join (see {@link #onPlayerJoin(MinecraftServer, ServerPlayerEntity)}), and a stored level
+ * always wins over that default. Level-1 players may additionally be restricted by a
  * <b>domain whitelist</b>: the {@code grants} map keyed by player holds the set of domain
  * ids they may control. Absent key = unrestricted (level 1 defaults to full editing);
  * present key = only those domains (an empty set means nothing is editable). Level 2
@@ -88,6 +90,49 @@ public final class BbsOpManager
     }
 
     /* Query / mutate */
+
+    /**
+     * Default the world host to level 2 on their first join, unless a level is already stored
+     * for them (so an admin can still demote the host).
+     *
+     * <p>On a dedicated server there is no player identity for "the person who started it", so
+     * the first player to join a world with no stored levels becomes the admin, once.</p>
+     *
+     * @return whether a level was granted on this join
+     */
+    public static boolean onPlayerJoin(MinecraftServer server, ServerPlayerEntity player)
+    {
+        UUID playerId = player.getUuid();
+
+        if (levels.containsKey(playerId))
+        {
+            return false;
+        }
+
+        if (!isHost(server, player))
+        {
+            return false;
+        }
+
+        levels.put(playerId, LEVEL_ADMIN);
+        dirty = true;
+        save();
+
+        System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " joined as the world host and defaulted to BBS level 2");
+
+        return true;
+    }
+
+    /** The integrated server's own player, or the first player of a dedicated world with no levels yet. */
+    private static boolean isHost(MinecraftServer server, ServerPlayerEntity player)
+    {
+        if (server.isHost(player.getGameProfile()))
+        {
+            return true;
+        }
+
+        return server.isDedicated() && levels.isEmpty();
+    }
 
     /** Effective level for a player; never-set players default to read-only (0). */
     public static int get(UUID playerId)
