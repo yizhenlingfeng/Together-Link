@@ -1,8 +1,8 @@
-# BBS Together
+# Together Link
 
-BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft）的多人协作模组，基于 Minecraft 1.20.1 Fabric。它让多名玩家在同一个 BBS 影片项目中实时协作编辑，同步光标、选中、关键帧、回放，并支持资产和影片数据的服务器端分发。
+Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft）的多人协作模组，基于 Minecraft 1.20.1 Fabric。它让多名玩家在同一个 BBS 影片项目中实时协作编辑，同步光标、选中、关键帧、回放，并支持资产和影片数据的服务器端分发。
 
-- **模组 ID**：`bbs_together`
+- **模组 ID**：`bbs_together`（历史沿用，未改动）
 - **当前版本**：1.7.5
 - **Minecraft**：1.20.1
 - **前置**：BBS FS >= 2.6、Fabric API、Fabric Loader >= 0.15.6
@@ -83,7 +83,7 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 
 ### 服务器命令
 - `/bbstogether record <玩家>`：切换指定玩家的录制状态；若其中有人正在录制，则停止所有目标玩家的录制。
-- `/bbsop <玩家> [0-2]`：查询或设置玩家的 BBS 权限等级（0 仅浏览 / 1 编辑者 / 2 管理员）。
+- `/bbsop <玩家> [0-2]`：查询或设置玩家的 BBS 权限等级（0 仅浏览 / 1 编辑者 / 2 管理员）。仅服主（原版 2 级 OP 以上）、服务器控制台或 BBS 等级 2 的玩家可用。
 - `/bbsop <玩家> grant <域> <allow|deny>`：允许或禁止 1 级玩家的某个功能域；`/bbsop <玩家> grant reset` 恢复为不受限。域：morph、film、record、model_blocks、particles、model_editor、textures、audio、upload。
 
 ---
@@ -95,8 +95,8 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 2. 把以下 jar 放入 `mods/` 文件夹：
    - Fabric API
    - BBS FS >= 2.6
-   - `bbs-together-泠改-1.7.1-1.20.1.jar`
-3. 服务端与所有客户端都需要安装相同版本的 BBS FS 与 BBS Together。
+   - `together-link-1.7.5-1.20.1.jar`
+3. 服务端与所有客户端都需要安装相同版本的 BBS FS 与 Together Link。
 
 ### 开启多人协作
 1. 启动服务端，玩家正常加入世界。
@@ -105,7 +105,7 @@ BBS Together 是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft�
 4. 服务器管理员输入 `/bbstogether record @a` 可让所有人开始/停止录制。
 
 ### 配置
-在游戏内打开 BBS 设置（Mods 列表 → BBS Together → Config），可调整：
+在游戏内打开 BBS 设置（Mods 列表 → Together Link → Config），可调整：
 
 | 配置项 | 说明 |
 |--------|------|

@@ -2,7 +2,7 @@
     "schemaVersion": 1,
     "id": "bbs_together",
     "version": "${version}",
-    "name": "BBS Together",
+    "name": "Together Link",
     "description": "A BBS addon that adds multiplayer collaboration features: player color indicators, shared cursors, selection highlights, asset syncing, and synchronized recording.",
     "authors": [
         "McHorse",
