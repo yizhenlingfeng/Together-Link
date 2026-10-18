@@ -80,6 +80,20 @@ public final class BbsOpClientState
     }
 
     /**
+     * Whether the local player may start a coop-recording invitation. Both level 1 and level 2
+     * are allowed; domain whitelists only restrict what may be edited, not who may invite.
+     */
+    public static boolean canInviteCoop()
+    {
+        if (!TogetherClientNetwork.isConnected())
+        {
+            return true;
+        }
+
+        return level >= 1;
+    }
+
+    /**
      * Whether the local player may manage other players' BBS permissions: BBS level 2 only.
      * Vanilla OPs are deliberately excluded — they manage through the {@code /bbsop}
      * command instead. The server re-checks on every packet.

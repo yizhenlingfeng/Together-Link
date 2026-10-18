@@ -10,6 +10,7 @@ import mchorse.bbs_mod.ui.utils.Area;
 import mchorse.bbs_mod.ui.utils.Scroll;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.commits.FilmCommit;
+import mchorse.bbs_together.commits.FilmCommitStore;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.ui.UIPlayerFaceRenderer;
 import net.minecraft.client.MinecraftClient;
@@ -74,6 +75,8 @@ public class UICommitGraph extends UIElement
     private final Map<String, Long> requested = new HashMap<String, Long>();
     private final List<String> columnOrder = new ArrayList<String>();
     private final List<Node> nodes = new ArrayList<Node>();
+    /** Widest lane offset (from the centered main lane) of each film, for layout/text offsets. */
+    private final Map<String, Integer> maxAbsLanes = new HashMap<String, Integer>();
 
     private Node selected;
     /** Film whose graph the local selection belongs to, for the collaboration cursor. */
@@ -250,6 +253,11 @@ public class UICommitGraph extends UIElement
             commits.sort((a, b) -> Long.compare(b.time, a.time));
 
             Map<String, Integer> lanes = new HashMap<String, Integer>();
+            /* Keep the default branch in the middle; feature branches alternate right/left. */
+            String mainBranch = graph.branches.containsKey(FilmCommitStore.BRANCH_MAIN)
+                ? FilmCommitStore.BRANCH_MAIN
+                : (graph.branches.isEmpty() ? "" : graph.branches.keySet().iterator().next());
+            int[] side = {0};
 
             for (FilmCommit commit : commits)
             {
@@ -258,7 +266,7 @@ public class UICommitGraph extends UIElement
                 node.filmId = filmId;
                 node.commit = commit;
                 node.column = column;
-                node.lane = this.laneOf(commit, lanes);
+                node.lane = this.laneOf(commit, lanes, mainBranch, side);
                 node.tip = this.isTip(graph, commit);
 
                 all.add(node);
@@ -289,6 +297,13 @@ public class UICommitGraph extends UIElement
         }
 
         this.nodes.addAll(all);
+
+        this.maxAbsLanes.clear();
+
+        for (Node node : all)
+        {
+            this.maxAbsLanes.merge(node.filmId, Math.abs(node.lane), Math::max);
+        }
 
         /* Work out which commits are still on the film's line before drawing anything: after a
          * rollback the dropped commits stay in the graph but must not look current any more */
@@ -345,19 +360,30 @@ public class UICommitGraph extends UIElement
     }
 
     /**
-     * Lane for a commit: its branch's lane, allocated on first sight. Branches keep the order in
-     * which their newest commit appeared, so the branch that is being worked on stays leftmost.
+     * Lane for a commit. The main/default branch always sits at lane 0 (the middle of the lane
+     * band); other branches alternate to the right and left (+, -, +, -) so they split around
+     * main instead of piling up on one side.
      */
-    private int laneOf(FilmCommit commit, Map<String, Integer> lanes)
+    private int laneOf(FilmCommit commit, Map<String, Integer> lanes, String mainBranch, int[] side)
     {
         Integer lane = lanes.get(commit.branch);
 
-        if (lane == null)
+        if (lane != null)
         {
-            lane = lanes.size();
-
-            lanes.put(commit.branch, lane);
+            return lane;
         }
+
+        if (commit.branch.equals(mainBranch) || commit.branch.isEmpty() || (mainBranch.isEmpty() && lanes.isEmpty()))
+        {
+            lane = 0;
+        }
+        else
+        {
+            ++side[0];
+            lane = (side[0] % 2 == 1) ? (side[0] + 1) / 2 : -(side[0] / 2);
+        }
+
+        lanes.put(commit.branch, lane);
 
         return lane;
     }
@@ -481,30 +507,33 @@ public class UICommitGraph extends UIElement
         return this.area.x + 10 + column * this.columnWidth();
     }
 
+    /** X of lane 0 (the main branch): the centre of the lane band, not the centre of the page. */
+    private int laneBase(int column, String filmId)
+    {
+        return this.columnX(column) + 10 + this.maxAbsLane(filmId) * LANE;
+    }
+
     private int laneX(Node node)
     {
-        return this.columnX(node.column) + node.lane * LANE;
+        return this.laneX(node.column, node.filmId, node.lane);
+    }
+
+    private int laneX(int column, String filmId, int lane)
+    {
+        return this.laneBase(column, filmId) + lane * LANE;
+    }
+
+    private int maxAbsLane(String filmId)
+    {
+        Integer lane = this.maxAbsLanes.get(filmId);
+
+        return lane == null ? 0 : lane;
     }
 
     /** Where the commit text of a node starts: right of the film's widest lane use. */
     private int textX(Node node)
     {
-        return this.columnX(node.column) + this.lanesOf(node.filmId) * LANE + 10;
-    }
-
-    private int lanesOf(String filmId)
-    {
-        int lanes = 1;
-
-        for (Node node : this.nodes)
-        {
-            if (node.filmId.equals(filmId))
-            {
-                lanes = Math.max(lanes, node.lane + 1);
-            }
-        }
-
-        return lanes;
+        return this.laneBase(node.column, node.filmId) + (this.maxAbsLane(node.filmId) + 1) * LANE + 10;
     }
 
     private int rowTop(int row)
@@ -633,7 +662,7 @@ public class UICommitGraph extends UIElement
             for (int[] parent : node.parents)
             {
                 int parentY = this.rowY(parent[0]);
-                int parentX = this.columnX(node.column) + parent[1] * LANE;
+                int parentX = this.laneX(node.column, node.filmId, parent[1]);
 
                 /* Up out of the commit towards the parent's row ... */
                 this.segment(context, node.x, node.y, node.x, parentY, color);

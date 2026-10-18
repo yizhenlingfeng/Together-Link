@@ -156,6 +156,7 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_COMMIT_SELECTION = new Identifier("bbs_together", "s_commit_selection");
     public static final Identifier SERVER_COMMIT_COLOR = new Identifier("bbs_together", "s_commit_color");
     public static final Identifier SERVER_COMMIT_REVERT = new Identifier("bbs_together", "s_commit_revert");
+    public static final Identifier SERVER_COMMIT_SQUASH = new Identifier("bbs_together", "s_commit_squash");
     public static final Identifier SERVER_COMMIT_CREATE = new Identifier("bbs_together", "s_commit_create");
     public static final Identifier SERVER_COMMIT_HEAD = new Identifier("bbs_together", "s_commit_head");
     public static final Identifier SERVER_BRANCH_CREATE = new Identifier("bbs_together", "s_branch_create");
@@ -371,6 +372,7 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitSelection(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_COLOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitColor(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_REVERT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRevert(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_SQUASH, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitSquash(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitCreate(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BRANCH_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCreate(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BRANCH_CHECKOUT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCheckout(server, player, buf));
@@ -1828,6 +1830,11 @@ public class TogetherServerNetwork {
             if (targetBranch == null || targetBranch.isEmpty()) {
                 return;
             }
+            /* A commit from another branch is not part of this checkout; refusing here keeps a
+             * stale/hand-crafted packet from moving the wrong branch. */
+            if (!targetBranch.equals(TogetherServerNetwork.playerBranch(filmId, player))) {
+                return;
+            }
             if (CoopSessionManager.isFilmLockedForEditing(filmId, targetBranch)) {
                 return;
             }
@@ -1846,6 +1853,36 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.broadcastFilmSaved(server, filmId, targetBranch, reverted);
             TogetherServerNetwork.broadcastFilmSelections(server);
             TogetherServerNetwork.broadcastReplaySelections(server, filmId);
+            TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
+        });
+    }
+
+    /** Squash the current branch from its head down to the picked commit. */
+    private static void handleCommitSquash(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
+            return;
+        }
+        String filmId = buf.readString();
+        String commitId = buf.readString();
+        server.execute(() -> {
+            String targetBranch = FilmCommitStore.branchOfCommit(filmId, commitId);
+            if (targetBranch == null || targetBranch.isEmpty()) {
+                return;
+            }
+            if (!targetBranch.equals(TogetherServerNetwork.playerBranch(filmId, player))) {
+                return;
+            }
+            if (CoopSessionManager.isFilmLockedForEditing(filmId, targetBranch)) {
+                return;
+            }
+            FilmCommit squashed = FilmCommitStore.squash(filmId, commitId, player.getUuid().toString(), player.getGameProfile().getName(), null);
+            if (squashed == null) {
+                player.sendMessage(Text.literal("§e[BBS Together] 无法合并到此提交：该历史区间被其他分支引用，或提交已不在当前分支上"), false);
+                return;
+            }
+            playerEditingFilm.put(player.getUuid(), filmId);
+            BehaviorLogManager.record(player, BehaviorType.EDIT.id, 1, filmId, new ArrayList<String>(), Map.of("commit", squashed.id, "squashed", commitId, "branch", targetBranch));
+            TogetherServerNetwork.broadcastCommits(server, filmId, FilmCommitStore.list(filmId));
             TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
         });
     }

@@ -58,9 +58,8 @@ public class UIFilmPreviewBbsOpMixin
             }
 
             Film film = (Film) this.panel.getData();
-            boolean mayRecord = BbsOpClientState.canEdit(BbsOpDomain.FILM.id) && BbsOpClientState.canEdit(BbsOpDomain.RECORD.id);
 
-            if (mayRecord && !CoopClient.isInSession())
+            if (BbsOpClientState.canInviteCoop() && !CoopClient.isInSession())
             {
                 menu.action(Icons.VIDEO_CAMERA, CoopL10n.key("bbs_together.coop.menu.request"), () ->
                 {

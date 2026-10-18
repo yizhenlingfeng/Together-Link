@@ -17,6 +17,7 @@ import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.commits.FilmDiffBuilder;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.network.TogetherEditSyncQueue;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -88,6 +89,8 @@ public class UICommitInfo extends UIElement
     private boolean working;
     /** When the pending changes were last rebuilt, so they follow the editor while it is open. */
     private long built;
+    /** Edit version the current lines were built from; unchanged means no diff work needed. */
+    private long builtVersion = -1L;
 
     public UICommitInfo()
     {
@@ -174,6 +177,7 @@ public class UICommitInfo extends UIElement
         }
 
         this.built = System.currentTimeMillis();
+        this.builtVersion = TogetherEditSyncQueue.editVersion();
 
         this.updateScroll();
     }
@@ -517,8 +521,12 @@ public class UICommitInfo extends UIElement
     {
         this.scroll.drag(context.mouseX, context.mouseY);
 
-        /* Follow the editor, but recompute the diff about once a second, not every frame */
-        if (this.working && System.currentTimeMillis() - this.built > 1000L)
+        /* Follow the editor when it actually changed. Rebuilding a full-film diff every second
+         * froze the render thread for about a second on large films. */
+        long now = System.currentTimeMillis();
+        long version = TogetherEditSyncQueue.editVersion();
+
+        if (this.working && version != this.builtVersion && now - this.built > 1000L)
         {
             this.refresh();
         }

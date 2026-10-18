@@ -8,6 +8,8 @@ import mchorse.bbs_together.BBSTogetherFix22;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Pending "local edit → server" syncs, extracted from {@code UIFilmUndoHandlerMixin} so the
@@ -24,13 +26,46 @@ import java.util.Set;
 public final class TogetherEditSyncQueue {
     private static final Set<BaseValue> QUEUE = new HashSet<>();
     private static long lastFlush = 0L;
+    /** Bumped on every real edit, so diff views can rebuild only when something changed. */
+    private static final AtomicLong EDIT_VERSION = new AtomicLong();
+    /** Whether local content changed since the last commit/full-film replacement. */
+    private static final AtomicBoolean DIRTY = new AtomicBoolean();
 
     private TogetherEditSyncQueue() {
     }
 
     public static void add(BaseValue value) {
+        /* Passive per-second counter, not a user edit: syncing it every second also made the
+         * commit pane rebuild a full-film diff every second. */
+        if ("time_spent_active".equals(value.getId())) {
+            return;
+        }
         QUEUE.add(value);
+        EDIT_VERSION.incrementAndGet();
+        if (value.isSynced() || (!value.getPath().strings.isEmpty() && "replays".equals(value.getPath().strings.get(0)))) {
+            DIRTY.set(true);
+        }
         lastFlush = 0L;
+    }
+
+    /** Whether local film content changed since the last commit/full replacement. */
+    public static boolean isDirty() {
+        return DIRTY.get();
+    }
+
+    /** A commit/full-film replacement now represents the current local content. */
+    public static void markCommitted() {
+        DIRTY.set(false);
+    }
+
+    /** Version of the local/remote film data; consumers can skip work when it is unchanged. */
+    public static long editVersion() {
+        return EDIT_VERSION.get();
+    }
+
+    /** Mark the film data as changed without queueing a value (remote sync/apply). */
+    public static void markChanged() {
+        EDIT_VERSION.incrementAndGet();
     }
 
     /** Whether the value's post-edit sync is still queued (never handed to the network). */
@@ -44,6 +79,7 @@ public final class TogetherEditSyncQueue {
 
     public static void clear() {
         QUEUE.clear();
+        DIRTY.set(false);
     }
 
     /** Drains queued edit syncs (throttled to 100 ms), same behavior as before the move. */

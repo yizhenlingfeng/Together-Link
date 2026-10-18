@@ -109,12 +109,15 @@ public class UICommitsPanel extends UIDashboardPanel
         final String filmId = node.filmId;
         final String commitId = node.commit.id;
 
-        if (!node.commit.parent().isEmpty())
+        if (CommitUi.canRevert(node))
         {
             menu.action(Icons.UNDO, L10n.lang("bbs_together.commits.revert"), () -> CommitUi.confirmRevert(context, filmId, commitId));
         }
 
-        menu.action(Icons.REFRESH, L10n.lang("bbs_together.commits.reset"), () -> CommitUi.confirmReset(context, filmId, commitId));
+        if (CommitUi.canSquash(node))
+        {
+            menu.action(Icons.TREE, L10n.lang("bbs_together.commits.squash").format(commitId), () -> CommitUi.confirmSquash(context, filmId, commitId));
+        }
 
         if (!node.commit.branch.isEmpty())
         {

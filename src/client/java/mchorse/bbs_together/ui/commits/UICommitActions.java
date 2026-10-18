@@ -87,14 +87,13 @@ public class UICommitActions extends UIElement
         this.branchCreate.setEnabled(!film.isEmpty() && !name.isEmpty());
         this.branchCheckout.setEnabled(!film.isEmpty() && !name.isEmpty());
 
-        /* The first commit of a film has nothing before it, so there is nowhere to revert to */
-        boolean first = node != null && node.commit.parent().isEmpty();
+        boolean canRevert = CommitUi.canRevert(node);
 
-        this.revert.setEnabled(node != null && !first);
+        this.revert.setEnabled(canRevert);
 
-        if (first)
+        if (node != null && !canRevert)
         {
-            this.revert.tooltip(L10n.lang("bbs_together.commits.revert_first"));
+            this.revert.tooltip(L10n.lang("bbs_together.commits.revert_same_branch"));
         }
         else
         {
@@ -124,6 +123,7 @@ public class UICommitActions extends UIElement
         Film data = CommitUi.liveFilm(this, film);
 
         TogetherClientNetwork.sendCommitCreate(film, this.message.getText(), graph.commitBranch(film), data);
+        TogetherEditSyncQueue.markCommitted();
         this.message.setText("");
     }
 

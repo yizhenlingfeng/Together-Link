@@ -1,7 +1,9 @@
 package mchorse.bbs_together.ui;
 
 import mchorse.bbs_mod.BBSSettings;
+import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.l10n.L10n;
+import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIScrollView;
@@ -9,12 +11,14 @@ import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlayPanel;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.utils.colors.Colors;
-import mchorse.bbs_together.behaviors.PlayerRecord;
 import mchorse.bbs_together.network.CoopClient;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.network.TogetherEditSyncQueue;
+import mchorse.bbs_together.ui.commits.CommitUi;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.PlayerListEntry;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -70,8 +74,43 @@ public class UICoopInvitePanel extends UIOverlayPanel
 
     private void send()
     {
+        /* A coop invite is validated against the server's branch, and structural edits (for
+         * example a newly added replay) only reach it through a commit. Commit the editor's
+         * current state first when there is anything uncommitted; otherwise the invite would
+         * be refused with "not enough replays" even though the client shows enough. */
+        if (TogetherClientNetwork.isConnected() && TogetherEditSyncQueue.isDirty())
+        {
+            Film film = this.liveFilm();
+
+            if (film != null)
+            {
+                TogetherClientNetwork.sendCommitCreate(this.filmId,
+                    L10n.lang("bbs_together.commits.auto_coop").get(),
+                    TogetherClientNetwork.filmBranch(this.filmId), film);
+                TogetherEditSyncQueue.markCommitted();
+            }
+        }
+
         CoopClient.sendInvite(this.filmId, new ArrayList<>(this.selected));
         this.close();
+    }
+
+    /** The editor's live film, even when the picker overlay is not a child of the film panel. */
+    private Film liveFilm()
+    {
+        UIFilmPanel panel = CommitUi.filmPanel();
+
+        if (panel != null && panel.getData() instanceof Film)
+        {
+            Film film = (Film) panel.getData();
+
+            if (this.filmId != null && this.filmId.equals(film.getId()))
+            {
+                return film;
+            }
+        }
+
+        return CommitUi.liveFilm(this, this.filmId);
     }
 
     private void updateInviteEnabled()
@@ -93,20 +132,27 @@ public class UICoopInvitePanel extends UIOverlayPanel
             this.removeAll();
             UICoopInvitePanel.this.selected.clear();
 
-            UUID self = MinecraftClient.getInstance().player == null
-                ? null
-                : MinecraftClient.getInstance().player.getUuid();
+            MinecraftClient mc = MinecraftClient.getInstance();
+            UUID self = mc.player == null ? null : mc.player.getUuid();
+            List<OnlinePlayer> players = new ArrayList<>();
 
-            List<PlayerRecord> players = new ArrayList<>();
-
-            for (PlayerRecord record : TogetherClientNetwork.behaviorPlayers.values())
+            /* Use the actual online player list, not the behavior-log cache: a player who just
+             * joined has no behavior record yet, so the old source silently omitted their row
+             * (and therefore their avatar) from the picker. */
+            if (mc.getNetworkHandler() != null)
             {
-                if (record.groupHeader || record.id == null || record.id.equals(self))
+                for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList())
                 {
-                    continue;
-                }
+                    UUID id = entry.getProfile() == null ? null : entry.getProfile().getId();
+                    String name = entry.getProfile() == null ? null : entry.getProfile().getName();
 
-                players.add(record);
+                    if (id == null || name == null || name.isEmpty() || id.equals(self))
+                    {
+                        continue;
+                    }
+
+                    players.add(new OnlinePlayer(id, name));
+                }
             }
 
             players.sort((a, b) -> a.name.compareToIgnoreCase(b.name));
@@ -116,12 +162,25 @@ public class UICoopInvitePanel extends UIOverlayPanel
                 this.add(new EmptyRow());
             }
 
-            for (PlayerRecord record : players)
+            for (OnlinePlayer player : players)
             {
-                this.add(new PlayerRow(record));
+                this.add(new PlayerRow(player));
             }
 
             this.resize();
+        }
+    }
+
+    /** Minimal online-player row data; the avatar renderer takes the UUID and name. */
+    private static final class OnlinePlayer
+    {
+        private final UUID id;
+        private final String name;
+
+        OnlinePlayer(UUID id, String name)
+        {
+            this.id = id;
+            this.name = name;
         }
     }
 
@@ -144,18 +203,18 @@ public class UICoopInvitePanel extends UIOverlayPanel
 
     private class PlayerRow extends UIElement
     {
-        private final PlayerRecord record;
+        private final OnlinePlayer player;
 
-        public PlayerRow(PlayerRecord record)
+        public PlayerRow(OnlinePlayer player)
         {
-            this.record = record;
+            this.player = player;
 
             this.h(ROW);
         }
 
         private boolean isSelected()
         {
-            return UICoopInvitePanel.this.selected.contains(this.record.id);
+            return UICoopInvitePanel.this.selected.contains(this.player.id);
         }
 
         @Override
@@ -163,13 +222,13 @@ public class UICoopInvitePanel extends UIOverlayPanel
         {
             if (this.area.isInside(context) && context.mouseButton == 0)
             {
-                if (UICoopInvitePanel.this.selected.contains(this.record.id))
+                if (UICoopInvitePanel.this.selected.contains(this.player.id))
                 {
-                    UICoopInvitePanel.this.selected.remove(this.record.id);
+                    UICoopInvitePanel.this.selected.remove(this.player.id);
                 }
                 else
                 {
-                    UICoopInvitePanel.this.selected.add(this.record.id);
+                    UICoopInvitePanel.this.selected.add(this.player.id);
                 }
 
                 UICoopInvitePanel.this.updateInviteEnabled();
@@ -201,9 +260,9 @@ public class UICoopInvitePanel extends UIOverlayPanel
 
             int face = this.area.y + (this.area.h - 16) / 2;
 
-            UIPlayerFaceRenderer.draw(batcher, this.record.name, this.record.id, this.area.x + 4, face, 16);
+            UIPlayerFaceRenderer.draw(batcher, this.player.name, this.player.id, this.area.x + 4, face, 16);
 
-            String label = this.record.name;
+            String label = this.player.name;
 
             batcher.text(label, this.area.x + 26, this.area.y + (this.area.h - batcher.getFont().getHeight()) / 2 + 1,
                 selected ? Colors.WHITE : Colors.LIGHTEST_GRAY, false);

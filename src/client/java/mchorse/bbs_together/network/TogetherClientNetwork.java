@@ -445,6 +445,7 @@ public class TogetherClientNetwork {
 
     public static void reset() {
         crusher.reset();
+        TogetherEditSyncQueue.clear();
         AssetSyncTracker.reset();
         playerColors.clear();
         playerCursors.clear();
@@ -2411,6 +2412,8 @@ public class TogetherClientNetwork {
              * no camera clips; the old guards only make sense for same-branch live updates. */
             applyFilmDataUpdate(panel, data.asMap(), force);
             together_notifyFilmSyncApplied(panel, filmId);
+            TogetherEditSyncQueue.markChanged();
+            TogetherEditSyncQueue.markCommitted();
             return;
         }
 
@@ -2422,6 +2425,8 @@ public class TogetherClientNetwork {
         }
 
         together_saveReceivedFilm(filmId, data.asMap());
+        TogetherEditSyncQueue.markChanged();
+        TogetherEditSyncQueue.markCommitted();
     }
 
     private static void applyFilmDataUpdate(UIFilmPanel panel, MapType data) {
@@ -2966,6 +2971,16 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_REVERT, (PacketByteBuf)buf);
     }
 
+    public static void sendCommitSquash(String filmId, String commitId) {
+        if (!isBBSTogetherOnServer || filmId == null || commitId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(commitId);
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_SQUASH, (PacketByteBuf)buf);
+    }
+
     public static void sendCommitCreate(String filmId, String message, String branch, Film film) {
         if (!isBBSTogetherOnServer || filmId == null || MinecraftClient.getInstance().player == null) {
             return;
@@ -3318,6 +3333,7 @@ public class TogetherClientNetwork {
         if (!applied) {
             return;
         }
+        TogetherEditSyncQueue.markChanged();
         if (structureSync) {
             together_restoreReplayAfterStructureSync(panel, snapshot, currentIdx);
             return;

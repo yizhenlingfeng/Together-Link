@@ -121,12 +121,16 @@ public class UIFilmCommitsView extends UIElement
             return;
         }
 
-        if (!node.commit.parent().isEmpty())
+        if (CommitUi.canRevert(node))
         {
             menu.action(Icons.UNDO, L10n.lang("bbs_together.commits.revert"), () -> CommitUi.confirmRevert(context, node.filmId, node.commit.id));
         }
 
-        menu.action(Icons.REFRESH, L10n.lang("bbs_together.commits.reset"), () -> CommitUi.confirmReset(context, node.filmId, node.commit.id));
+        if (CommitUi.canSquash(node))
+        {
+            menu.action(Icons.TREE, L10n.lang("bbs_together.commits.squash").format(node.commit.shortId()), () -> CommitUi.confirmSquash(context, node.filmId, node.commit.id));
+        }
+
         menu.action(Icons.ADD, L10n.lang("bbs_together.commits.branch_here").format(node.commit.shortId()), () -> this.actions.wantBranchAt(node.commit.id));
 
         if (!node.commit.branch.isEmpty())

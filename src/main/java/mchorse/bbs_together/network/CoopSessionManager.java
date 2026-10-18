@@ -258,8 +258,9 @@ public final class CoopSessionManager {
             return;
         }
 
-        /* Host must be allowed to record at all; targets too (they get remote-started). */
-        if (!BbsOpManager.isAllowed(hostId, BbsOpDomain.FILM) || !BbsOpManager.isAllowed(hostId, BbsOpDomain.RECORD)) {
+        /* Inviting is allowed for editors (level 1) and admins (level 2). Domain whitelists
+         * restrict editing; they should not hide the coop-recording entry point. */
+        if (BbsOpManager.get(hostId) < BbsOpManager.LEVEL_EDITOR) {
             sendChat(host, "bbs_together.coop.error.no_record");
             return;
         }

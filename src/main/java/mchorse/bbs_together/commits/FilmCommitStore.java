@@ -15,8 +15,10 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per film commit history, stored next to the films themselves.
@@ -602,6 +604,120 @@ public final class FilmCommitStore
         save(store);
 
         return data;
+    }
+
+    /**
+     * Squash every commit from {@code targetId} up to the branch head into one commit at the
+     * target's position. The resulting commit keeps the branch head's film data, so no content
+     * is lost; the old target and the commits above it are removed from the history.
+     *
+     * @return the replacement commit, or {@code null} when the target is not an ancestor of
+     *         the branch head or the range is shared with another branch
+     */
+    public static synchronized FilmCommit squash(String filmId, String targetId, String authorId,
+        String authorName, String message)
+    {
+        Store store = get(filmId);
+
+        if (store == null)
+        {
+            return null;
+        }
+
+        FilmCommit target = store.find(targetId);
+
+        if (target == null)
+        {
+            return null;
+        }
+
+        String branch = target.branch == null || target.branch.isEmpty() ? store.current : target.branch;
+        FilmCommit head = store.find(store.branchHead(branch));
+
+        if (head == null || head.id.equals(target.id))
+        {
+            return null;
+        }
+
+        /* Walk the single-parent branch from head down to the target. */
+        List<FilmCommit> removed = new ArrayList<FilmCommit>();
+        FilmCommit current = head;
+
+        while (current != null && !current.id.equals(target.id))
+        {
+            removed.add(current);
+
+            String parent = current.parent();
+
+            current = parent.isEmpty() ? null : store.find(parent);
+        }
+
+        if (current == null)
+        {
+            return null;
+        }
+
+        removed.add(target);
+
+        Set<String> removedIds = new HashSet<String>();
+
+        for (FilmCommit commit : removed)
+        {
+            /* Another branch head must not disappear because this branch squashed its history. */
+            if (FilmCommitStore.heldByAnotherBranch(store, commit.id, branch))
+            {
+                return null;
+            }
+
+            removedIds.add(commit.id);
+        }
+
+        /* Do not rewrite another branch's ancestry: it may fork from the middle of this range. */
+        for (FilmCommit commit : store.commits)
+        {
+            if (removedIds.contains(commit.id))
+            {
+                continue;
+            }
+
+            for (String parent : commit.parents)
+            {
+                if (removedIds.contains(parent))
+                {
+                    return null;
+                }
+            }
+        }
+
+        MapType data = FilmCommitStore.snapshot(store, head.id);
+
+        if (data == null)
+        {
+            return null;
+        }
+
+        FilmCommit parent = target.parent().isEmpty() ? null : store.find(target.parent());
+        String text = message == null || message.isEmpty() ? target.message : message;
+        FilmCommit squashed = FilmCommitStore.write(store, data, parent, authorId, authorName, target.time,
+            FilmCommit.KIND_MANUAL, text, branch);
+
+        if (squashed == null)
+        {
+            return null;
+        }
+
+        /* Keep the picked node's colour so the graph looks like the same point was squashed. */
+        squashed.color = target.color;
+
+        for (FilmCommit commit : removed)
+        {
+            store.commits.remove(commit);
+            FilmCommitStore.delete(store, commit.id);
+        }
+
+        FilmCommitStore.save(store);
+
+        return squashed;
     }
 
     /** Whether a branch other than {@code branch} has its head on {@code commitId}. */

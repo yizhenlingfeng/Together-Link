@@ -10,6 +10,7 @@ import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIMessageOverlayPanel;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.commits.FilmCommitStore;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 
@@ -99,27 +100,78 @@ public final class CommitUi
         return true;
     }
 
-    /** Asks whether the commit disappears from the history, or stays while the branch moves back. */
+    /** Branch the player is on, falling back to the graph's per-player current branch. */
+    private static String currentBranch(String filmId)
+    {
+        String branch = TogetherClientNetwork.filmBranch(filmId);
+
+        if (!branch.isEmpty())
+        {
+            return branch;
+        }
+
+        FilmCommitClient.Graph graph = FilmCommitClient.graph(filmId);
+
+        return graph == null ? "" : graph.current;
+    }
+
+    /** A commit can only be rolled back on the branch the player currently has checked out. */
+    public static boolean canRevert(UICommitGraph.Node node)
+    {
+        if (node == null || node.commit == null)
+        {
+            return false;
+        }
+
+        String current = CommitUi.currentBranch(node.filmId);
+
+        return current.isEmpty() || node.commit.branch.isEmpty() || node.commit.branch.equals(current);
+    }
+
+    /** Squashing only makes sense on the current branch and below its head. */
+    public static boolean canSquash(UICommitGraph.Node node)
+    {
+        return canRevert(node) && node.active && !node.tip;
+    }
+
+    /** Squash the current branch head down to the picked commit, keeping the head's film data. */
+    public static void confirmSquash(UIContext context, String filmId, String commitId)
+    {
+        FilmCommit commit = FilmCommitClient.commit(filmId, commitId);
+        String current = CommitUi.currentBranch(filmId);
+
+        if (commit == null || (!current.isEmpty() && !commit.branch.isEmpty() && !commit.branch.equals(current)))
+        {
+            return;
+        }
+
+        UIOverlay.addOverlay(context, new UICommitRollbackOverlay(
+            L10n.lang("bbs_together.commits.squash_title"),
+            L10n.lang("bbs_together.commits.squash_message")
+        )
+            .choice(L10n.lang("bbs_together.commits.squash_confirm"), () -> TogetherClientNetwork.sendCommitSquash(filmId, commitId))
+            .build());
+    }
+
+    /** Return the branch to the picked commit, either deleting the later commits or keeping them. */
     public static void confirmRevert(UIContext context, String filmId, String commitId)
     {
+        FilmCommit commit = FilmCommitClient.commit(filmId, commitId);
+        String current = CommitUi.currentBranch(filmId);
+
+        if (commit != null && !commit.branch.isEmpty() && !current.isEmpty() && !commit.branch.equals(current))
+        {
+            /* A commit on another branch is not part of this checkout; rolling it back here would
+             * move the wrong branch. The menu hides the entry, this is a second guard. */
+            return;
+        }
+
         UIOverlay.addOverlay(context, new UICommitRollbackOverlay(
             L10n.lang("bbs_together.commits.revert_title"),
             L10n.lang("bbs_together.commits.revert_message")
         )
-            .choice(L10n.lang("bbs_together.commits.revert_delete"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.ROLLBACK_DELETE))
-            .choice(L10n.lang("bbs_together.commits.revert_keep"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.ROLLBACK_KEEP))
-            .build());
-    }
-
-    /** Asks whether the commits after it are dropped, or the branch head only moves back. */
-    public static void confirmReset(UIContext context, String filmId, String commitId)
-    {
-        UIOverlay.addOverlay(context, new UICommitRollbackOverlay(
-            L10n.lang("bbs_together.commits.reset_title"),
-            L10n.lang("bbs_together.commits.reset_message")
-        )
-            .choice(L10n.lang("bbs_together.commits.reset_delete"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.RESET_DELETE))
-            .choice(L10n.lang("bbs_together.commits.reset_keep"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.RESET_KEEP))
+            .choice(L10n.lang("bbs_together.commits.revert_delete"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.RESET_DELETE))
+            .choice(L10n.lang("bbs_together.commits.revert_keep"), () -> TogetherClientNetwork.sendCommitRevert(filmId, commitId, FilmCommitStore.RESET_KEEP))
             .build());
     }
 
