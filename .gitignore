@@ -53,6 +53,9 @@ dist/*.jar
 # BBS 子项目源码构建产物
 lib/**/.gradle/
 lib/**/build/
+
+# 参考模组原始压缩包（解包后的源码树已入库，zip 本体不进 git）
+lib/**/*.zip
 .workbuddy/
 .crash-report/
 

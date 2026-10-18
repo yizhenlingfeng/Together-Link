@@ -504,7 +504,10 @@ public final class FilmBranchStore
          * never committed, so prefer it over the head snapshot. */
         if (store == null || branch.equals(store.current))
         {
-            Film main = BBSMod.getFilms().load(filmId);
+            /* A film that only exists on a client (never uploaded) reaches this path while
+             * the server has no .dat yet. Asking BBS to load it logs a full ERROR with a
+             * FileNotFoundException for what is a normal first-open, so check first. */
+            Film main = BBSMod.getFilms().exists(filmId) ? BBSMod.getFilms().load(filmId) : null;
 
             if (main != null)
             {

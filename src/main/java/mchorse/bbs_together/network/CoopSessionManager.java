@@ -52,6 +52,8 @@ public final class CoopSessionManager {
     public static final int END_EXPIRED = 3;
     public static final int END_TIMEOUT = 4;
     public static final int END_HOST_DISBAND = 5;
+    /** An invitee could not commit their own branch / switch to the session branch. */
+    public static final int END_BRANCH_SWITCH_FAILED = 6;
 
     /** A recording session that produced no data for this long is force-closed (partial merge). */
     private static final long RECORDING_TIMEOUT_MS = 30L * 60L * 1000L;
@@ -75,7 +77,8 @@ public final class CoopSessionManager {
         public final long id;
         public final String filmId;
         public final UUID host;
-        /** Branch the host was on when the session was created; every member must share it. */
+        /** Branch the host was on when the session was created; invitees are moved onto it
+         * (after committing their own branch) when they accept. */
         public String branch;
         /** Host + everyone who accepted, in join order. */
         public final Map<UUID, Member> members = new LinkedHashMap<>();
@@ -193,10 +196,16 @@ public final class CoopSessionManager {
     }
 
     public static void handleRespond(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        long sessionId = buf.readLong();
-        boolean accept = buf.readBoolean();
+        /* Chunked: an accept from another branch may carry the invitee's full film so the
+         * automatic commit contains camera clips and structure edits, not just replay data. */
+        TogetherServerNetwork.receiveCrusher(player, buf, (bytes, packetByteBuf) -> {
+            long sessionId = packetByteBuf.readLong();
+            boolean accept = packetByteBuf.readBoolean();
+            String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(256) : "";
+            MapType incomingFilm = TogetherServerNetwork.readFilmPayload(bytes);
 
-        server.execute(() -> respond(server, player, sessionId, accept));
+            server.execute(() -> respond(server, player, sessionId, accept, incomingFilm, sentBranch));
+        });
     }
 
     public static void handlePick(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -292,13 +301,9 @@ public final class CoopSessionManager {
                 return;
             }
 
-            /* A coop take records into one film branch: all members must see the same replay
-             * list and write the merged takes back to that branch. */
-            if (!FilmBranchStore.branchOf(filmId, target).equals(branch)) {
-                sendChat(host, "bbs_together.coop.error.branch");
-                return;
-            }
-
+            /* A coop take records into one film branch, but invitees may still be on another
+             * branch. They keep working there while the invite is pending; accepting commits
+             * that branch and moves them onto the host's branch (see respond()). */
             targetPlayers.add(player);
         }
 
@@ -332,12 +337,15 @@ public final class CoopSessionManager {
             out.writeString(host.getGameProfile().getName(), 256);
             out.writeString(filmId, 256);
             out.writeLong(session.deadline - System.currentTimeMillis());
+            /* The host's branch travels along so the invitee can upload its full film before
+             * accepting when the two are on different branches (see CoopClient). */
+            out.writeString(session.branch == null ? "" : session.branch, 256);
 
             ServerPlayNetworking.send(player, TogetherServerNetwork.CLIENT_COOP_REQUEST, out);
         }
     }
 
-    private static void respond(MinecraftServer server, ServerPlayerEntity player, long sessionId, boolean accept) {
+    private static void respond(MinecraftServer server, ServerPlayerEntity player, long sessionId, boolean accept, MapType incomingFilm, String sentBranch) {
         CoopSession session = sessions.get(sessionId);
         UUID uuid = player.getUuid();
 
@@ -354,6 +362,32 @@ public final class CoopSessionManager {
 
             if (invited != null && !session.members.containsKey(uuid)) {
                 session.members.put(uuid, invited);
+            }
+
+            /* The invite is about the host's branch. An invitee coming from another branch
+             * keeps their own work: commit that branch, then check out the session branch.
+             * Only after the move succeeds may they join the room. */
+            if (!TogetherServerNetwork.prepareCoopBranchSwitch(server, player, session.filmId, session.branch, incomingFilm, sentBranch)) {
+                session.members.remove(uuid);
+                session.invited.remove(uuid);
+                membership.remove(uuid);
+                sendChat(player, "bbs_together.coop.error.branch_switch");
+
+                ServerPlayerEntity hostPlayer = server.getPlayerManager().getPlayer(session.host);
+
+                if (hostPlayer != null) {
+                    hostPlayer.sendMessage(Text.literal("§e[BBS Together] " + player.getGameProfile().getName() + " 无法自动提交并切换分支，未能接受邀请"), false);
+                }
+
+                if (session.invited.isEmpty() && session.members.size() <= 1) {
+                    end(server, session, END_BRANCH_SWITCH_FAILED);
+                } else if (session.phase == CoopSession.Phase.PICKING) {
+                    /* Other members already opened the room; drop this one from their list.
+                     * While still INVITING nobody has a room to update. */
+                    broadcastRoom(server, session);
+                }
+
+                return;
             }
 
             /* First accept opens the room; later accepts (before the deadline) join it. */

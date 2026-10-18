@@ -3,12 +3,13 @@ package mchorse.bbs_together.network;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.Films;
-import mchorse.bbs_mod.l10n.L10n;
+import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIScreen;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.BBSTogetherFix19;
 import mchorse.bbs_together.ui.UICoopRoomMenu;
+import mchorse.bbs_together.ui.commits.CommitUi;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -41,15 +42,18 @@ public final class CoopClient {
         public final UUID host;
         public final String hostName;
         public final String filmId;
+        /** Branch the host records on; the invitee is moved there on accept. */
+        public final String hostBranch;
         /** Accept window length; the countdown counts locally from receive time. */
         public final long durationMs;
         public final long receivedAt = System.currentTimeMillis();
 
-        Invite(long id, UUID host, String hostName, String filmId, long durationMs) {
+        Invite(long id, UUID host, String hostName, String filmId, String hostBranch, long durationMs) {
             this.id = id;
             this.host = host;
             this.hostName = hostName;
             this.filmId = filmId;
+            this.hostBranch = hostBranch == null ? "" : hostBranch;
             this.durationMs = durationMs;
         }
     }
@@ -176,16 +180,15 @@ public final class CoopClient {
     }
 
     public static void sendRespond(long sessionId, boolean accept) {
+        sendRespond(sessionId, accept, null, "");
+    }
+
+    public static void sendRespond(long sessionId, boolean accept, Film filmToCommit, String branch) {
         if (!TogetherClientNetwork.isConnected()) {
             return;
         }
 
-        PacketByteBuf buf = PacketByteBufs.create();
-
-        buf.writeLong(sessionId);
-        buf.writeBoolean(accept);
-
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_RESPOND, buf);
+        TogetherClientNetwork.sendCoopRespond(sessionId, accept, filmToCommit, branch);
     }
 
     public static void sendPick(long sessionId, int index) {
@@ -265,8 +268,9 @@ public final class CoopClient {
         final String hostName = buf.readString(256);
         final String filmId = buf.readString(256);
         final long durationMs = buf.readLong();
+        final String hostBranch = buf.isReadable() ? buf.readString(256) : "";
 
-        client.execute(() -> pendingInvite = new Invite(id, host, hostName, filmId, durationMs));
+        client.execute(() -> pendingInvite = new Invite(id, host, hostName, filmId, hostBranch, durationMs));
     }
 
     public static void handleRequestClosed(MinecraftClient client, PacketByteBuf buf) {
@@ -341,6 +345,7 @@ public final class CoopClient {
                     case CoopSessionManager.END_ALL_DENIED -> key = "bbs_together.coop.notify.all_denied";
                     case CoopSessionManager.END_EXPIRED -> key = "bbs_together.coop.notify.expired";
                     case CoopSessionManager.END_TIMEOUT -> key = "bbs_together.coop.notify.timeout";
+                    case CoopSessionManager.END_BRANCH_SWITCH_FAILED -> key = "bbs_together.coop.notify.branch_switch_failed";
                     default -> key = "bbs_together.coop.notify.disbanded";
                 }
 
@@ -513,8 +518,13 @@ public final class CoopClient {
         boolean deny = CoopKeys.COOP_DENY.isHeld();
 
         if (accept && !prevAccept) {
+            /* The server commits the current branch and switches us to the host's branch.
+             * Flush edits still inside the 100 ms throttle, and when the branches differ attach
+             * the whole editor film so the commit also contains camera clips and structure
+             * changes (replay deltas are the only values the server applies live). */
+            Film filmToCommit = prepareInviteAccept(invite);
             pendingInvite = null;
-            sendRespond(invite.id, true);
+            sendRespond(invite.id, true, filmToCommit, TogetherClientNetwork.filmBranch(invite.filmId));
         } else if (deny && !prevDeny) {
             pendingInvite = null;
             sendRespond(invite.id, false);
@@ -522,6 +532,38 @@ public final class CoopClient {
 
         prevAccept = accept;
         prevDeny = deny;
+    }
+
+    /**
+     * Drain queued edits and return the film the server should commit before switching branches.
+     * The film travels inside the accept packet, so it arrives before the accept on the same
+     * channel; returns {@code null} when the invitee is already on the host's branch.
+     */
+    private static Film prepareInviteAccept(Invite invite) {
+        UIFilmPanel panel = CommitUi.filmPanel();
+
+        if (panel == null || panel.getData() == null || !(panel.getData() instanceof Film)) {
+            return null;
+        }
+
+        Film film = (Film) panel.getData();
+
+        if (invite.filmId == null || !invite.filmId.equals(film.getId())) {
+            return null;
+        }
+
+        TogetherEditSyncQueue.flushNow(panel);
+
+        String localBranch = TogetherClientNetwork.filmBranch(invite.filmId);
+
+        if (!invite.hostBranch.isEmpty() && !invite.hostBranch.equals(localBranch)) {
+            /* The full film above is the commit payload; anything still queued belongs to the
+             * branch we are leaving and must not be flushed under the new branch afterwards. */
+            TogetherEditSyncQueue.clear();
+            return film;
+        }
+
+        return null;
     }
 
     /** Called every frame: releases a room screen that was waiting for a vanilla screen to close. */
@@ -545,7 +587,14 @@ public final class CoopClient {
                 return;
             }
 
-            Film film = (Film) mchorse.bbs_mod.BBSMod.getFilms().load(filmId);
+            /* Prefer the live editor film: after accepting an invite from another branch the
+             * authoritative branch state was applied in memory, but BBS may not have written
+             * it to disk yet. The recorded replay must be the host branch's replay. */
+            UIFilmPanel panel = CommitUi.filmPanel();
+            Object panelData = panel == null ? null : panel.getData();
+            Film film = panelData instanceof Film && filmId.equals(((Film) panelData).getId())
+                ? (Film) panelData
+                : (Film) mchorse.bbs_mod.BBSMod.getFilms().load(filmId);
 
             if (film == null || replayIndex < 0 || replayIndex >= film.replays.getList().size()) {
                 sendMessage("bbs_together.coop.notify.begin_failed");

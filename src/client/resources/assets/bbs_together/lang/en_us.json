@@ -19,7 +19,7 @@
     "bbs_together.coop.error.film_busy": "[BBSTogether] This film already has an active recording session.",
     "bbs_together.coop.error.no_record": "[BBSTogether] Everyone invited needs film editing and recording permission.",
     "bbs_together.coop.error.no_film": "[BBSTogether] That film does not exist on the server.",
-    "bbs_together.coop.error.branch": "[BBSTogether] Everyone invited must be on the same film branch as you.",
+    "bbs_together.coop.error.branch_switch": "[BBSTogether] Could not commit your current branch and switch to the coop recording branch; the invitation was not accepted.",
     "bbs_together.coop.error.not_enough_replays": "[BBSTogether] The film needs at least one replay per participant.",
     "bbs_together.coop.error.offline": "[BBSTogether] One of the invited players is not online.",
     "bbs_together.coop.notify.merged": "[BBSTogether] Cooperative recording merged into the film.",
@@ -27,6 +27,7 @@
     "bbs_together.coop.notify.all_denied": "[BBSTogether] Everyone declined the recording request.",
     "bbs_together.coop.notify.expired": "[BBSTogether] The recording request expired.",
     "bbs_together.coop.notify.timeout": "[BBSTogether] The recording session timed out; partial takes were merged.",
+    "bbs_together.coop.notify.branch_switch_failed": "[BBSTogether] A player could not commit and switch to the coop branch; the session ended.",
     "bbs_together.coop.notify.disbanded": "[BBSTogether] The recording session was disbanded.",
     "bbs_together.coop.notify.begin_failed": "[BBSTogether] Could not start the coop recording (film missing locally?).",
     "bbs_together.coop.notify.recording_started": "[BBSTogether] Coop recording started - stop as usual when done."

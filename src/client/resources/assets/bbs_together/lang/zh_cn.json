@@ -19,7 +19,7 @@
     "bbs_together.coop.error.film_busy": "[BBSTogether] 该影片已有进行中的录制会话。",
     "bbs_together.coop.error.no_record": "[BBSTogether] 被邀请的所有玩家都需要影片编辑与录制权限。",
     "bbs_together.coop.error.no_film": "[BBSTogether] 服务器上不存在该影片。",
-    "bbs_together.coop.error.branch": "[BBSTogether] 被邀请的玩家必须与你处于同一影片分支。",
+    "bbs_together.coop.error.branch_switch": "[BBSTogether] 无法自动提交当前分支并切换到合作录制所在分支，邀请未接受。",
     "bbs_together.coop.error.not_enough_replays": "[BBSTogether] 影片的回放数量不足（每位参与者需要一个回放）。",
     "bbs_together.coop.error.offline": "[BBSTogether] 被邀请的玩家不在线。",
     "bbs_together.coop.notify.merged": "[BBSTogether] 合作录制已合并进影片。",
@@ -27,6 +27,7 @@
     "bbs_together.coop.notify.all_denied": "[BBSTogether] 所有玩家都拒绝了录制请求。",
     "bbs_together.coop.notify.expired": "[BBSTogether] 录制请求已超时。",
     "bbs_together.coop.notify.timeout": "[BBSTogether] 录制会话超时，已合并已收到的部分。",
+    "bbs_together.coop.notify.branch_switch_failed": "[BBSTogether] 有玩家无法自动提交并切换到合作录制分支，会话已结束。",
     "bbs_together.coop.notify.disbanded": "[BBSTogether] 录制会话已解散。",
     "bbs_together.coop.notify.begin_failed": "[BBSTogether] 无法开始合作录制（本地缺少该影片？）。",
     "bbs_together.coop.notify.recording_started": "[BBSTogether] 合作录制开始，录制完成后按停止键收卷。"

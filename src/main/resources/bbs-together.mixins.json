@@ -5,6 +5,8 @@
     "mixins":  [
                    "BBSCommandsMixin",
                    "ServerNetworkBbsOpMixin",
+                   "FilmStorageLockMixin",
+                   "FilmLoadQuietMixin",
                    "ActionManagerBbsOpMixin",
                    "PermissionUtilsBbsOpMixin",
                    "ModelBlockEntityMixin",

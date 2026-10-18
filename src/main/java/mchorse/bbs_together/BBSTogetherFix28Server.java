@@ -14,7 +14,7 @@ import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_together.commits.FilmBranchStore;
-import mchorse.bbs_mod.network.ServerPacketCrusher;
+import mchorse.bbs_together.network.CompressedServerPacketCrusher;
 import mchorse.bbs_together.BBSTogetherFix28;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -27,7 +27,7 @@ import net.minecraft.server.MinecraftServer;
 public final class BBSTogetherFix28Server {
     private static final ConcurrentHashMap<String, LinkedHashSet<UUID>> FILM_ENTRY_ORDER = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, String> ACTIVE_FILM_EDITORS = new ConcurrentHashMap();
-    private static final ConcurrentHashMap<UUID, ServerPacketCrusher> SNAPSHOT_CRUSHERS = new ConcurrentHashMap();
+    private static final ConcurrentHashMap<UUID, CompressedServerPacketCrusher> SNAPSHOT_CRUSHERS = new ConcurrentHashMap();
     private static final ConcurrentHashMap<String, Long> RECORDING_BASELINE_ACCEPTED_AT = new ConcurrentHashMap();
     private static final long RECORDING_BASELINE_DEDUP_MS = 2000L;
     private static volatile boolean serverReceiversRegistered;
@@ -45,7 +45,7 @@ public final class BBSTogetherFix28Server {
             minecraftServer.execute(() -> BBSTogetherFix28Server.handleJoinRequest(minecraftServer, class_32222, string));
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
-            ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
+            CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 UUID uUID = class_25402.readUuid();
                 String string = class_25402.readString();
@@ -53,7 +53,7 @@ public final class BBSTogetherFix28Server {
             });
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_LEAVE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
-            ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
+            CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
                 String branch = class_25402.isReadable() ? class_25402.readString(128) : "";
@@ -61,7 +61,7 @@ public final class BBSTogetherFix28Server {
             });
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
-            ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
+            CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
                 String branch = class_25402.isReadable() ? class_25402.readString(128) : "";
@@ -69,7 +69,7 @@ public final class BBSTogetherFix28Server {
             });
         });
         ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
-            ServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
+            CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
                 String branch = class_25402.isReadable() ? class_25402.readString(128) : "";
