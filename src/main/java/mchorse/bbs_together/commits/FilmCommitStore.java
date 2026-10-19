@@ -11,7 +11,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -24,23 +23,24 @@ import java.util.Set;
  * Per film commit history, stored next to the films themselves.
  *
  * <pre>
- * &lt;world&gt;/bbs/films/
- * ├─ &lt;film&gt;.dat                 # the film itself, written by BBS FS
- * └─ _commits/&lt;filmId&gt;/
- *    ├─ index.bin               # commits, parents, branch heads
- *    ├─ s/&lt;commitId&gt;.bin        # film snapshot (raw BaseType bytes)
- *    └─ d/&lt;commitId&gt;.bin        # change details, made by FilmDiffBuilder
+ * &lt;films&gt;/&lt;path&gt;/&lt;film&gt;.dat       # the film itself, written by BBS FS (vanilla compatible)
+ * &lt;films&gt;/&lt;path&gt;/_&lt;film&gt;/          # BBS backup folder, invisible to the film list
+ * └─ _together/
+ *    ├─ index.bin                   # commits, parents, branch heads
+ *    ├─ s/&lt;commitId&gt;.bin            # film snapshot (raw BaseType bytes)
+ *    └─ d/&lt;commitId&gt;.bin            # change details, made by FilmDiffBuilder
  * </pre>
  *
- * <p>{@code _commits} starts with an underscore so {@code FolderManager.getKeys()} skips it - it
- * only lists real films. Everything here touches the disk, so it must be called from the server
- * thread (the save path already runs there).</p>
+ * <p>The sidecar lives in BBS' own {@code _<name>} folder, so a rename/move of the film folder
+ * carries the history with it. Both that folder and the legacy {@code _commits} location start
+ * with an underscore, so {@code FolderManager.getKeys()} never lists them as films. Everything
+ * here touches the disk, so it must be called from the server thread (the save path already runs
+ * there).</p>
  */
 public final class FilmCommitStore
 {
     public static final String BRANCH_MAIN = "main";
 
-    private static final String FOLDER = "_commits";
     private static final String INDEX = "index.bin";
     private static final String SNAPSHOTS = "s";
     private static final String DIFFS = "d";
@@ -74,10 +74,39 @@ public final class FilmCommitStore
          */
         public String current = BRANCH_MAIN;
 
+        /**
+         * One-snapshot cache. Commits compare the new film against the branch head and then
+         * diff against the same snapshot, so without this the head file is read and parsed
+         * twice per commit. Only the most recently used snapshot is kept, which bounds memory
+         * to a single film copy.
+         */
+        String cachedSnapshotId = "";
+        MapType cachedSnapshot;
+
         Store(String filmId, File folder)
         {
             this.filmId = filmId;
             this.folder = folder;
+        }
+
+        void cacheSnapshot(String id, MapType data)
+        {
+            this.cachedSnapshotId = id == null ? "" : id;
+            this.cachedSnapshot = data;
+        }
+
+        MapType cachedSnapshot(String id)
+        {
+            return id != null && id.equals(this.cachedSnapshotId) ? this.cachedSnapshot : null;
+        }
+
+        void forgetSnapshot(String id)
+        {
+            if (id != null && id.equals(this.cachedSnapshotId))
+            {
+                this.cachedSnapshotId = "";
+                this.cachedSnapshot = null;
+            }
         }
 
         /** Head of one branch, or {@code null} when that branch does not exist. */
@@ -107,20 +136,6 @@ public final class FilmCommitStore
 
     /* Loading */
 
-    private static File baseFolder()
-    {
-        try
-        {
-            File films = BBSMod.getFilms().getFolder();
-
-            return films == null ? null : new File(films, FOLDER);
-        }
-        catch (Exception e)
-        {
-            return null;
-        }
-    }
-
     public static synchronized Store get(String filmId)
     {
         if (filmId == null || filmId.isEmpty())
@@ -135,19 +150,114 @@ public final class FilmCommitStore
             return store;
         }
 
-        File base = baseFolder();
+        File folder = FilmFolders.togetherFolder(filmId);
 
-        if (base == null)
+        if (folder == null)
         {
             return null;
         }
 
-        store = new Store(filmId, new File(base, filmId));
+        store = new Store(filmId, folder);
 
+        migrateLegacy(store);
         load(store);
         STORES.put(filmId, store);
 
         return store;
+    }
+
+    /**
+     * Move a world written by an earlier version from {@code <films>/_commits/<film>/} into the
+     * film's own sidecar. The move is per entry and never overwrites newer files, so a partial
+     * migration can be resumed on the next start.
+     */
+    private static void migrateLegacy(Store store)
+    {
+        File legacy = FilmFolders.legacyFolder(store.filmId);
+
+        if (legacy == null || !legacy.isDirectory() || legacy.equals(store.folder))
+        {
+            return;
+        }
+
+        if (new File(store.folder, INDEX).isFile())
+        {
+            return;
+        }
+
+        File[] children = legacy.listFiles();
+
+        if (children == null || children.length == 0)
+        {
+            FilmFolders.deleteEmptyParents(legacy, filmRoot());
+            return;
+        }
+
+        try
+        {
+            Files.createDirectories(store.folder.toPath());
+        }
+        catch (IOException e)
+        {
+            System.err.println("[BBSTogether] Failed to create commit folder " + store.folder + ": " + e);
+
+            return;
+        }
+
+        for (File child : children)
+        {
+            mergeLegacy(child, new File(store.folder, child.getName()));
+        }
+
+        FilmFolders.deleteEmptyParents(legacy, filmRoot());
+    }
+
+    /** Move every file that the new sidecar does not have yet; recurse where both have folders. */
+    private static void mergeLegacy(File from, File to)
+    {
+        if (!from.exists())
+        {
+            return;
+        }
+
+        if (!to.exists())
+        {
+            FilmFolders.move(from, to);
+
+            return;
+        }
+
+        if (from.isDirectory() && to.isDirectory())
+        {
+            File[] children = from.listFiles();
+
+            if (children != null)
+            {
+                for (File child : children)
+                {
+                    mergeLegacy(child, new File(to, child.getName()));
+                }
+            }
+        }
+    }
+
+    private static File filmRoot()
+    {
+        try
+        {
+            return BBSMod.getFilms().getFolder();
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
+    }
+
+    private static boolean hasEntries(File folder)
+    {
+        File[] children = folder == null ? null : folder.listFiles();
+
+        return children != null && children.length > 0;
     }
 
     private static void load(Store store)
@@ -259,6 +369,13 @@ public final class FilmCommitStore
             return null;
         }
 
+        MapType cached = store.cachedSnapshot(commitId);
+
+        if (cached != null)
+        {
+            return cached;
+        }
+
         File file = file(store, SNAPSHOTS, commitId);
 
         if (!file.isFile())
@@ -270,7 +387,14 @@ public final class FilmCommitStore
         {
             BaseType data = DataStorageUtils.readFromBytes(Files.readAllBytes(file.toPath()));
 
-            return data == null || !data.isMap() ? null : data.asMap();
+            if (data == null || !data.isMap())
+            {
+                return null;
+            }
+
+            store.cacheSnapshot(commitId, data.asMap());
+
+            return data.asMap();
         }
         catch (Exception e)
         {
@@ -285,11 +409,13 @@ public final class FilmCommitStore
     {
         MapType map = new MapType();
         ListType films = new ListType();
-        File base = baseFolder();
+        Set<String> listed = new HashSet<String>();
+        File root = filmRoot();
 
-        if (base != null && base.isDirectory())
+        if (root != null && root.isDirectory())
         {
-            collect(base, base, films);
+            collect(root, root, films, listed);
+            collectLegacy(root, films, listed);
         }
 
         map.put("films", films);
@@ -297,7 +423,7 @@ public final class FilmCommitStore
         return map;
     }
 
-    private static void collect(File base, File folder, ListType films)
+    private static void collect(File root, File folder, ListType films, Set<String> listed)
     {
         File[] children = folder.listFiles();
 
@@ -313,29 +439,107 @@ public final class FilmCommitStore
                 continue;
             }
 
-            if (!new File(child, INDEX).isFile())
+            String name = child.getName();
+
+            if (FilmFolders.TOGETHER.equals(name))
             {
-                collect(base, child, films);
+                if (new File(child, INDEX).isFile())
+                {
+                    collectFilm(root, child, films, listed);
+                }
 
                 continue;
             }
 
-            String filmId = base.toPath().relativize(child.toPath()).toString().replace(File.separatorChar, '/');
-            Store store = get(filmId);
-
-            if (store == null || store.commits.isEmpty())
+            if (!FilmFolders.LEGACY.equals(name))
             {
-                continue;
+                collect(root, child, films, listed);
             }
-
-            MapType entry = new MapType();
-
-            entry.putString("id", filmId);
-            entry.putInt("count", store.commits.size());
-            films.add(entry);
         }
     }
 
+    private static void collectFilm(File root, File together, ListType films, Set<String> listed)
+    {
+        String filmId = FilmFolders.filmIdOfTogetherFolder(root, together);
+
+        if (filmId == null || !BBSMod.getFilms().exists(filmId) || !listed.add(filmId))
+        {
+            return;
+        }
+
+        Store store = get(filmId);
+
+        if (store != null && !store.commits.isEmpty())
+        {
+            addFilmEntry(films, filmId, store.commits.size());
+        }
+    }
+
+    /** Include worlds that still keep their history in the legacy {@code _commits} tree. */
+    private static void collectLegacy(File root, ListType films, Set<String> listed)
+    {
+        File legacy = new File(root, FilmFolders.LEGACY);
+
+        if (!legacy.isDirectory())
+        {
+            return;
+        }
+
+        List<String> ids = new ArrayList<String>();
+
+        collectLegacyIds(legacy, legacy, ids);
+
+        for (String filmId : ids)
+        {
+            if (!listed.add(filmId) || !BBSMod.getFilms().exists(filmId))
+            {
+                continue;
+            }
+
+            Store store = get(filmId);
+
+            if (store != null && !store.commits.isEmpty())
+            {
+                addFilmEntry(films, filmId, store.commits.size());
+            }
+        }
+    }
+
+    private static void collectLegacyIds(File root, File folder, List<String> ids)
+    {
+        File[] children = folder.listFiles();
+
+        if (children == null)
+        {
+            return;
+        }
+
+        for (File child : children)
+        {
+            if (!child.isDirectory())
+            {
+                continue;
+            }
+
+            if (new File(child, INDEX).isFile())
+            {
+                ids.add(root.toPath().relativize(child.toPath()).toString().replace(File.separatorChar, '/'));
+            }
+            else
+            {
+                collectLegacyIds(root, child, ids);
+            }
+        }
+    }
+
+    private static void addFilmEntry(ListType films, String filmId, int count)
+    {
+        MapType entry = new MapType();
+
+        entry.putString("id", filmId);
+        entry.putInt("count", count);
+        films.add(entry);
+    }
 
     /** The details of one commit, or {@code null} when they were never written. */
     public static MapType diff(String filmId, String commitId)
@@ -412,7 +616,7 @@ public final class FilmCommitStore
             trimmed = trimmed.substring(0, FilmCommit.MAX_MESSAGE);
         }
 
-        return write(store, data, head, authorId, authorName, now, FilmCommit.KIND_MANUAL, trimmed, target);
+        return write(store, data, head, headData, authorId, authorName, now, FilmCommit.KIND_MANUAL, trimmed, target);
     }
 
     /** Whether {@code name} can be used as a branch name. */
@@ -698,7 +902,7 @@ public final class FilmCommitStore
 
         FilmCommit parent = target.parent().isEmpty() ? null : store.find(target.parent());
         String text = message == null || message.isEmpty() ? target.message : message;
-        FilmCommit squashed = FilmCommitStore.write(store, data, parent, authorId, authorName, target.time,
+        FilmCommit squashed = FilmCommitStore.write(store, data, parent, null, authorId, authorName, target.time,
             FilmCommit.KIND_MANUAL, text, branch);
 
         if (squashed == null)
@@ -778,10 +982,16 @@ public final class FilmCommitStore
      *
      * @param head the branch head the commit hangs off, or {@code null} for the first commit
      */
-    private static FilmCommit write(Store store, MapType data, FilmCommit head, String authorId,
+    private static FilmCommit write(Store store, MapType data, FilmCommit head, MapType headData, String authorId,
         String authorName, long now, int kind, String message, String branch)
     {
-        MapType before = head == null ? null : snapshot(store, head.id);
+        MapType before = headData;
+
+        if (head != null && before == null)
+        {
+            before = snapshot(store, head.id);
+        }
+
         MapType diff = FilmDiffBuilder.diff(before, data);
 
         FilmCommit commit = new FilmCommit();
@@ -822,6 +1032,7 @@ public final class FilmCommitStore
 
             Files.write(snapshotFile.toPath(), bytes);
             Files.write(diffFile.toPath(), DataStorageUtils.writeToBytes(diff));
+            store.cacheSnapshot(commit.id, data);
         }
         catch (IOException e)
         {
@@ -843,6 +1054,8 @@ public final class FilmCommitStore
 
     private static void delete(Store store, String commitId)
     {
+        store.forgetSnapshot(commitId);
+
         File snapshot = file(store, SNAPSHOTS, commitId);
         File diff = file(store, DIFFS, commitId);
 
@@ -994,17 +1207,20 @@ public final class FilmCommitStore
         }
 
         STORES.remove(filmId);
-        File base = baseFolder();
+        FilmFolders.deleteRecursively(FilmFolders.togetherFolder(filmId));
 
-        if (base != null)
+        File legacy = FilmFolders.legacyFolder(filmId);
+
+        if (legacy != null && legacy.isDirectory())
         {
-            deleteRecursively(new File(base, filmId));
+            FilmFolders.deleteRecursively(legacy);
+            FilmFolders.deleteEmptyParents(legacy, filmRoot());
         }
     }
 
     /**
      * Move a film's history folder after BBS renamed the film. The caller is responsible for
-     * the main film file; this only keeps {@code _commits/<film>} and its cached store in sync.
+     * the main film file; this only keeps the per-film sidecar and its cached store in sync.
      */
     public static synchronized void renameFilm(String oldId, String newId)
     {
@@ -1013,14 +1229,17 @@ public final class FilmCommitStore
             return;
         }
 
-        File base = baseFolder();
+        File from = FilmFolders.togetherFolder(oldId);
+        File to = FilmFolders.togetherFolder(newId);
 
-        if (base != null)
+        if (to == null)
         {
-            File from = new File(base, oldId);
-            File to = new File(base, newId);
+            return;
+        }
 
-            if (to.exists())
+        if (from != null && from.isDirectory())
+        {
+            if (hasEntries(to))
             {
                 /* Never overwrite another film's history because BBS allowed a rename to it. */
                 System.err.println("[BBSTogether] Film commit folder already exists for " + newId + "; leaving " + oldId + " untouched");
@@ -1028,29 +1247,49 @@ public final class FilmCommitStore
                 return;
             }
 
-            if (from.isDirectory())
+            FilmFolders.deleteRecursively(to);
+
+            if (!FilmFolders.move(from, to))
             {
-                try
+                return;
+            }
+
+            FilmFolders.deleteEmptyParents(from, FilmFolders.sidecarFolder(oldId));
+        }
+        else
+        {
+            /* The old tree may still be the legacy one if it was never opened after upgrading. */
+            File legacy = FilmFolders.legacyFolder(oldId);
+
+            if (legacy != null && legacy.isDirectory())
+            {
+                if (hasEntries(to))
                 {
-                    to.getParentFile().mkdirs();
-                    Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    System.err.println("[BBSTogether] Film commit folder already exists for " + newId + "; leaving " + oldId + " untouched");
+
+                    return;
                 }
-                catch (IOException e)
+
+                FilmFolders.deleteRecursively(to);
+
+                if (FilmFolders.move(legacy, to))
                 {
-                    System.err.println("[BBSTogether] Failed to move film commits from " + oldId + " to " + newId + ": " + e);
+                    FilmFolders.deleteEmptyParents(legacy, filmRoot());
                 }
             }
         }
 
         Store old = STORES.remove(oldId);
 
-        if (old != null && base != null)
+        if (old != null)
         {
-            Store renamed = new Store(newId, new File(base, newId));
+            Store renamed = new Store(newId, to);
 
             renamed.commits.addAll(old.commits);
             renamed.branches.putAll(old.branches);
             renamed.current = old.current;
+            renamed.cachedSnapshotId = old.cachedSnapshotId;
+            renamed.cachedSnapshot = old.cachedSnapshot;
 
             for (FilmCommit commit : renamed.commits)
             {
@@ -1065,26 +1304,6 @@ public final class FilmCommitStore
             /* Force a reload from the moved folder next time it is opened */
             STORES.remove(newId);
         }
-    }
-
-    private static void deleteRecursively(File file)
-    {
-        if (file == null || !file.exists())
-        {
-            return;
-        }
-
-        File[] children = file.listFiles();
-
-        if (children != null)
-        {
-            for (File child : children)
-            {
-                deleteRecursively(child);
-            }
-        }
-
-        file.delete();
     }
 
     /* Helpers */

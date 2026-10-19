@@ -3,7 +3,7 @@
 Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbench Studio for Minecraft）的多人协作模组，基于 Minecraft 1.20.1 Fabric。它让多名玩家在同一个 BBS 影片项目中实时协作编辑，同步光标、选中、关键帧、回放，并支持资产和影片数据的服务器端分发。
 
 - **模组 ID**：`bbs_together`（历史沿用，未改动）
-- **当前版本**：1.7.7
+- **当前版本**：1.7.8.1
 - **Minecraft**：1.20.1
 - **前置**：BBS FS >= 2.6、Fabric API、Fabric Loader >= 0.15.6
 - **Java**：17（编译目标）/ 21（运行 Gradle 9.2）
@@ -27,15 +27,17 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - **回放合并**：支持多人录制的回放片段合并到同一时间线。
 
 ### 影片提交（版本历史）
-- **提交**：在影片编辑页的「提交」页填写提交信息后提交。服务器为该影片记录一份快照与差异，存于 `<存档>/bbs/films/_commits/<影片>/`，每部影片最多保留 300 条。提交落在**发起者当前分支**上，按钮显示「提交到 <当前分支>」；不会把本分支内容写进图里选中的其他分支。客户端会把编辑器中尚未保存的影片数据一并发送，刚改完关键帧轨道不保存直接提交也能记下改动。提交没有产生新记录时（与分支最新提交内容相同，或影片数据读写失败）服务器回传原因并弹窗提示。
+- **提交**：在影片编辑页的「提交」页填写提交信息后提交。服务器为该影片记录一份快照与差异，存于影片自己的附属文件夹 `<存档>/bbs/films/<影片目录>/_<影片名>/_together/`（与 BBS 的自动备份同一文件夹，原版 BBS 与不含 Together 的客户端都不会把它当成影片），每部影片最多保留 300 条。提交落在**发起者当前分支**上，按钮显示「提交到 <当前分支>」；不会把本分支内容写进图里选中的其他分支。客户端会把编辑器中尚未保存的影片数据一并发送，刚改完关键帧轨道不保存直接提交也能记下改动。提交没有产生新记录时（与分支最新提交内容相同，或影片数据读写失败）服务器回传原因并弹窗提示。
 - **提交图**：横轴按影片分列，节点为提交、连线为父子关系，连线恒为暗灰色。默认分支固定在泳道带中央，其他分支从左右两侧交替展开，减少交叉。纵轴按时间自上而下排列，最旧在上、最新在下，视图默认吸附最新提交，翻看历史后滚回底部会重新吸附。影片当前分支线上的提交为实心并带高亮描边；其余（退回时保留的提交、影片未停留的分支）为空心灰字。未单独设色的提交（包括新建分支上的提交）默认使用界面主题色；手动设色或显式重置为灰色仍以服务器保存的颜色为准。当前提交所在行常驻淡主题色底与左侧色条，即使选中其他提交也能看出影片停在哪里。行样式、滚动条与滚轮行为与 BBS 列表一致。
 - **他人选中提交**：选中提交会同步给同一影片的其他玩家，行尾显示其头像（回放列表样式：10px 面部 + 1px 玩家色描边，最多 4 个，从右往左并排，自己的头像排最前）；文本和分支标签会为头像让出宽度，不会被遮挡；离开影片或断开时头像消失。提交图因数据刷新、他人提交或提交详情响应而重建时，自己的选中按影片 + 提交 id 恢复，不再跳回最新提交。
 - **当前提交位置**：每名玩家所在分支的头部提交常驻显示头像，不随选中/取消选中消失；自己和别人的当前位置都能看到。头像采用回放列表样式：10px 面部 + 1px 不透明玩家色描边。
 - **提交详情**：按 BBS 属性面板样式逐行列出提交 id、类型、分支、作者、时间，以及剪辑与关键帧的增删改统计和各段差异，内容多时可滚动。未选中提交时，此处改为显示编辑器影片相对当前分支头的未提交改动；仅在编辑内容实际变化时重建（最多每秒一次），避免大影片反复全量比较导致卡顿。影片未在编辑器中打开时会提示先打开。
 - **退回与合并**：右键**当前分支**的提交可选择「撤回至此提交」，弹窗提供「删除并退回」与「保留并退回」：前者删除该提交之后的提交，后者将这些提交保留在历史中；两种方式都以选中的提交为退回点。不同分支的提交不显示退回入口。另提供「合并到此提交」：把该提交至当前分支头之间的提交压缩为一个节点，影片内容保留当前分支头，适用于整理连续的小提交。压缩会重写这段历史，若区间被其他分支引用则拒绝执行并提示。
+- **提交重命名**：右键任意提交节点选择「重命名提交」，仅修改提交信息，不影响提交 id、父子关系或分支头。
 - **分支**：右键节点「从此处新建分支」；页签顶部显示当前分支；右键任意提交可直接「检出此提交所在分支」，也可在底部输入分支名检出。切换只把**该玩家**的影片内容切到目标分支头部，其他玩家留在各自分支。每名玩家在当前影片上的分支由服务器持久化，重进或重启后仍在原分支。
-- **多人分支隔离**：服务器为每部影片的每个分支保留独立工作副本，同一分支的玩家仍实时共享编辑，不同分支的玩家互不覆盖。提交只落在发起者当前分支上；主影片文件始终跟随影片的默认分支，供预览、影片列表和不感知分支的客户端使用。
-- **编辑页内的提交页**：影片编辑页「Properties」组新增「提交」小页签，自上而下为提交图、提交详情（或未提交改动）、提交信息与操作按钮。详情栏顶边为可拖动的分隔条，悬停显示上下箭头，双击复位为默认高度，拖动结果记入编辑器布局设置。
+- **多人分支隔离**：每个分支使用独立工作副本（`_<影片名>/_together/w/<分支哈希>.bin`），同分支实时共享，不同分支互不覆盖。提交只落在发起者当前分支；主影片 `<影片名>.dat` 始终跟随默认分支，分支数据随影片目录移动且不进入原版影片列表。
+- **标签页与打开速度**：同一影片仅保留一个页签，从影片列表再次打开时切换到已有页签；「影片节点」固定在最左侧。打开影片时服务端直接返回玩家所在分支，后续请求仅刷新分支名与提交图；最近打开的影片在客户端缓存，以便快速重开。
+- **编辑页内的提交页**：影片编辑页「Properties」组新增「提交」小页签，包含提交图、提交详情（或未提交改动）、提交信息与操作按钮。详情栏整条顶边可拖动，中央显示短线手柄，双击恢复默认高度，高度记入编辑器布局设置。「提交」dock 页首次默认与属性页合并，解锁布局后可拖动、调整大小或更换栏位。
 - **单个提交颜色**：右键提交节点选择「提交颜色」，用 BBS 调色盘取色。颜色由服务器随提交保存并广播，所有玩家看到同一套颜色，重启后仍然保留；旧版本留在本机 `config/bbs_together_commit_colors.json` 的颜色会在首次打开提交图时自动补传到服务器（需具备影片编辑权限）。
 - **服务端权威**：提交、退回、压缩与分支操作均由服务器落盘后广播，所有客户端同步刷新；切分支只修改发起者自己的玩家分支并只回传该分支内容。
 
@@ -111,7 +113,7 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 2. 把以下 jar 放入 `mods/` 文件夹：
    - Fabric API
    - BBS FS >= 2.6
-   - `together-link-1.7.7-1.20.1.jar`
+   - `together-link-1.7.8.1-1.20.1.jar`
 3. 服务端与所有客户端都需要安装相同版本的 BBS FS 与 Together Link。
 
 ### 开启多人协作
@@ -143,13 +145,14 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 
 ### 服务端
 - `src/main/java/mchorse/bbs_together/commits/FilmCommit.java`：一条提交（id、父提交、分支、信息、作者、时间、类型、颜色）。
-- `src/main/java/mchorse/bbs_together/commits/FilmCommitStore.java`：磁盘存档与提交图操作。目录 `<存档>/bbs/films/_commits/<影片>/`，`index.bin` 记分支、提交列表与各提交颜色，`s/` 存快照、`d/` 存差异；提供 `commit`、`list`、`diff`、`rollback`（退回保留/删除）、`squash`（压缩到指定提交）、`createBranch`、`rename`、`setColor`。
-- `src/main/java/mchorse/bbs_together/commits/FilmBranchStore.java`：每分支工作副本与玩家分支选择。`w/<分支哈希>.bin` 存该分支的未提交影片，`players.bin` 记每名玩家在此影片上的分支；默认分支与主影片文件 `<影片>.dat` 保持同步，其他分支不写主文件。
+- `src/main/java/mchorse/bbs_together/commits/FilmFolders.java`：统一计算每部影片的附属文件夹 `<影片目录>/_<影片名>/_together/`，并负责旧版 `<存档>/bbs/films/_commits/<影片>/` 的迁移、移动与清理。附属文件夹以 `_` 开头，BBS 的影片扫描会跳过它，原版只看到 `<影片名>.dat`。
+- `src/main/java/mchorse/bbs_together/commits/FilmCommitStore.java`：磁盘存档与提交图操作。`index.bin` 记分支、提交列表与各提交颜色，`s/` 存快照、`d/` 存差异；提供 `commit`、`list`、`diff`、`rollback`（退回保留/删除）、`squash`（压缩到指定提交）、`createBranch`、`rename`、`setColor`。提交时复用分支头快照缓存，避免同一次提交重复读取并解析整部影片。
+- `src/main/java/mchorse/bbs_together/commits/FilmBranchStore.java`：每分支工作副本与玩家分支选择。`w/<分支哈希>.bin` 存该分支的未提交影片，`players.bin` 记每名玩家在此影片上的分支；默认分支与主影片文件 `<影片>.dat` 保持同步，其他分支不写主文件。主文件读取改为直接复用已解析的 `Film`，未变化的保存会跳过重复写盘与 BBS 备份。
 - `src/main/java/mchorse/bbs_together/commits/FilmDiffBuilder.java`：按剪辑、关键帧、字段生成提交差异与统计，客户端复用同一份实现计算未提交改动。
 - `TogetherServerNetwork.java` 的提交处理器：校验权限、参数与影片锁，按玩家所在分支落盘后广播 `c_commits` / `c_commit_added` / `c_commit_index` / `c_commit_color` / `c_commit_rejected`，并写入行为日志。影片数据同步、保存和撤销也按分支过滤与落盘。
 
 ### 协议（`bbs_together` 命名空间）
-`c/s_commit_index`、`c/s_commits`、`c/s_commit_diff`、`c/s_commit_head`、`c/s_commit_create`、`c/s_commit_rename`、`c/s_commit_color`、`s_commit_selection`、`c_commit_selections`、`c_player_commit_positions`、`c_film_branch_state`、`c/s_commit_revert`（带 mode 字节）、`s_commit_squash`、`s_branch_create`、`s_branch_checkout`、`c_commit_added`、`c_commit_renamed`、`c_commit_color`、`c_commit_rejected`（带原因字节）。
+`c/s_commit_index`、`c/s_commits`、`c/s_commit_diff`、`c/s_commit_head`、`c/s_commit_create`、`c/s_commit_rename`、`c/s_commit_color`、`s_commit_selection`、`c_commit_selections`、`c_player_commit_positions`、`c_film_branch_state`、`c_film_branch`（只带影片与分支名，用于整部影片已先行送达时校准分支）、`c/s_commit_revert`（带 mode 字节）、`s_commit_squash`、`s_branch_create`、`s_branch_checkout`、`c_commit_added`、`c_commit_renamed`、`c_commit_color`、`c_commit_rejected`（带原因字节）。
 
 分支隔离附加字段：`c_film_saved_sync` 与 `c_film_data_sync` 带 `branch`，客户端丢弃非当前分支的包；`c_commits` 带收件人的当前分支，用于覆盖图里的 `current`；`s_branch_checkout` 只切换发起者自己的分支并只向他回传该分支的完整影片。
 
@@ -165,18 +168,38 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - `ui/commits/UICommitRollbackOverlay.java`：退回确认弹窗，提供「删除并退回」与「保留并退回」。
 - `ui/commits/CommitColors.java`：旧版本保存在 `config/bbs_together_commit_colors.json` 的本地颜色，作为服务器颜色未知时的回退；服务器颜色变化会镜像回该文件，旧颜色首次同步时补传。
 
-### 提交页相关注入（4 个 mixin，共 8 处；1.7.7 未新增）
-- 提交页只使用 4 个轻量注入，分别负责挂载 dock 页、顶栏图标、伪数据页签 id 与页签文字；分支隔离、提交同步、退回/压缩、头像和颜色全部走普通网络包与现有 UI API，**1.7.7 没有新增任何 mixin**。
-- 每秒活动时间过滤集中在 `TogetherEditSyncQueue.add`，未为此新增注入。
-- `mixin/UIFilmPanelCommitsMixin.java`：在影片编辑页挂上「提交」dock 页、顶栏图标和「影片节点」页签内容。
+### 提交页相关注入
+- `mixin/UIFilmPanelCommitsMixin.java`：在影片编辑页挂上「提交」dock 页、顶栏图标和「影片节点」页签内容；「提交」首次并入属性页栈，后续遵循用户布局；「影片节点」固定在页签条最左侧。
 - `mixin/UIPanelTopBarCommitsMixin.java`：页签条为顶栏图标让出位置。
 - `mixin/UIDataDashboardPanelCommitsMixin.java`：让影片编辑页的 `showTab` / `getOpenId` / `saveOpen` 认这个伪数据 id。
-- `mixin/UITabListCommitsMixin.java`：伪数据 id 的页签文字。
-- 这些注入收在 `src/client/resources/bbs-together.client.mixins.json` 的 client 列表里；其他现有 mixin 属于此前的 BBS 兼容层，本次未改动。
+- `mixin/UITabListCommitsMixin.java`：伪数据 id 的页签文字；同一影片只复用一个页签；打开影片时若「影片节点」页签处于激活状态则另开页签而不是替换它。
+- `mixin/FilmRepositoryMixin.java`：客户端影片缓存命中时立即打开编辑器，随后仍由服务器分支状态包校准。
+- `mixin/FilmLoadQuietMixin.java`（服务端）：把管理器 LOAD/SAVE 按玩家所在分支落盘，避免重复传输整部影片，并防止编辑侧分支覆盖默认分支主文件。
+- 每秒活动时间过滤集中在 `TogetherEditSyncQueue.add`，未为此新增注入。
+- 其他注入收在 `src/client/resources/bbs-together.client.mixins.json` 与 `src/main/resources/bbs-together.mixins.json` 的列表中，属于此前已有的 BBS 兼容层。
 
 ---
 
 ## 更新日志
+
+### v1.7.8.1
+- 同一部影片只保留一个标签页；从影片列表再次打开时切换到已有页签，并清理重复页签
+- 从空白「新建标签页」切回影片时，临时页签自动关闭
+- 「影片节点」页签固定在页签条最左侧，打开影片不会替换该页签
+- 修复关闭页签时错误复用被关闭文档 id 的问题：关闭「影片节点」不再误关影片页签，关闭影片页签也不会重新打开它或吞掉相邻页签
+- 「提交」dock 页首次加载时仍默认合并到属性页栈；解锁布局后可拖动、调整大小或更换栏位，布局刷新不再强制拉回
+- 提交详情栏支持整条上边缘拖动，手柄显示为居中短线，双击恢复默认高度
+- 提交图所有节点新增右键「重命名提交」
+- 提交图可列出尚未迁移的旧版 `_commits` 历史，并在读取时完成迁移
+
+### v1.7.8
+- 打开影片时，服务端管理器 LOAD 直接返回玩家所在分支，避免默认分支与分支状态的重复传输
+- 影片选中与加入请求在整部影片刚送达的短窗口内仅刷新分支名和提交图
+- 客户端缓存最近打开的影片；多人模式下再次打开可立即显示，并由服务端数据校准
+- 分支与提交数据迁移到影片自己的 `_<影片名>/_together/` 目录，随影片目录移动，且不进入原版影片列表
+- 旧版 `<存档>/bbs/films/_commits/<影片>/` 数据在首次访问时自动迁移
+- 服务端管理器 SAVE 按玩家分支落盘，避免非默认分支覆盖主影片文件
+- 提交复用分支头快照缓存；工作副本未变化时跳过重复写盘和 BBS 备份
 
 ### v1.7.7
 - 提交退回改为同分支操作：「撤回至此提交」只在提交所在分支与玩家当前分支一致时显示；跨分支提交不再提供退回入口，服务端同步增加校验

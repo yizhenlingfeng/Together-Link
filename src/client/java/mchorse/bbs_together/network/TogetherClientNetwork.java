@@ -112,6 +112,22 @@ public class TogetherClientNetwork {
     public static final ConcurrentHashMap<UUID, String> playersInFilmScreen = new ConcurrentHashMap();
     /** Film id -> branch this client currently holds for it (server-driven). */
     private static final ConcurrentHashMap<String, String> filmBranches = new ConcurrentHashMap<>();
+    /**
+     * Last complete film received for a few recently opened films, keyed by film id. Opening a
+     * film again (even after closing it) can then show the editor immediately while the server
+     * refresh runs, instead of blocking on a full network round trip.
+     */
+    private static final int FILM_CACHE_LIMIT = 8;
+    /** Set while {@code FilmRepository} fills the editor from the cache, so it is not re-serialized. */
+    private static final ThreadLocal<String> cachedFilmLoad = new ThreadLocal<String>();
+    private static final LinkedHashMap<String, CachedFilm> filmCache = new LinkedHashMap<String, CachedFilm>(16, 0.75F, true)
+    {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, CachedFilm> eldest)
+        {
+            return this.size() > FILM_CACHE_LIMIT;
+        }
+    };
     /** Film id -> player -> commit id currently selected in that film's graph. */
     private static final ConcurrentHashMap<String, ConcurrentHashMap<UUID, String>> commitSelections = new ConcurrentHashMap<>();
     /** Film id -> player -> commit id where that player's branch currently sits. */
@@ -411,6 +427,17 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_HINT, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetHintPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH_STATE, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmBranchStatePacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH, (client, handler, buf, resp) ->
+        {
+            String filmId = buf.readString();
+            String branch = buf.readString(FilmCommit.MAX_BRANCH * 2);
+
+            client.execute(() ->
+            {
+                TogetherClientNetwork.setFilmBranch(filmId, branch);
+                TogetherClientNetwork.updateCachedFilmBranch(filmId, branch);
+            });
+        });
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SAVED_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSavedSyncPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DATA_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleFilmDataSyncPacket(client, (byte[])bytes, packetByteBuf)));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_UNDO_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleUndoRejectedPacket(client, (byte[])bytes)));
@@ -451,6 +478,11 @@ public class TogetherClientNetwork {
         playerCursors.clear();
         filmSelections.clear();
         filmBranches.clear();
+        synchronized (filmCache)
+        {
+            filmCache.clear();
+        }
+        cachedFilmLoad.remove();
         commitSelections.clear();
         playerCommitPositions.clear();
         pendingBranchCheckouts.clear();
@@ -546,6 +578,123 @@ public class TogetherClientNetwork {
     public static String filmBranch(String filmId) {
         String branch = filmId == null ? null : filmBranches.get(filmId);
         return branch == null ? "" : branch;
+    }
+
+    /** One complete film received from the server, together with the branch it belongs to. */
+    private static final class CachedFilm
+    {
+        String branch;
+        final MapType data;
+
+        CachedFilm(String branch, MapType data)
+        {
+            this.branch = branch == null ? "" : branch;
+            this.data = data;
+        }
+    }
+
+    /**
+     * Remember a complete film copy. The data comes straight from a network packet and is not
+     * mutated afterwards; the bounded map keeps at most {@link #FILM_CACHE_LIMIT} films.
+     */
+    public static void cacheFilmData(String filmId, String branch, BaseType data)
+    {
+        if (filmId == null || filmId.isEmpty() || data == null || !data.isMap()
+            || MinecraftClient.getInstance().isIntegratedServerRunning())
+        {
+            return;
+        }
+
+        synchronized (filmCache)
+        {
+            filmCache.put(filmId, new CachedFilm(branch, data.asMap()));
+        }
+    }
+
+    public static void beginCachedFilmLoad(String filmId)
+    {
+        cachedFilmLoad.set(filmId);
+    }
+
+    public static void endCachedFilmLoad()
+    {
+        cachedFilmLoad.remove();
+    }
+
+    /** Whether {@code fill} is being called for a film that came from the cache. */
+    public static boolean isCachedFilmLoad(String filmId)
+    {
+        return filmId != null && filmId.equals(cachedFilmLoad.get());
+    }
+
+    /** A cached film for {@code filmId}, or null when this branch has no cached copy. */
+    public static MapType cachedFilmData(String filmId)
+    {
+        if (filmId == null || filmId.isEmpty())
+        {
+            return null;
+        }
+
+        synchronized (filmCache)
+        {
+            CachedFilm cached = filmCache.get(filmId);
+
+            if (cached == null)
+            {
+                return null;
+            }
+
+            String known = filmBranch(filmId);
+
+            /* Do not guess a branch: after a reconnect the branch is unknown until the server
+             * says which one this player is on, and showing another branch's cached film would
+             * be worse than waiting for the authoritative copy. */
+            if (known.isEmpty() || !known.equals(cached.branch))
+            {
+                return null;
+            }
+
+            return cached.data;
+        }
+    }
+
+    private static void updateCachedFilmBranch(String filmId, String branch)
+    {
+        synchronized (filmCache)
+        {
+            CachedFilm cached = filmCache.get(filmId);
+
+            if (cached != null && (cached.branch.isEmpty() || cached.branch.equals(branch)))
+            {
+                cached.branch = branch == null ? "" : branch;
+            }
+        }
+    }
+
+    private static void evictCachedFilm(String filmId)
+    {
+        synchronized (filmCache)
+        {
+            filmCache.remove(filmId);
+        }
+    }
+
+    private static void renameCachedFilm(String oldId, String newId)
+    {
+        if (oldId == null || newId == null || oldId.equals(newId))
+        {
+            return;
+        }
+
+        synchronized (filmCache)
+        {
+            CachedFilm cached = filmCache.remove(oldId);
+
+            if (cached != null)
+            {
+                filmCache.put(newId, cached);
+            }
+        }
     }
 
     private static void setFilmBranch(String filmId, String branch) {
@@ -2358,7 +2507,17 @@ public class TogetherClientNetwork {
             setFilmBranch(filmId, branch);
         }
 
-        applyFullFilmPacket(filmId, data, true);
+        /* A cache hit already put exactly this film on screen; reassigning the whole Film and
+         * rebuilding its entities is the expensive part of opening, so skip it when the
+         * authoritative copy did not actually change. */
+        MapType cached = cachedFilmData(filmId);
+        boolean unchanged = cached != null && BaseType.equals(cached, data);
+
+        cacheFilmData(filmId, branch, data);
+
+        if (!unchanged) {
+            applyFullFilmPacket(filmId, data, true);
+        }
     }
 
     private static void handleFilmSavedSyncPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -2398,6 +2557,7 @@ public class TogetherClientNetwork {
             setFilmBranch(filmId, branch);
         }
 
+        cacheFilmData(filmId, branch == null || branch.isEmpty() ? filmBranch(filmId) : branch, data);
         applyFullFilmPacket(filmId, data, branchChange);
     }
 
@@ -2496,6 +2656,7 @@ public class TogetherClientNetwork {
             catch (Exception exception) {
             }
             filmBranches.remove(filmId);
+            evictCachedFilm(filmId);
             commitSelections.remove(filmId);
             playerCommitPositions.remove(filmId);
             UIDashboard dashboard = TogetherClientNetwork.getDashboardIfOpen();
@@ -2521,6 +2682,7 @@ public class TogetherClientNetwork {
             if (branch != null) {
                 filmBranches.put(newId, branch);
             }
+            renameCachedFilm(oldId, newId);
             ConcurrentHashMap<UUID, String> oldSelections = commitSelections.remove(oldId);
             if (oldSelections != null) {
                 commitSelections.put(newId, oldSelections);

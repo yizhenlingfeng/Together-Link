@@ -17,6 +17,7 @@ import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.Direction;
 import mchorse.bbs_together.ui.commits.CommitUi;
 import mchorse.bbs_together.ui.commits.ICommitsTabHost;
+import mchorse.bbs_together.ui.commits.ITabListLayout;
 import mchorse.bbs_together.ui.commits.UICommitsPanel;
 import mchorse.bbs_together.ui.commits.UIFilmCommitsView;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,19 +29,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
  * Wires the commit graph into the film editor in the two places the graph belongs:
  *
  * <ul>
- *     <li>a dock panel, stacked with the properties panel, that shows the commits of the film which
- *     is currently open in the editor;</li>
+ *     <li>a dock panel, initially stacked with the Properties panel, that shows the commits of
+ *     the film currently open in the editor and can be repositioned once the layout is unlocked;</li>
  *     <li>a dashboard-style tab of the film editor itself, next to the film tabs, that shows the
- *     commits of every film — opened by the button at the left of the top bar and by the landing
- *     menu. It replaces the editor content while it is the active tab, and the film tabs stay
- *     visible, so switching between a film and its history is the same gesture.</li>
+ *     commits of every film. It replaces the editor content while active while the film tabs stay
+ *     visible.</li>
  * </ul>
  */
 @Mixin(UIFilmPanel.class)
@@ -75,10 +74,10 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
     }
 
     /**
-     * Keeps the commit view as the second tab of the editor group ("Properties", i.e. editArea),
-     * and pulls it out of any older saved layout that placed it elsewhere. The active tab is only
-     * set when the stack is built, never on later passes: forcing it every time would make the tab
-     * impossible to open, because the next layout build would switch it straight back.
+     * Adds the commit view next to the editor group ("Properties", i.e. editArea) the first time
+     * a layout without it is loaded. Once it is anywhere in the layout it is left alone: the dock
+     * lock can be turned off and the user can drag the commit pane out of the stack, resize it or
+     * place it in another column without this callback pulling it back on the next layout pass.
      */
     @Unique
     private EditorLayoutNode bbs$ensureCommitsStack(EditorLayoutNode root)
@@ -88,44 +87,14 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
 
         EditorLayoutNode.collectPanelIds(out, ids);
 
-        if (!ids.contains("editArea"))
+        if (!ids.contains("editArea") || ids.contains(CommitUi.DOCK_PANEL_ID))
         {
             return out;
-        }
-
-        if (ids.contains(CommitUi.DOCK_PANEL_ID))
-        {
-            if (this.bbs$stackedWithEditor(out))
-            {
-                return out;
-            }
-
-            out = EditorLayoutNode.copyWithRemovedPanel(out, CommitUi.DOCK_PANEL_ID);
         }
 
         EditorLayoutNode stacked = EditorLayoutNode.copyWithInsertStackAt(out, "editArea", CommitUi.DOCK_PANEL_ID);
 
         return EditorLayoutNode.copyWithStackActivePanel(stacked, CommitUi.DOCK_PANEL_ID, "editArea");
-    }
-
-    @Unique
-    private boolean bbs$stackedWithEditor(EditorLayoutNode node)
-    {
-        if (node instanceof EditorLayoutNode.StackNode)
-        {
-            List<String> panels = ((EditorLayoutNode.StackNode) node).getPanelIds();
-
-            return panels.contains("editArea") && panels.contains(CommitUi.DOCK_PANEL_ID);
-        }
-
-        if (node instanceof EditorLayoutNode.SplitterNode)
-        {
-            EditorLayoutNode.SplitterNode splitter = (EditorLayoutNode.SplitterNode) node;
-
-            return this.bbs$stackedWithEditor(splitter.getFirst()) || this.bbs$stackedWithEditor(splitter.getSecond());
-        }
-
-        return false;
     }
 
     /* Top bar button and the commits page, created once the panel is fully built */
@@ -159,7 +128,18 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
     @Override
     public boolean bbs$isCommitsTabActive()
     {
-        return this.bbs$commitsTab && this.bbs$commitsPage != null;
+        if (this.bbs$commitsPage == null)
+        {
+            return false;
+        }
+
+        /* Follow the tab that is current *right now*, not the stale visibility flag: during
+         * closeTab() the tab list has already removed a tab but openTab() has not run yet.
+         * After closing the commits tab this is the film id (don't write the pseudo id into the
+         * film tab); after closing the last film tab it is the commits id (keep it as commits). */
+        UIEditorDashboardPanel editor = (UIEditorDashboardPanel) (Object) this;
+
+        return CommitUi.isCommitsTab(editor.tabs.getCurrentId());
     }
 
     @Override
@@ -277,6 +257,9 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
             tabs.addTab();
             tabs.setOpenId(CommitUi.TAB_ID);
         }
+
+        /* Keep the commit page where its top-bar icon was: the leftmost tab. */
+        ((ITabListLayout) tabs).bbs$moveTabToFront(CommitUi.TAB_ID);
 
         this.bbs$showCommitsTab();
         this.bbs$refreshTopButton();

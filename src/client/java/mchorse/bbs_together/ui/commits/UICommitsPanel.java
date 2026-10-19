@@ -51,10 +51,13 @@ public class UICommitsPanel extends UIDashboardPanel
         this.refresh = new UIIcon(Icons.REFRESH, (b) -> this.requestAll());
 
         this.leftHandle = UISplitter.pixels("bbs_together.commits.left", 190, MIN_SIDE, MAX_SIDE);
+        /* The details pane is measured from its bottom edge: dragging its top edge up makes
+         * it taller, which is what the user expects from a bottom sheet. */
         this.bottomHandle = UISplitter.pixels("bbs_together.commits.bottom", 150, MIN_BOTTOM, MAX_BOTTOM).vertical().fromEnd();
 
         this.leftHandle.measure(this).onChange(this::layout).range(MIN_SIDE, () -> (float) Math.max(MIN_SIDE, this.area.w - MIN_SIDE));
-        this.bottomHandle.measure(this).onChange(this::layout).range(MIN_BOTTOM, () -> (float) Math.max(MIN_BOTTOM, this.area.h - BAR_HEIGHT - 80));
+        this.bottomHandle.measure(this.info).onChange(this::layout).range(MIN_BOTTOM, () -> (float) Math.max(MIN_BOTTOM, this.area.h - BAR_HEIGHT - 80));
+        CommitUi.styleSplitter(this.bottomHandle);
 
         this.graph.listener = (node) -> this.info.show(this.graph.actionFilm(), node);
         this.graph.context(this::fillGraphMenu);
@@ -67,7 +70,8 @@ public class UICommitsPanel extends UIDashboardPanel
         this.refresh.relative(this).x(2).y(2).wh(16, 16);
 
         this.leftHandle.relative(this.films).x(1F).y(0.5F).w(6).h(40).anchor(0.5F, 0.5F);
-        this.bottomHandle.relative(this.graph).x(0.5F).y(1F).w(40).h(6).anchor(0.5F, 0.5F);
+        /* Span the whole top edge of the details pane, not just a 40 px grip in the middle. */
+        this.bottomHandle.relative(this.info).x(0).y(0).w(1F).h(8).anchor(0F, 0.5F);
 
         this.add(this.films, this.graph, this.info, this.refresh, this.leftHandle, this.bottomHandle);
     }
@@ -108,6 +112,10 @@ public class UICommitsPanel extends UIDashboardPanel
 
         final String filmId = node.filmId;
         final String commitId = node.commit.id;
+
+        /* Every node, including commits on other branches, can have its message edited. */
+        menu.action(Icons.EDIT, L10n.lang("bbs_together.commits.rename").format(node.commit.shortId()),
+            () -> CommitUi.renameCommit(context, filmId, commitId));
 
         if (CommitUi.canRevert(node))
         {

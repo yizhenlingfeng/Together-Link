@@ -8,11 +8,14 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.FilmManager;
 import mchorse.bbs_mod.network.ServerNetwork;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
+import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.utils.PermissionUtils;
 import mchorse.bbs_mod.utils.repos.RepositoryOperation;
 import mchorse.bbs_together.behaviors.ModelBlockTracker;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
+import mchorse.bbs_together.network.FilmLoadContext;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -26,7 +29,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * All ServerNetwork injections in one class: the level-0 hard stop, the model-block
- * tracker arming and the null-film load fix.
+ * tracker arming and the film-load player context.
  *
  * <p>These handlers already gate on {@code PermissionUtils.arePanelsAllowed} (global gamerule /
  * OP), but a level-0 player must be refused even when the gamerule opens editing to everyone.
@@ -45,6 +48,23 @@ public class ServerNetworkBbsOpMixin
 {
     @Shadow(remap = false)
     private static ServerPacketCrusher crusher;
+
+    /** BBS 2.6's manager-data LOAD calls {@code toData()} without a null check. */
+    private static final boolean BBS_26 = FabricLoader.getInstance().getModContainer("bbs")
+        .map((container) -> container.getMetadata().getVersion().getFriendlyString().startsWith("2.6"))
+        .orElse(false);
+
+    @Inject(method = "handleManagerDataPacket", at = @At("HEAD"), remap = false)
+    private static void bbs$rememberFilmLoadPlayer(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
+    {
+        FilmLoadContext.set(player);
+    }
+
+    @Inject(method = "handleManagerDataPacket", at = @At("RETURN"), remap = false)
+    private static void bbs$forgetFilmLoadPlayer(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
+    {
+        FilmLoadContext.clear();
+    }
 
     @Inject(method = "handleModelBlockFormPacket", at = @At("HEAD"))
     private static void together$armModelBlockTracker(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf, CallbackInfo ci)
@@ -129,6 +149,7 @@ public class ServerNetworkBbsOpMixin
                     ServerNetwork.sendManagerData(player, callbackId, op, film == null ? new ByteType(false) : film.toData());
                     break;
                 }
+
                 case KEYS:
                 {
                     ServerNetwork.sendManagerData(player, callbackId, op, DataStorageUtils.stringListToData(films.getKeys()));
@@ -146,15 +167,27 @@ public class ServerNetworkBbsOpMixin
     }
 
     /**
-     * Fix BBS 2.6 bug: ServerNetwork.handleManagerDataPacket calls film.toData()
-     * without null check when loading a non-existent film, causing player disconnect.
-     * require=0: soft-fail if another mod redirects the same call.
+     * BBS 2.6 calls {@code film.toData()} on a manager LOAD without checking for a missing
+     * film, which disconnects the player. 2.7 already handles null (and sends the explicit
+     * "does not exist" response), so substitute an empty film only on 2.6. The target is the
+     * lambda that holds the manager-data switch; both 2.6 and 2.7 compile it to the same name.
      */
-    @Redirect(method={"handleManagerDataPacket"}, at=@At(value="INVOKE", target="Lmchorse/bbs_mod/film/FilmManager;load(Ljava/lang/String;)Lmchorse/bbs_mod/film/Film;", remap=false), remap=false, require=0)
-    private Film together_safeLoadFilm(FilmManager films, String id)
+    @Redirect(
+        method = "lambda$handleManagerDataPacket$24",
+        at = @At(value = "INVOKE", target = "Lmchorse/bbs_mod/film/FilmManager;load(Ljava/lang/String;)Lmchorse/bbs_mod/settings/values/core/ValueGroup;"),
+        require = 0,
+        remap = false
+    )
+    private static ValueGroup together$nullFilmFix(FilmManager films, String id)
     {
-        Film film = films.load(id);
+        ValueGroup film = films.load(id);
 
-        return film == null ? new Film() : film;
+        if (film == null && BBS_26)
+        {
+            return new Film();
+        }
+
+        return film;
     }
+
 }

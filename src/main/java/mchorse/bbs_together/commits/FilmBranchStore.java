@@ -2,6 +2,7 @@ package mchorse.bbs_together.commits;
 
 import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.data.DataStorageUtils;
+import mchorse.bbs_mod.data.migration.SaveVersion;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
@@ -12,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -21,10 +23,10 @@ import java.util.UUID;
  *
  * <p>Before this class there was one film file and one "current branch" for the whole server:
  * checking a branch out replaced the film for everybody. Now every branch gets its own working
- * copy under {@code <films>/_commits/<film>/w/}, so two players can edit two branches of the same
- * film at the same time. The main BBS film file follows the film's <b>default</b> branch only
- * (the branch {@link FilmCommitStore.Store#current} points at); other branches live here and are
- * never written into the main file.</p>
+ * copy under the film's own sidecar folder ({@code _<film>/_together/w/}), so two players can
+ * edit two branches of the same film at the same time. The main BBS film file follows the film's
+ * <b>default</b> branch only (the branch {@link FilmCommitStore.Store#current} points at); other
+ * branches live here and are never written into the main file.</p>
  *
  * <p>The branch a player is on is stored per film in {@code players.bin}, so a player returns to
  * the same branch after a reconnect or a server restart.</p>
@@ -43,6 +45,12 @@ public final class FilmBranchStore
     private static final Map<String, Map<String, Film>> WORKING = new HashMap<>();
     /** filmId -> player -> branch. */
     private static final Map<String, Map<UUID, String>> PLAYER_BRANCHES = new HashMap<>();
+    /**
+     * SHA-256 of the last bytes written for one branch. The server debounces edits into periodic
+     * saves; without this check an unchanged film is still gzip-compressed into the workspace and
+     * copied into a BBS backup every few seconds. Only the 32-byte digest is kept.
+     */
+    private static final Map<String, byte[]> LAST_SAVED = new HashMap<>();
 
     private FilmBranchStore()
     {}
@@ -153,7 +161,7 @@ public final class FilmBranchStore
 
         players = new HashMap<UUID, String>();
 
-        File folder = commitFolder(filmId);
+        File folder = FilmFolders.togetherFolder(filmId);
         File file = folder == null ? null : new File(folder, PLAYERS);
 
         if (file != null && file.isFile())
@@ -190,7 +198,7 @@ public final class FilmBranchStore
     {
         try
         {
-            File folder = commitFolder(filmId);
+            File folder = FilmFolders.togetherFolder(filmId);
 
             if (folder == null)
             {
@@ -232,7 +240,8 @@ public final class FilmBranchStore
 
         /* Default branch: the main .dat and w/<hash>.bin mirror each other. Prefer whichever
          * was written last, so an out-of-band BBS save or a crash between the two writes does
-         * not resurrect stale data. */
+         * not resurrect stale data. Loading the .dat directly avoids parsing it a second time
+         * just to serialize it again through initialData(). */
         if (actual.equals(defaultBranch(filmId)))
         {
             File mainFile = BBSMod.getFilms().getFile(filmId);
@@ -242,11 +251,11 @@ public final class FilmBranchStore
                 && (workspaceFile == null || !workspaceFile.isFile()
                 || mainFile.lastModified() > workspaceFile.lastModified()))
             {
-                MapType initial = initialData(filmId, actual);
+                film = BBSMod.getFilms().load(filmId);
 
-                if (initial != null)
+                if (film != null)
                 {
-                    film = createFrom(filmId, actual, initial);
+                    film.setId(filmId);
                 }
             }
         }
@@ -343,18 +352,32 @@ public final class FilmBranchStore
 
             MapType data = (MapType) film.toData();
 
-            writeAtomic(new File(folder, branchKey(actual) + EXTENSION), DataStorageUtils.writeToBytes(data));
+            /* Stamp before hashing so the bytes match what BBS writes. */
+            SaveVersion.stamp(data);
+
+            byte[] bytes = DataStorageUtils.writeToBytes(data);
+            byte[] digest = digest(bytes);
+            String savedKey = workspaceKey(filmId, actual);
+
+            if (Arrays.equals(LAST_SAVED.get(savedKey), digest))
+            {
+                return;
+            }
+
+            writeAtomic(new File(folder, branchKey(actual) + EXTENSION), bytes);
 
             /* The main BBS file mirrors the default branch. Keeping this in one place means
              * every caller (debounced edit, commit, rollback, recording, shutdown) updates
              * both copies. */
             if (isDefault(filmId, actual))
             {
+                boolean saved = false;
+
                 for (int attempt = 0; ; attempt++)
                 {
                     try
                     {
-                        BBSMod.getFilms().save(filmId, data);
+                        saved = BBSMod.getFilms().save(filmId, data);
                         break;
                     }
                     catch (Exception e)
@@ -376,7 +399,15 @@ public final class FilmBranchStore
                         }
                     }
                 }
+
+                if (!saved)
+                {
+                    /* Keep LAST_SAVED unset so the next debounced save retries the main file. */
+                    return;
+                }
             }
+
+            LAST_SAVED.put(savedKey, digest);
         }
         catch (Exception e)
         {
@@ -408,6 +439,7 @@ public final class FilmBranchStore
     {
         WORKING.clear();
         PLAYER_BRANCHES.clear();
+        LAST_SAVED.clear();
     }
 
     /** Remove one film's branch data cache (film deleted; the folder is removed by FilmCommitStore). */
@@ -415,6 +447,10 @@ public final class FilmBranchStore
     {
         WORKING.remove(filmId);
         PLAYER_BRANCHES.remove(filmId);
+
+        String prefix = filmId + '\t';
+
+        LAST_SAVED.keySet().removeIf((key) -> key.startsWith(prefix));
     }
 
     /** Move the caches when BBS renames a film; the folder itself is moved by FilmCommitStore. */
@@ -438,6 +474,28 @@ public final class FilmBranchStore
         {
             PLAYER_BRANCHES.put(newId, players);
         }
+
+        String oldPrefix = oldId + '\t';
+        String newPrefix = newId + '\t';
+        Map<String, byte[]> moved = new HashMap<>();
+
+        LAST_SAVED.keySet().removeIf((key) ->
+        {
+            if (key.startsWith(oldPrefix))
+            {
+                moved.put(newPrefix + key.substring(oldPrefix.length()), LAST_SAVED.get(key));
+
+                return true;
+            }
+
+            return false;
+        });
+        LAST_SAVED.putAll(moved);
+    }
+
+    private static String workspaceKey(String filmId, String branch)
+    {
+        return filmId + '\t' + branchKey(branch);
     }
 
     private static String normalize(String filmId, String branch)
@@ -534,30 +592,32 @@ public final class FilmBranchStore
 
     /* Files */
 
-    private static File commitFolder(String filmId)
+    private static File workspaceFolder(String filmId)
+    {
+        File folder = FilmFolders.togetherFolder(filmId);
+
+        return folder == null ? null : new File(folder, WORKSPACES);
+    }
+
+    /** Digest of a serialized working copy; only the 32-byte hash is kept in {@link #LAST_SAVED}. */
+    private static byte[] digest(byte[] bytes)
     {
         try
         {
-            File folder = BBSMod.getFilms().getFolder();
-
-            if (folder == null)
-            {
-                return null;
-            }
-
-            return new File(new File(folder, "_commits"), filmId.replace('/', File.separatorChar));
+            return MessageDigest.getInstance("SHA-256").digest(bytes);
         }
         catch (Exception e)
         {
-            return null;
+            byte[] fallback = new byte[4];
+            int hash = Arrays.hashCode(bytes);
+
+            fallback[0] = (byte) (hash >>> 24);
+            fallback[1] = (byte) (hash >>> 16);
+            fallback[2] = (byte) (hash >>> 8);
+            fallback[3] = (byte) hash;
+
+            return fallback;
         }
-    }
-
-    private static File workspaceFolder(String filmId)
-    {
-        File folder = commitFolder(filmId);
-
-        return folder == null ? null : new File(folder, WORKSPACES);
     }
 
     private static String branchKey(String branch)

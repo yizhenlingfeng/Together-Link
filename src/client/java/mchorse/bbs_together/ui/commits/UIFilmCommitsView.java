@@ -48,7 +48,9 @@ public class UIFilmCommitsView extends UIElement
         this.infoHandle = UISplitter.pixels("bbs_together.commits.info", INFO_H, MIN_INFO_H, 800).vertical().fromEnd();
         this.infoHandle.measure(this.info).onChange(this::layouts);
         this.infoHandle.range(MIN_INFO_H, () -> (float) Math.max(MIN_INFO_H, this.area.h - this.actionsHeight() - MIN_GRAPH_H));
-        this.infoHandle.relative(this.info).x(0.5F).y(0).w(40).h(6).anchor(0.5F, 0.5F);
+        /* The whole top edge is the grip, but only a short line in the middle is painted. */
+        this.infoHandle.relative(this.info).x(0).y(0).w(1F).h(8).anchor(0F, 0.5F);
+        CommitUi.styleSplitter(this.infoHandle);
 
         this.graph.listener = (node) -> {
             this.info.show(this.filmId.get(), node);
@@ -120,6 +122,10 @@ public class UIFilmCommitsView extends UIElement
         {
             return;
         }
+
+        /* Every node, including commits on other branches, can have its message edited. */
+        menu.action(Icons.EDIT, L10n.lang("bbs_together.commits.rename").format(node.commit.shortId()),
+            () -> CommitUi.renameCommit(context, node.filmId, node.commit.id));
 
         if (CommitUi.canRevert(node))
         {

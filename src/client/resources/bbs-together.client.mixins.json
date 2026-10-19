@@ -40,7 +40,8 @@
         "UIFilmPanelCommitsMixin",
         "UIPanelTopBarCommitsMixin",
         "UIDataDashboardPanelCommitsMixin",
-        "UITabListCommitsMixin"
+        "UITabListCommitsMixin",
+        "FilmRepositoryMixin"
     ],
     "injectors": {
         "defaultRequire": 1

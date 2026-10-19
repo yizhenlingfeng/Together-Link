@@ -80,6 +80,25 @@ public class UIFilmPanelMixin {
     @Unique
     private String together_fs2LastJoinFilmId = "";
 
+    /**
+     * Keep a copy of the complete film the editor just received. Opening the same film again
+     * can then be instant (see {@code FilmRepositoryMixin}); the server refresh still runs.
+     */
+    @Inject(method={"fill"}, at={@At(value="TAIL")}, remap=false)
+    private void together_cacheFilm(Film film, CallbackInfo ci) {
+        if (film == null || !TogetherClientNetwork.isConnected() || MinecraftClient.getInstance().isIntegratedServerRunning()) {
+            return;
+        }
+        String id = film.getId();
+        if (id == null || id.isEmpty() || TogetherClientNetwork.isCachedFilmLoad(id)) {
+            return;
+        }
+        BaseType data = film.toData();
+        if (data instanceof MapType) {
+            TogetherClientNetwork.cacheFilmData(id, TogetherClientNetwork.filmBranch(id), data);
+        }
+    }
+
     @Inject(method={"fillData"}, at={@At(value="TAIL")}, remap=false)
     private void onFillData(CallbackInfo ci) {
         int idx;

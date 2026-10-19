@@ -99,6 +99,8 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_FILM_SCREENS = new Identifier("bbs_together", "c_film_screens");
     public static final Identifier CLIENT_MERGE_REPLAYS = new Identifier("bbs_together", "c_merge_replays");
     public static final Identifier CLIENT_FILM_BRANCH_STATE = new Identifier("bbs_together", "c_film_branch_state");
+    /** Tiny packet that only names the branch, used when the full branch data was already sent. */
+    public static final Identifier CLIENT_FILM_BRANCH = new Identifier("bbs_together", "c_film_branch");
     public static final Identifier CLIENT_FILM_SAVED_SYNC = new Identifier("bbs_together", "c_film_saved_sync");
     public static final Identifier SERVER_UNDO_SYNC = new Identifier("bbs_together", "s_undo_sync");
     public static final Identifier CLIENT_UNDO_REJECTED = new Identifier("bbs_together", "c_undo_rejected");
@@ -175,6 +177,7 @@ public class TogetherServerNetwork {
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, String> lastBranchStateSent = new ConcurrentHashMap();
+    private static final ConcurrentHashMap<UUID, Long> lastBranchStateAt = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, String> playerInFilmScreen = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Integer> playerColors = new ConcurrentHashMap();
     private static final Set<String> deletedFilmIds = Collections.synchronizedSet(new HashSet());
@@ -202,6 +205,13 @@ public class TogetherServerNetwork {
     private static final long FILM_SAVE_DELAY_MS = 5000L;
     /** Continuous editing must not delay persisting forever. */
     private static final long FILM_SAVE_MAX_MS = 15000L;
+    /**
+     * How long a full branch state counts as already delivered. Opening a film does three
+     * requests in quick succession (BBS' manager load, the film selection and the join request);
+     * only the first one needs to carry the whole film. The window is short enough that a real
+     * re-enter later still resynchronizes from disk.
+     */
+    private static final long BRANCH_DATA_FRESH_MS = 3000L;
     private static final ConcurrentHashMap<String, HashCacheEntry> assetHashCache = new ConcurrentHashMap();
     private static final AtomicLong assetBytesSent = new AtomicLong();
     private static final AtomicLong assetTasksSent = new AtomicLong();
@@ -265,10 +275,53 @@ public class TogetherServerNetwork {
         String branch = FilmBranchStore.branchOf(filmId, player.getUuid());
         MapType data = FilmBranchStore.workingData(filmId, branch);
         TogetherServerNetwork.sendFilmBranchStateTo(server, player, filmId, branch, data);
+        TogetherServerNetwork.markBranchStateDelivered(player, filmId, branch);
+        TogetherServerNetwork.sendFilmBranchMeta(server, player, filmId, branch);
+    }
+
+    /**
+     * Send the current branch state unless the full film was already delivered moments ago.
+     * In that case only the branch name and the commit graph are refreshed, which avoids
+     * re-sending a large film two more times every time the editor opens.
+     */
+    public static void syncFilmBranchState(MinecraftServer server, ServerPlayerEntity player, String filmId) {
+        if (filmId == null || filmId.isEmpty()) {
+            return;
+        }
+        String branch = TogetherServerNetwork.playerBranch(filmId, player);
+        String key = TogetherServerNetwork.branchKey(filmId, branch);
+        Long at = lastBranchStateAt.get(player.getUuid());
+        boolean fresh = key.equals(lastBranchStateSent.get(player.getUuid()))
+            && at != null
+            && System.currentTimeMillis() - at <= BRANCH_DATA_FRESH_MS;
+        if (fresh) {
+            TogetherServerNetwork.sendFilmBranchMeta(server, player, filmId, branch);
+        } else {
+            TogetherServerNetwork.sendFilmBranchState(server, player, filmId);
+        }
+    }
+
+    /** Record that the full film for this player/film/branch is already on the wire. */
+    public static void markBranchStateDelivered(ServerPlayerEntity player, String filmId, String branch) {
+        if (player == null || filmId == null || filmId.isEmpty()) {
+            return;
+        }
+        lastBranchStateSent.put(player.getUuid(), TogetherServerNetwork.branchKey(filmId, branch));
+        lastBranchStateAt.put(player.getUuid(), System.currentTimeMillis());
+    }
+
+    private static void sendFilmBranchLabel(ServerPlayerEntity player, String filmId, String branch) {
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId);
+        buf.writeString(branch == null ? "" : branch);
+        ServerPlayNetworking.send(player, CLIENT_FILM_BRANCH, buf);
+    }
+
+    private static void sendFilmBranchMeta(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch) {
+        TogetherServerNetwork.sendFilmBranchLabel(player, filmId, branch);
         TogetherServerNetwork.sendCommits(player, FilmCommitStore.list(filmId), filmId, branch);
         TogetherServerNetwork.sendCommitSelectionsTo(player, filmId);
         TogetherServerNetwork.sendPlayerCommitPositionsTo(server, player, filmId);
-        lastBranchStateSent.put(player.getUuid(), filmId + "\t" + branch);
     }
 
     private static void sendFilmBranchStateTo(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, MapType data) {
@@ -391,6 +444,7 @@ public class TogetherServerNetwork {
         pendingUploadAggregates.clear();
         playerEditingFilm.clear();
         lastBranchStateSent.clear();
+        lastBranchStateAt.clear();
         playerColors.clear();
         playerCursors.clear();
         playerCommitSelections.clear();
@@ -635,6 +689,7 @@ public class TogetherServerNetwork {
             if (filmId.isEmpty()) {
                 String goneFilm = playerEditingFilm.remove(player.getUuid());
                 lastBranchStateSent.remove(player.getUuid());
+                lastBranchStateAt.remove(player.getUuid());
                 CommitSelection gone = playerCommitSelections.remove(player.getUuid());
                 if (gone != null) {
                     TogetherServerNetwork.broadcastCommitSelections(server, gone.filmId);
@@ -644,11 +699,9 @@ public class TogetherServerNetwork {
                 }
             } else {
                 playerEditingFilm.put(player.getUuid(), filmId);
-                String branch = TogetherServerNetwork.playerBranch(filmId, player);
-                String key = filmId + "\t" + branch;
-                if (!key.equals(lastBranchStateSent.get(player.getUuid()))) {
-                    TogetherServerNetwork.sendFilmBranchState(server, player, filmId);
-                }
+                /* The manager load that just opened this film may already have delivered the
+                 * branch content; only refresh the branch label and commit graph then. */
+                TogetherServerNetwork.syncFilmBranchState(server, player, filmId);
             }
             TogetherServerNetwork.broadcastFilmSelections(server);
             if (!filmId.isEmpty()) {

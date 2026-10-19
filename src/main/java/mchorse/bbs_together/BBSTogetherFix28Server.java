@@ -100,8 +100,9 @@ public final class BBSTogetherFix28Server {
         ACTIVE_FILM_EDITORS.put(uUID, string2);
         FILM_ENTRY_ORDER.computeIfAbsent(string2, film -> new LinkedHashSet()).add(uUID);
         /* The server owns every branch's working copy. Asking another client for a snapshot
-         * would hand the newcomer that player's branch, not theirs. */
-        TogetherServerNetwork.sendFilmBranchState(minecraftServer, class_32222, string2);
+         * would hand the newcomer that player's branch, not theirs. The film itself was often
+         * just delivered by the manager load, so only ask for a full copy when it is stale. */
+        TogetherServerNetwork.syncFilmBranchState(minecraftServer, class_32222, string2);
     }
 
     private static Map<UUID, String> getTogetherFilmSelections() {

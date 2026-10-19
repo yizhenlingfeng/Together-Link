@@ -9,6 +9,9 @@ import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIMessageOverlayPanel;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
+import mchorse.bbs_mod.ui.framework.elements.overlay.UIPromptOverlayPanel;
+import mchorse.bbs_mod.ui.framework.elements.utils.UISplitter;
+import mchorse.bbs_mod.ui.utils.Scroll;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.commits.FilmCommitStore;
@@ -151,6 +154,53 @@ public final class CommitUi
         )
             .choice(L10n.lang("bbs_together.commits.squash_confirm"), () -> TogetherClientNetwork.sendCommitSquash(filmId, commitId))
             .build());
+    }
+
+    /** Paint a splitter's full-width hit area as a short, centered handle line. */
+    public static void styleSplitter(UISplitter splitter)
+    {
+        splitter.rendering((context) ->
+        {
+            int x = splitter.area.x + splitter.area.w / 2;
+            int y = splitter.area.y + splitter.area.h / 2;
+            int color = splitter.isDragging() ? Scroll.HANDLE_ACTIVE_COLOR : Scroll.HANDLE_COLOR;
+
+            context.batcher.box(x - 20, y - 1, x + 20, y + 1, color);
+        });
+    }
+
+    /** Rename any commit from its graph node, regardless of branch or selection. */
+    public static void renameCommit(UIContext context, String filmId, String commitId)
+    {
+        if (context == null || filmId == null || commitId == null)
+        {
+            return;
+        }
+
+        FilmCommit commit = FilmCommitClient.commit(filmId, commitId);
+
+        if (commit == null)
+        {
+            return;
+        }
+
+        UIPromptOverlayPanel panel = new UIPromptOverlayPanel(
+            L10n.lang("bbs_together.commits.rename_title"),
+            L10n.lang("bbs_together.commits.rename_message"),
+            (text) ->
+            {
+                String message = text == null ? "" : text.trim();
+
+                if (!message.isEmpty() && !message.equals(commit.message))
+                {
+                    TogetherClientNetwork.sendCommitRename(filmId, commitId, message);
+                }
+            }
+        );
+
+        panel.text.textbox.setLength(FilmCommit.MAX_MESSAGE);
+        panel.text.setText(commit.message);
+        UIOverlay.addOverlay(context, panel);
     }
 
     /** Return the branch to the picked commit, either deleting the later commits or keeping them. */
