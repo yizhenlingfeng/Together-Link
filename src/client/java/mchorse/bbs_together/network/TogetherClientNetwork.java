@@ -77,6 +77,10 @@ import mchorse.bbs_together.BBSTogetherFix45;
 import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.commits.FilmCommit;
+import mchorse.bbs_together.locks.AssetLock;
+import mchorse.bbs_together.locks.AssetLockClient;
+import mchorse.bbs_together.locks.AssetLockMode;
+import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
 import mchorse.bbs_together.sync.AssetSyncTracker;
@@ -449,6 +453,7 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MODEL_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleModelDeletedPacket(client, buf.readString()));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetLocksPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST, (client, handler, buf, resp) -> CoopClient.handleRequest(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST_CLOSED, (client, handler, buf, resp) -> CoopClient.handleRequestClosed(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_ROOM, (client, handler, buf, resp) -> CoopClient.handleRoom(client, buf));
@@ -530,6 +535,7 @@ public class TogetherClientNetwork {
         autoSyncScheduled.set(false);
         lastAutoSyncMs = 0L;
         mchorse.bbs_together.bbsop.BbsOpClientState.reset();
+        AssetLockClient.reset();
         CoopClient.reset();
         isBBSTogetherOnServer = false;
         BBSTogetherFix28Client.resetState();
@@ -1233,7 +1239,7 @@ public class TogetherClientNetwork {
                                      * flip-flopping either —always push it, otherwise freshly
                                      * authored models never reach the server at all. */
                                     boolean serverMissing = serverSha1 == null;
-                                    if (upload && (serverMissing || !TogetherClientNetwork.together$isAutoFlip(relativePath, 'U', manual))) {
+                                    if (upload && AssetLockClient.canEditModelPath(relativePath) && (serverMissing || !TogetherClientNetwork.together$isAutoFlip(relativePath, 'U', manual))) {
                                         toUpload.add(relativePath);
                                     }
                                 }
@@ -2820,6 +2826,30 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_GRANT, (PacketByteBuf)buf);
     }
 
+    /** Set / clear an asset lock (level-2 managers only, server re-checks). */
+    public static void sendAssetLock(AssetLockType type, String assetId, AssetLockMode mode, Map<UUID, String> members) {
+        if (!isBBSTogetherOnServer || type == null || assetId == null || MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(type.id);
+        buf.writeString(assetId);
+        buf.writeInt(mode == null ? -1 : mode.ordinal());
+        if (mode == null || members == null) {
+            buf.writeInt(0);
+        } else {
+            int count = Math.min(members.size(), 256);
+            buf.writeInt(count);
+            int written = 0;
+            for (Map.Entry<UUID, String> entry : members.entrySet()) {
+                if (written++ >= count) break;
+                buf.writeUuid(entry.getKey());
+                buf.writeString(entry.getValue() == null ? "" : entry.getValue());
+            }
+        }
+        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_LOCK, (PacketByteBuf)buf);
+    }
+
     /** Ask the server (as a logged request behavior) to delete a model; managers approve/deny it. */
     public static void sendModelDeleteRequest(String modelId) {
         if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
@@ -2909,6 +2939,47 @@ public class TogetherClientNetwork {
         }
         java.util.List<String> finalWhitelist = whitelist;
         client.execute(() -> mchorse.bbs_together.bbsop.BbsOpClientState.sync(newLevel, finalWhitelist));
+    }
+
+    private static void handleAssetLocksPacket(MinecraftClient client, PacketByteBuf buf) {
+        int count = Math.min(buf.readInt(), 4096);
+        List<AssetLock> locks = new ArrayList<>(count);
+        for (int i = 0; i < count; ++i) {
+            try {
+                AssetLockType type = AssetLockType.byId(buf.readString(32));
+                String assetId = buf.readString(512);
+                String owner = buf.readString(64);
+                String ownerName = buf.readString(64);
+                AssetLockMode mode = AssetLockMode.byOrdinal(buf.readInt());
+                if (type == null || mode == null) {
+                    return;
+                }
+                AssetLock lock = new AssetLock(type, assetId);
+                if (!owner.isEmpty()) {
+                    try {
+                        lock.owner = UUID.fromString(owner);
+                    }
+                    catch (IllegalArgumentException ignored) {}
+                }
+                lock.ownerName = ownerName;
+                lock.mode = mode;
+                TogetherClientNetwork.readLockMembers(buf, lock.whitelist);
+                TogetherClientNetwork.readLockMembers(buf, lock.blacklist);
+                locks.add(lock);
+            }
+            catch (Exception e) {
+                break;
+            }
+        }
+        List<AssetLock> finalLocks = locks;
+        client.execute(() -> AssetLockClient.sync(finalLocks));
+    }
+
+    private static void readLockMembers(PacketByteBuf buf, Map<UUID, String> target) {
+        int count = Math.min(buf.readInt(), 256);
+        for (int i = 0; i < count; ++i) {
+            target.put(buf.readUuid(), buf.readString(64));
+        }
     }
 
     private static void handleBehaviorListPacket(MinecraftClient client, PacketByteBuf buf) {

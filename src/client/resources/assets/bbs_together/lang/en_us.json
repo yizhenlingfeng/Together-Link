@@ -30,5 +30,10 @@
     "bbs_together.coop.notify.branch_switch_failed": "[BBSTogether] A player could not commit and switch to the coop branch; the session ended.",
     "bbs_together.coop.notify.disbanded": "[BBSTogether] The recording session was disbanded.",
     "bbs_together.coop.notify.begin_failed": "[BBSTogether] Could not start the coop recording (film missing locally?).",
-    "bbs_together.coop.notify.recording_started": "[BBSTogether] Coop recording started - stop as usual when done."
+    "bbs_together.coop.notify.recording_started": "[BBSTogether] Coop recording started - stop as usual when done.",
+    "bbs_together.locks.picker.whitelist.title": "Pick whitelisted players",
+    "bbs_together.locks.picker.blacklist.title": "Pick blacklisted players",
+    "bbs_together.locks.picker.save": "Save",
+    "bbs_together.locks.picker.cancel": "Cancel",
+    "bbs_together.locks.picker.empty": "No players available"
 }

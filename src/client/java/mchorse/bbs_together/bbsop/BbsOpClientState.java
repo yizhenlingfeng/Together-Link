@@ -74,6 +74,14 @@ public final class BbsOpClientState
             return false;
         }
 
+        /* A per-asset lock narrows the domain further: a level-1 editor looking at a
+         * locked film gets the same read-only UI a level-0 player sees. Admins bypass
+         * locks above, and the server re-checks every write anyway. */
+        if (BbsOpDomain.FILM.id.equals(domainId) && mchorse.bbs_together.locks.AssetLockClient.isCurrentFilmLocked())
+        {
+            return false;
+        }
+
         Set<String> current = whitelist;
 
         return current == null || current.contains(domainId);

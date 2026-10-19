@@ -1,12 +1,24 @@
 package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.data.types.MapType;
+import mchorse.bbs_mod.l10n.keys.IKey;
+import mchorse.bbs_mod.ui.ContentType;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.settings.values.core.ValueGroup;
+import mchorse.bbs_mod.ui.dashboard.list.UIDataPathList;
 import mchorse.bbs_mod.ui.dashboard.panels.UIDataDashboardPanel;
+import mchorse.bbs_mod.ui.dashboard.panels.overlay.UICRUDOverlayPanel;
 import mchorse.bbs_mod.ui.dashboard.panels.overlay.UIDataOverlayPanel;
+import mchorse.bbs_mod.ui.utils.context.MenuIcon;
+import mchorse.bbs_mod.ui.utils.context.MenuVerb;
+import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_mod.utils.DataPath;
+import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.ui.AssetLockUi;
+import mchorse.bbs_together.ui.IFilmListMarker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -15,6 +27,8 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+import java.util.function.Consumer;
 
 @Environment(value=EnvType.CLIENT)
 @Mixin(value={UIDataOverlayPanel.class}, remap=false)
@@ -85,6 +99,34 @@ public class UIDataOverlayPanelMixin {
     @Inject(method={"removeFolder"}, at={@At(value="TAIL")}, remap=false)
     private void onRemoveFolder(CallbackInfo ci) {
         TogetherClientNetwork.sendFilmListChanged();
+    }
+
+    @Inject(method = "<init>", at = @At("TAIL"), remap = false)
+    private void together$addFilmLock(IKey title, UIDataDashboardPanel panel, Consumer<String> callback, CallbackInfo ci) {
+        UIDataOverlayPanel self = (UIDataOverlayPanel) (Object) this;
+        UIDataPathList namesList = ((UICRUDOverlayPanel) (Object) this).namesList;
+
+        if (this.panel != null && this.panel.getType() == ContentType.FILMS && namesList instanceof IFilmListMarker marker) {
+            marker.bbs$setFilmList(true);
+        }
+
+        namesList.context((menu) -> {
+            if (!BbsOpClientState.canManage() || this.panel == null || this.panel.getType() != ContentType.FILMS) {
+                return;
+            }
+
+            DataPath path = namesList.getCurrentFirst();
+
+            if (path == null || path.folder || "..".equals(path.getLast())) {
+                return;
+            }
+
+            String filmId = path.toString();
+
+            menu.icons.add(new MenuIcon(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.FILM), MenuVerb.Slot.CLIPBOARD, () -> {
+                AssetLockUi.openMenu(self.getContext(), AssetLockType.FILM, filmId);
+            }));
+        });
     }
 }
 

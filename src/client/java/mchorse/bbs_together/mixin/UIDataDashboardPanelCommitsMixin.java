@@ -1,6 +1,10 @@
 package mchorse.bbs_together.mixin;
 
+import mchorse.bbs_mod.film.Film;
+import mchorse.bbs_mod.settings.values.core.ValueGroup;
+import mchorse.bbs_mod.ui.ContentType;
 import mchorse.bbs_mod.ui.dashboard.panels.UIDataDashboardPanel;
+import mchorse.bbs_together.locks.AssetLockClient;
 import mchorse.bbs_together.ui.commits.CommitUi;
 import mchorse.bbs_together.ui.commits.ICommitsTabHost;
 import org.spongepowered.asm.mixin.Mixin;
@@ -51,6 +55,18 @@ public class UIDataDashboardPanelCommitsMixin
         if ((((Object) this) instanceof ICommitsTabHost host) && host.bbs$isCommitsTabActive())
         {
             ci.cancel();
+        }
+    }
+
+    /** Let the existing film read-only UI follow a per-film lock. */
+    @Inject(method = "fill", at = @At("TAIL"))
+    private void bbs_together$trackCurrentFilm(ValueGroup data, CallbackInfo ci)
+    {
+        UIDataDashboardPanel self = (UIDataDashboardPanel) (Object) this;
+
+        if (self.getType() == ContentType.FILMS)
+        {
+            AssetLockClient.setCurrentFilm(data instanceof Film ? data.getId() : null);
         }
     }
 }

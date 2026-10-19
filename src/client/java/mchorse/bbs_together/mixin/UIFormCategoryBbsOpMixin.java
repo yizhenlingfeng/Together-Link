@@ -6,8 +6,11 @@ import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.cells.CellState;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
+import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.ui.AssetLockUi;
 import mchorse.bbs_together.ui.ModelDeleteActions;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -70,7 +73,22 @@ public class UIFormCategoryBbsOpMixin
     private void together$addModelDeleteActions(ContextMenuManager menu, CallbackInfo ci)
     {
         UIFormCategory self = (UIFormCategory) (Object) this;
+        Form form = self.getContextForm();
 
-        ModelDeleteActions.addActions(menu, self, self.getContextForm());
+        ModelDeleteActions.addActions(menu, self, form);
+
+        /* Level 2 only: lock the model so other players can no longer edit/upload it. */
+        if (BbsOpClientState.canManage() && !self.isGroupContext() && form instanceof ModelForm modelForm)
+        {
+            String modelId = modelForm.model.get();
+
+            if (modelId != null && !modelId.isEmpty())
+            {
+                menu.action(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.MODEL), () ->
+                {
+                    AssetLockUi.openMenu(self.getContext(), AssetLockType.MODEL, modelId);
+                });
+            }
+        }
     }
 }

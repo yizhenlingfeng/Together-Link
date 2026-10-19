@@ -1,9 +1,13 @@
 package mchorse.bbs_together.mixin;
 
+import mchorse.bbs_mod.forms.forms.Form;
+import mchorse.bbs_mod.forms.forms.ModelForm;
+import mchorse.bbs_mod.ui.forms.UIFormList;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
-import mchorse.bbs_mod.ui.forms.UIFormList;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_together.locks.AssetLockClient;
+import mchorse.bbs_together.locks.AssetLockType;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,9 +17,9 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Read-only (level 0) lock on the disguise list: the "edit form" button (pencil icon above
- * the list) is greyed out, matching the disabled-button look used everywhere else in BBS.
- * Selecting/browsing disguises keeps working.
+ * Read-only lock on the disguise list's "edit form" button (pencil icon above the list).
+ * It is greyed out for level 0 and also when the selected disguise is a locked model the
+ * player cannot edit. Selecting/browsing disguises keeps working.
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = UIFormList.class, remap = false)
@@ -27,6 +31,24 @@ public class UIFormListBbsOpMixin
     @Inject(method = "render", at = @At("TAIL"), remap = false)
     private void together$greyOutEdit(UIContext context, CallbackInfo ci)
     {
-        this.edit.setEnabled(!!BbsOpClientState.canEdit("morph"));
+        UIFormList self = (UIFormList) (Object) this;
+        boolean editable = BbsOpClientState.canEdit("morph");
+
+        if (editable)
+        {
+            Form form = self.getSelected();
+
+            if (form instanceof ModelForm modelForm)
+            {
+                String id = modelForm.model.get();
+
+                if (id != null && !AssetLockClient.canEdit(AssetLockType.MODEL, id))
+                {
+                    editable = false;
+                }
+            }
+        }
+
+        this.edit.setEnabled(editable);
     }
 }

@@ -6,31 +6,56 @@ import java.util.Map;
 import java.util.UUID;
 import mchorse.bbs_mod.ui.dashboard.list.UIDataPathList;
 import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.DataPath;
+import mchorse.bbs_mod.utils.colors.Colors;
+import mchorse.bbs_together.locks.AssetLockClient;
+import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.ui.IFilmListMarker;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.client.render.Tessellator;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Environment(value=EnvType.CLIENT)
 @Mixin(value={UIDataPathList.class}, remap=false)
-public class UIDataPathListMixin {
+public class UIDataPathListMixin implements IFilmListMarker {
     private final Map<UUID, Integer> together_skinCache = new HashMap<UUID, Integer>();
     private int together_lastFilmSelectionsSize = -1;
+    @Unique
+    private boolean bbs$filmList;
+
+    @Override
+    public boolean bbs$isFilmList() {
+        return this.bbs$filmList;
+    }
+
+    @Override
+    public void bbs$setFilmList(boolean filmList) {
+        this.bbs$filmList = filmList;
+    }
 
     @Inject(method={"renderElementPart"}, at={@At(value="TAIL")}, remap=false)
     private void onRenderElementPartTail(UIContext context, DataPath element, int i, int x, int y, boolean hover, boolean selected, CallbackInfo ci) {
         if (!TogetherClientNetwork.isConnected()) {
             return;
+        }
+        UIDataPathList self = (UIDataPathList)(Object)this;
+        if (!element.folder && this.bbs$isFilmList()) {
+            String path = element.toString();
+            if (AssetLockClient.get(AssetLockType.FILM, path) != null) {
+                int textX = x + 16;
+                int textW = context.batcher.getFont().getWidth(element.getLast());
+                context.batcher.icon(Icons.LOCKED, Colors.WHITE, textX + textW + 4, y + self.scroll.scrollItemSize / 2F, 0F, 0.5F);
+            }
         }
         if (element.folder) {
             return;
@@ -38,7 +63,6 @@ public class UIDataPathListMixin {
         if (TogetherClientNetwork.filmSelections.isEmpty()) {
             return;
         }
-        UIDataPathList self = (UIDataPathList)(Object)this;
         String filmId = element.toString();
         ArrayList<UUID> playersOnFilm = new ArrayList<UUID>();
         for (Map.Entry<UUID, String> entry : TogetherClientNetwork.filmSelections.entrySet()) {

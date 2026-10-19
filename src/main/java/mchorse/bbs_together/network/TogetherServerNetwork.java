@@ -67,6 +67,10 @@ import mchorse.bbs_together.behaviors.BehaviorType;
 import mchorse.bbs_together.commits.FilmBranchStore;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.commits.FilmCommitStore;
+import mchorse.bbs_together.locks.AssetLock;
+import mchorse.bbs_together.locks.AssetLockManager;
+import mchorse.bbs_together.locks.AssetLockMode;
+import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.AssetEgressBudget;
 import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.utils.AssetPaths;
@@ -138,6 +142,8 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_BBSOP_SYNC = new Identifier("bbs_together", "c_bbsop_sync");
     public static final Identifier SERVER_BBSOP_SET = new Identifier("bbs_together", "s_bbsop_set");
     public static final Identifier SERVER_BBSOP_GRANT = new Identifier("bbs_together", "s_bbsop_grant");
+    public static final Identifier CLIENT_ASSET_LOCKS = new Identifier("bbs_together", "c_asset_locks");
+    public static final Identifier SERVER_ASSET_LOCK = new Identifier("bbs_together", "s_asset_lock");
     public static final Identifier SERVER_COOP_INVITE = new Identifier("bbs_together", "s_coop_invite");
     public static final Identifier SERVER_COOP_RESPOND = new Identifier("bbs_together", "s_coop_respond");
     public static final Identifier SERVER_COOP_PICK = new Identifier("bbs_together", "s_coop_pick");
@@ -410,6 +416,7 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MODEL_DELETE_DECISION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteDecision(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_LOCK, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetLock(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_INVITE, (server, player, handler, buf, resp) -> CoopSessionManager.handleInvite(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_RESPOND, (server, player, handler, buf, resp) -> CoopSessionManager.handleRespond(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_PICK, (server, player, handler, buf, resp) -> CoopSessionManager.handlePick(server, player, buf));
@@ -1010,6 +1017,10 @@ public class TogetherServerNetwork {
                     System.out.println("[BBSTogether] Ignored upload of recently deleted model " + uploadModelId + " from " + uploader.getGameProfile().getName());
                     return;
                 }
+                if (uploadModelId != null && !AssetLockManager.canEdit(uploader.getUuid(), AssetLockType.MODEL, uploadModelId)) {
+                    AssetLockManager.notifyLocked(server, uploader, AssetLockType.MODEL);
+                    return;
+                }
                 Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
                 if (target.getParent() == null) {
                     return;
@@ -1531,6 +1542,15 @@ public class TogetherServerNetwork {
         }
     }
 
+    /** Refuse a film write for a player the film's lock does not allow; says why once. */
+    public static boolean denyLockedFilm(MinecraftServer server, ServerPlayerEntity player, String filmId) {
+        if (AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, filmId)) {
+            return false;
+        }
+        AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+        return true;
+    }
+
     private static void handleRecordingFinished(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM) || !BbsOpManager.isAllowed(player, BbsOpDomain.RECORD)) {
             return;
@@ -1546,6 +1566,9 @@ public class TogetherServerNetwork {
             server.execute(() -> {
                 String branch = TogetherServerNetwork.playerBranch(filmId, player);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+                    return;
+                }
+                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                     return;
                 }
                 if (CoopSessionManager.onRecordingFinished(server, player, filmId, replayIndex, replayData.asMap())) {
@@ -1577,6 +1600,9 @@ public class TogetherServerNetwork {
             server.execute(() -> {
                 String branch = TogetherServerNetwork.playerBranch(filmId, player);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+                    return;
+                }
+                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                     return;
                 }
                 Film stored = FilmBranchStore.working(filmId, branch);
@@ -1645,6 +1671,9 @@ public class TogetherServerNetwork {
                     return;
                 }
                 if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
+                    return;
+                }
+                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                     return;
                 }
                 String key = TogetherServerNetwork.branchKey(filmId, branch);
@@ -1839,6 +1868,9 @@ public class TogetherServerNetwork {
         String commitId = buf.readString();
         String message = buf.readString(1024);
         server.execute(() -> {
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                return;
+            }
             String author = FilmCommitStore.authorOf(filmId, commitId);
             if (author == null) {
                 return;
@@ -1861,6 +1893,9 @@ public class TogetherServerNetwork {
         String commitId = buf.readString(64);
         int color = Colors.opaque((int)buf.readInt());
         server.execute(() -> {
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                return;
+            }
             if (!FilmCommitStore.setColor(filmId, commitId, color)) {
                 return;
             }
@@ -1889,6 +1924,9 @@ public class TogetherServerNetwork {
                 return;
             }
             if (CoopSessionManager.isFilmLockedForEditing(filmId, targetBranch)) {
+                return;
+            }
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                 return;
             }
             MapType snapshot = FilmCommitStore.rollback(filmId, commitId, mode);
@@ -1928,6 +1966,9 @@ public class TogetherServerNetwork {
             if (CoopSessionManager.isFilmLockedForEditing(filmId, targetBranch)) {
                 return;
             }
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                return;
+            }
             FilmCommit squashed = FilmCommitStore.squash(filmId, commitId, player.getUuid().toString(), player.getGameProfile().getName(), null);
             if (squashed == null) {
                 player.sendMessage(Text.literal("§e[BBS Together] 无法合并到此提交：该历史区间被其他分支引用，或提交已不在当前分支上"), false);
@@ -1960,6 +2001,9 @@ public class TogetherServerNetwork {
                     return;
                 }
                 if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
+                    return;
+                }
+                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                     return;
                 }
                 MapType mapType = data = payload != null ? payload : FilmBranchStore.workingData(filmId, branch);
@@ -2006,6 +2050,9 @@ public class TogetherServerNetwork {
             if (deletedFilmIds.contains(filmId)) {
                 return;
             }
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                return;
+            }
             if (!FilmCommitStore.createBranch(filmId, name, commitId)) {
                 return;
             }
@@ -2032,6 +2079,10 @@ public class TogetherServerNetwork {
             }
             if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
                 TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u8be5\u5206\u652f\u6b63\u5728\u88ab\u5408\u4f5c\u5f55\u5236\u5360\u7528", false);
+                return;
+            }
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u8be5\u5f71\u7247\u5df2\u88ab\u9501\u5b9a", false);
                 return;
             }
             if (!FilmBranchStore.setBranch(filmId, player.getUuid(), branch)) {
@@ -2427,6 +2478,90 @@ public class TogetherServerNetwork {
         });
     }
 
+    private static void handleAssetLock(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        String typeId = buf.readString(32);
+        String assetId = buf.readString(512);
+        int modeOrdinal = buf.readInt();
+        int count = Math.min(buf.readInt(), 256);
+        LinkedHashMap<UUID, String> members = new LinkedHashMap<>();
+        for (int i = 0; i < count; ++i) {
+            try {
+                UUID id = buf.readUuid();
+                String name = buf.readString(64);
+                members.put(id, name);
+            }
+            catch (Exception e) {
+                break;
+            }
+        }
+        server.execute(() -> {
+            try {
+                if (!BbsOpManager.canManage(player)) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to change an asset lock without permission");
+                    return;
+                }
+                AssetLockType type = AssetLockType.byId(typeId);
+                if (type == null) {
+                    return;
+                }
+                String id = AssetLockManager.normalizeId(type, assetId);
+                if (id == null) {
+                    return;
+                }
+                AssetLockMode mode = modeOrdinal < 0 ? null : AssetLockMode.byOrdinal(modeOrdinal);
+                if (modeOrdinal >= 0 && mode == null) {
+                    return;
+                }
+                boolean changed = AssetLockManager.set(player, type, id, mode, members);
+                if (changed) {
+                    System.out.println("[BBSTogether] " + player.getGameProfile().getName()
+                        + (mode == null ? " unlocked " : " locked ") + type.id + " " + id);
+                    TogetherServerNetwork.broadcastAssetLocks(server);
+                }
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** Push every lock to one client; called on join and after every change. */
+    public static void sendAssetLocks(ServerPlayerEntity player) {
+        if (player == null) {
+            return;
+        }
+        ArrayList<AssetLock> locks = new ArrayList<>(AssetLockManager.snapshot());
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeInt(locks.size());
+        for (AssetLock lock : locks) {
+            out.writeString(lock.type.id);
+            out.writeString(lock.assetId);
+            out.writeString(lock.owner == null ? "" : lock.owner.toString());
+            out.writeString(lock.ownerName == null ? "" : lock.ownerName);
+            out.writeInt(lock.mode.ordinal());
+            TogetherServerNetwork.writeLockMembers(out, lock.whitelist);
+            TogetherServerNetwork.writeLockMembers(out, lock.blacklist);
+        }
+        ServerPlayNetworking.send(player, CLIENT_ASSET_LOCKS, out);
+    }
+
+    private static void writeLockMembers(PacketByteBuf out, Map<UUID, String> members) {
+        out.writeInt(members.size());
+        for (Map.Entry<UUID, String> entry : members.entrySet()) {
+            out.writeUuid(entry.getKey());
+            out.writeString(entry.getValue() == null ? "" : entry.getValue());
+        }
+    }
+
+    public static void broadcastAssetLocks(MinecraftServer server) {
+        if (server == null) {
+            return;
+        }
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            TogetherServerNetwork.sendAssetLocks(p);
+        }
+    }
+
     private static void handleRemovePlayerLogs(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         UUID targetId = buf.readUuid();
         server.execute(() -> {
@@ -2480,6 +2615,10 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             try {
                 if (modelId.isEmpty() || modelId.contains("..") || modelId.startsWith("/") || modelId.endsWith("/")) {
+                    return;
+                }
+                if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.MODEL, modelId)) {
+                    AssetLockManager.notifyLocked(server, player, AssetLockType.MODEL);
                     return;
                 }
                 File assetsFolder = BBSMod.getAssetsFolder();
@@ -2541,6 +2680,7 @@ public class TogetherServerNetwork {
             System.out.println("[BBSTogether] Model " + modelId + " was already gone from the server assets");
         }
         TogetherServerNetwork.tombstoneModel(modelId);
+        AssetLockManager.removeForAsset(AssetLockType.MODEL, modelId);
         for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
             PacketByteBuf out = PacketByteBufs.create();
             out.writeString(modelId);
@@ -2597,7 +2737,11 @@ public class TogetherServerNetwork {
         }
         String filmId = buf.readString();
         server.execute(() -> {
+            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                return;
+            }
             deletedFilmIds.add(filmId);
+            AssetLockManager.removeForAsset(AssetLockType.FILM, filmId);
             lastSavedFilmSnapshots.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
             filmSaveDirty.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
             try {
@@ -2628,12 +2772,19 @@ public class TogetherServerNetwork {
         String oldId = buf.readString();
         String newId = buf.readString();
         server.execute(() -> {
+            if (TogetherServerNetwork.denyLockedFilm(server, player, oldId)) {
+                return;
+            }
+            if (TogetherServerNetwork.denyLockedFilm(server, player, newId)) {
+                return;
+            }
             try {
                 BBSMod.getFilms().rename(oldId, newId);
             }
             catch (Exception exception) {
                 // empty catch block
             }
+            AssetLockManager.rename(AssetLockType.FILM, oldId, newId);
             FilmCommitStore.renameFilm(oldId, newId);
             FilmBranchStore.renameFilm(oldId, newId);
             for (Map.Entry<UUID, CommitSelection> entry : playerCommitSelections.entrySet()) {
@@ -2793,6 +2944,9 @@ public class TogetherServerNetwork {
                 if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
                     return;
                 }
+                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                    return;
+                }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
                     ServerPlayerEntity other;
@@ -2845,6 +2999,9 @@ public class TogetherServerNetwork {
             server.execute(() -> {
                 String branch = TogetherServerNetwork.playerBranch(filmId, player);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+                    return;
+                }
+                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                     return;
                 }
                 TogetherServerNetwork.applyUndoSync(server, player, filmId, changes);
