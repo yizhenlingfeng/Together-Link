@@ -8,6 +8,7 @@ import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.locks.AssetTombstones;
+import mchorse.bbs_together.network.ModelBlockPacketGuard;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -137,7 +138,18 @@ implements ModInitializer {
         }
 
         serverPlayer.networkHandler.sendPacket(new BlockUpdateS2CPacket(world, pos));
-        serverPlayer.networkHandler.sendPacket(BlockEntityUpdateS2CPacket.create(entity));
+
+        int nbtSize = ModelBlockPacketGuard.nbtSize(entity);
+
+        if (nbtSize <= ModelBlockPacketGuard.MAX_NBT_BYTES)
+        {
+            serverPlayer.networkHandler.sendPacket(BlockEntityUpdateS2CPacket.create(entity));
+        }
+        else
+        {
+            System.out.println("[BBSTogether] Skipped oversized model block sync at " + pos
+                + " (" + nbtSize + " bytes)");
+        }
     }
 
     /**

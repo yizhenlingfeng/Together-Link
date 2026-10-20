@@ -221,6 +221,7 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) �
 - 行为日志无服务端签名/审计链。
 - `client-bbs-together-refmap.json` 为历史文件；生产 jar 启动已验证，未重新生成。
 - 提交图已做可见边裁剪，全量 rebuild/布局仍有优化空间。
+- 模型方块 NBT 超过 4 MB 时跳过其 BlockEntityUpdate 包，避免超过原版 8 MB 上限导致断线；客户端可能需要重新加载区块才能看到该方块的最新形态。
 
 ## 1.7.9 更新日志
 
