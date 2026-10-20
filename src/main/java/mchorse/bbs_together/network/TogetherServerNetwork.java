@@ -2583,10 +2583,24 @@ public class TogetherServerNetwork {
 
         int subType = buf.readInt();
         String target = buf.readString();
+
+        /* This channel is only used for a model-editor save. Anything else would be a
+         * forged log entry, and unbounded strings would let a level-1 client bloat the
+         * persisted log. */
+        if (subType != BehaviorType.SUB_EDIT_MODEL || target.isEmpty() || target.length() > 256) {
+            return;
+        }
+
         int itemCount = buf.readInt();
         ArrayList<String> items = new ArrayList<String>();
         for (int i = 0; i < Math.min(itemCount, 64); ++i) {
-            items.add(buf.readString());
+            String item = buf.readString();
+
+            if (item.length() > 512) {
+                return;
+            }
+
+            items.add(item);
         }
         ArrayList<String> finalItems = items;
         server.execute(() -> {

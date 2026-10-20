@@ -663,6 +663,18 @@ public class UICommitGraph extends UIElement
             {
                 int parentY = this.rowY(parent[0]);
                 int parentX = this.laneX(node.column, node.filmId, parent[1]);
+                int minY = Math.min(node.y, parentY);
+                int maxY = Math.max(node.y, parentY);
+                int minX = Math.min(node.x, parentX);
+                int maxX = Math.max(node.x, parentX);
+
+                /* The body is already clipped, but skipping whole off-screen edges avoids
+                 * walking/batching every parent of a large history each frame. */
+                if (maxY < this.body.y || minY > this.body.ey()
+                    || maxX < this.body.x || minX > this.body.ex())
+                {
+                    continue;
+                }
 
                 /* Up out of the commit towards the parent's row ... */
                 this.segment(context, node.x, node.y, node.x, parentY, color);
