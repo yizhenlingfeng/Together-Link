@@ -108,6 +108,8 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 
 ### 服务器命令
 - `/bbstogether record <玩家>`：切换指定玩家的录制状态；若其中有人正在录制，则停止所有目标玩家的录制。
+- `/bbstogether restore <模型>`：清除该模型的持久删除 tombstone，允许再次上传；不会恢复已删除的文件。需要 OP 或 BBS 等级 2。
+- `/bbstogether diag`：输出当前资产同步/队列诊断信息。
 - `/bbsop <玩家> [0-2]`：查询或设置玩家的 BBS 权限等级（0 仅浏览 / 1 编辑者 / 2 管理员）。仅服主（原版 2 级 OP 以上）、服务器控制台或 BBS 等级 2 的玩家可用。
 - `/bbsop <玩家> grant <域> <allow|deny>`：允许或禁止 1 级玩家的某个功能域；`/bbsop <玩家> grant reset` 恢复为不受限。域：morph、film、record、model_blocks、particles、model_editor、textures、audio、upload。
 
@@ -264,6 +266,7 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - 服务端 manifest/请求/库存处理改用有界共享 I/O 线程池，上传分片改为单线程有序写入（不再占用服务器 tick 线程），客户端 SHA-1 缓存与删除 tombstone 加上限，避免长时间运行或恶意刷包无限增长
 - l10n 只保留 addon 事件这一处链接注册，去掉重复 registerOne，减少启动时重复加载语言文件
 - 文件夹改名/删除现在同步迁移或清理分支/提交数据，以及玩家提交选择、正在编辑/屏幕状态、光标、表单锁和延迟保存任务
+- 新增 `/bbstogether restore <模型>`：清除持久删除 tombstone，允许重新上传被删除的模型
 - manifest resync 与行为上报增加每玩家限流，等级 1 客户端不能刷爆行为日志
 - 修复：点选等级分组标题过滤行为列表时崩溃
 - 注意：客户端与服务端必须使用相同版本；白名单模式下的 1 级玩家升级后默认禁止录制，需管理员执行 `grant record allow`

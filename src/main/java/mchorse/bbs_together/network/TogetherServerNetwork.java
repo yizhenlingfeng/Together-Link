@@ -1223,6 +1223,12 @@ public class TogetherServerNetwork {
         TogetherServerNetwork.queueAssetHint(server, uploader, relativePath, sha1, size);
     }
 
+    public static void broadcastAssetsChanged(MinecraftServer server) {
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            ServerPlayNetworking.send(player, CLIENT_ASSETS_CHANGED, PacketByteBufs.create());
+        }
+    }
+
     private static void queueAssetHint(MinecraftServer server, ServerPlayerEntity uploader, String relativePath, String sha1, long size) {
         if (sha1 == null || sha1.isEmpty() || relativePath == null) {
             return;

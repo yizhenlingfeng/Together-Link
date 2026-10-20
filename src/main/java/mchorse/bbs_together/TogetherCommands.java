@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
+import mchorse.bbs_together.locks.AssetTombstones;
 import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.command.CommandRegistryAccess;
@@ -49,6 +50,24 @@ public class TogetherCommands {
             return players.size();
         });
         dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("record").then(target)));
+
+        /* /bbstogether restore <model> — clear a persistent delete tombstone so a model
+         * may be uploaded again. The deleted files themselves are not recreated. */
+        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether")
+            .requires(src -> src.hasPermissionLevel(2) || (src.getPlayer() != null && BbsOpManager.canManage(src.getPlayer()))))
+            .then(CommandManager.literal("restore").then(CommandManager.argument("model", StringArgumentType.greedyString()).executes(ctx -> {
+                String modelId = StringArgumentType.getString(ctx, "model");
+                ServerCommandSource source = ctx.getSource();
+
+                if (!AssetTombstones.restore(modelId)) {
+                    source.sendError(Text.literal("No delete tombstone for model \"" + modelId + "\""));
+                    return 0;
+                }
+
+                TogetherServerNetwork.broadcastAssetsChanged(source.getServer());
+                source.sendFeedback(() -> Text.literal("Tombstone cleared for \"" + modelId + "\". Deleted files are not restored; clients may upload the model again."), true);
+                return 1;
+            }))));
 
         /* E1: /bbstogether diag — where the asset bytes are going right now. */
         dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("diag").executes(ctx -> {
