@@ -116,6 +116,19 @@ public final class AssetLockClient
         return get(type, assetId) != null && !canEdit(type, assetId);
     }
 
+    /**
+     * Whether the lock on this asset was created by the local player. The owner-only
+     * markers (the small model corner padlock and the open film padlock) use this;
+     * a lock the player can edit is otherwise invisible to them.
+     */
+    public static boolean isOwnLock(AssetLockType type, String assetId)
+    {
+        AssetLock lock = get(type, assetId);
+        UUID self = self();
+
+        return lock != null && self != null && self.equals(lock.owner);
+    }
+
     /** Whether the current player may edit a model whose asset path starts with models/&lt;id&gt;. */
     public static boolean canEditModelPath(String relativePath)
     {

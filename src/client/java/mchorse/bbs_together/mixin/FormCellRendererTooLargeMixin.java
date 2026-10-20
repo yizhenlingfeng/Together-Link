@@ -48,17 +48,40 @@ public abstract class FormCellRendererTooLargeMixin
 
         String label = together$label(form);
 
-        if (label == null)
+        if (label != null)
+        {
+            context.batcher.gradientVBox(x, y, x + w, y + h, TOP_RED, BOT_RED);
+
+            FontRenderer font = context.batcher.getFont();
+            int tx = x + (w - font.getWidth(label)) / 2;
+            int ty = y + (h - font.getHeight()) / 2;
+
+            context.batcher.text(label, tx, ty, 0xFFFFFFFF, true);
+        }
+
+        together$paintOwnLock(context, form, x, y, w, h);
+    }
+
+    /**
+     * The lock owner gets a small padlock in the cell's bottom-right corner so they can
+     * recognise the models they locked. The big grey overlay is for players the lock
+     * actually denies, in which case {@link #together$paintLocked} already returned.
+     */
+    private static void together$paintOwnLock(UIContext context, Form form, int x, int y, int w, int h)
+    {
+        if (!(form instanceof ModelForm modelForm))
         {
             return;
         }
 
-        context.batcher.gradientVBox(x, y, x + w, y + h, TOP_RED, BOT_RED);
+        String id = modelForm.model.get();
 
-        FontRenderer font = context.batcher.getFont();
-        int tx = x + (w - font.getWidth(label)) / 2;
-        int ty = y + (h - font.getHeight()) / 2;
-        context.batcher.text(label, tx, ty, 0xFFFFFFFF, true);
+        if (id == null || !AssetLockClient.isOwnLock(AssetLockType.MODEL, id))
+        {
+            return;
+        }
+
+        context.batcher.outlinedIcon(Icons.LOCKED, x + w - 9, y + h - 9, 0.5F, 0.5F);
     }
 
     /** Locked models get the same treatment as over-size ones, in grey, but only when this player cannot edit them. */

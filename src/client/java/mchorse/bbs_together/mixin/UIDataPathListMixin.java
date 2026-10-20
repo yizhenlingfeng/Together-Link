@@ -51,10 +51,12 @@ public class UIDataPathListMixin implements IFilmListMarker {
         UIDataPathList self = (UIDataPathList)(Object)this;
         if (!element.folder && this.bbs$isFilmList()) {
             String path = element.toString();
-            if (AssetLockClient.isLockedForSelf(AssetLockType.FILM, path)) {
+            boolean locked = AssetLockClient.isLockedForSelf(AssetLockType.FILM, path);
+            boolean own = AssetLockClient.isOwnLock(AssetLockType.FILM, path);
+            if (locked || own) {
                 int textX = x + 16;
                 int textW = context.batcher.getFont().getWidth(element.getLast());
-                context.batcher.icon(Icons.LOCKED, Colors.WHITE, textX + textW + 4, y + self.scroll.scrollItemSize / 2F, 0F, 0.5F);
+                context.batcher.icon(locked ? Icons.LOCKED : Icons.UNLOCKED, Colors.WHITE, textX + textW + 4, y + self.scroll.scrollItemSize / 2F, 0F, 0.5F);
             }
         }
         if (element.folder) {
