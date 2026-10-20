@@ -14,6 +14,7 @@
         "UIKeyframeDopeSheetMixin",
         "IUIKeyframeGraphDefaultKeyframeMixin",
         "UIDashboardMixin",
+        "SyncHudOverlayMixin",
         "UIDashboardPanelsBbsOpMixin",
         "UIFormCategoryBbsOpMixin",
         "UIFilmPanelSaveSyncMixin",

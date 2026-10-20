@@ -6,7 +6,6 @@ import mchorse.bbs_mod.ui.framework.UIRenderingContext;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.BBSTogetherFix28Client;
 import mchorse.bbs_together.network.TogetherClientNetwork;
-import mchorse.bbs_together.sync.SyncBarRenderer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -60,7 +59,6 @@ public class UIDashboardMixin {
             return;
         }
         UIDashboard self = (UIDashboard)(Object)this;
-        SyncBarRenderer.render(context, self);
         if (TogetherClientNetwork.playersInFilmScreen.isEmpty()) {
             return;
         }
