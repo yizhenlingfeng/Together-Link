@@ -2611,7 +2611,9 @@ public class TogetherServerNetwork {
         ArrayList<String> finalItems = items;
         server.execute(() -> {
             try {
-                BehaviorLogManager.record(player, BehaviorType.EDIT.id, subType, target, finalItems, null);
+                java.util.Map<String, String> extra = new java.util.HashMap<>();
+                extra.put("source", "client");
+                BehaviorLogManager.record(player, BehaviorType.EDIT.id, subType, target, finalItems, extra);
             }
             catch (Exception e) {
                 e.printStackTrace();
