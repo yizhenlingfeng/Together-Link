@@ -1,7 +1,7 @@
 # Together Link 1.7.9 双端验收清单
 
 用于 1.7.9 安全/生命周期改动的真实双客户端回归。客户端与服务端必须使用同一个 jar
-（当前 SHA-256：`40F64D0003A7D14742B734049B1241C9E10AD6437A64C86E64F1162E15B0CF06`，
+（当前 SHA-256：`6BA29C9E4B775E53DFCBBBD646B157C0764FB463A679FCDCABF2855827E569C2`，
 以实际 `dist` 为准）。
 
 > 注意：`E:\mc\PCL\LatestLaunch.bat` 当前指向 `Together 测试端 1.2`，该实例里仍是

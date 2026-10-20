@@ -123,6 +123,8 @@
   "bbs_together.behaviors.context.deny_delete": "拒绝删除模型 %s 的请求",
   "bbs_together.behaviors.details.status": "审批状态",
   "bbs_together.behaviors.details.approver": "审批人",
+  "bbs_together.behaviors.details.source": "来源",
+  "bbs_together.behaviors.details.source_client": "客户端上报（未由服务端核实）",
   "bbs_together.behaviors.status.pending": "等待审批",
   "bbs_together.behaviors.status.approved": "已同意",
   "bbs_together.behaviors.status.denied": "已拒绝",

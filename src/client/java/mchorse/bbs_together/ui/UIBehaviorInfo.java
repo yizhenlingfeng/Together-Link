@@ -103,6 +103,14 @@ public class UIBehaviorInfo extends UIElement
             y = this.line(context, x, y, width, "bbs_together.behaviors.details.size", formatBytes(bytes), bottom);
         }
 
+        if ("client".equals(entry.extra.get("source")))
+        {
+            y = this.line(context, x, y, width,
+                "bbs_together.behaviors.details.source",
+                L10n.lang("bbs_together.behaviors.details.source_client").get(),
+                bottom);
+        }
+
         /* The subject line only stays for films: for models it would repeat the items */
         if (!entry.target.isEmpty() && entry.subType == BehaviorType.SUB_EDIT_FILM)
         {
@@ -129,6 +137,7 @@ public class UIBehaviorInfo extends UIElement
         for (Map.Entry<String, String> extra : entry.extra.entrySet())
         {
             if (BehaviorLogManager.BYTES_KEY.equals(extra.getKey())
+                || "source".equals(extra.getKey())
                 || REQUEST_EXTRA_KEYS.contains(extra.getKey()))
             {
                 continue;

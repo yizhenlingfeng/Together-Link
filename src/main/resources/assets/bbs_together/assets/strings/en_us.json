@@ -123,6 +123,8 @@
   "bbs_together.behaviors.context.deny_delete": "Deny the deletion request for model %s",
   "bbs_together.behaviors.details.status": "Decision",
   "bbs_together.behaviors.details.approver": "Decided by",
+  "bbs_together.behaviors.details.source": "Source",
+  "bbs_together.behaviors.details.source_client": "Client-reported (not server-verified)",
   "bbs_together.behaviors.status.pending": "Pending",
   "bbs_together.behaviors.status.approved": "Approved",
   "bbs_together.behaviors.status.denied": "Rejected",
