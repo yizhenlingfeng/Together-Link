@@ -2770,7 +2770,12 @@ public class TogetherServerNetwork {
         if (modelId == null || modelId.isEmpty() || modelId.contains("..")) {
             return;
         }
-        File modelDir = new File(BBSMod.getAssetsFolder(), "models/" + modelId.replace('/', File.separatorChar));
+        java.nio.file.Path safeModel = AssetPaths.resolveSafe(BBSMod.getAssetsFolder(), "models/" + modelId);
+
+        if (safeModel == null) {
+            return;
+        }
+        File modelDir = safeModel.toFile();
         boolean removed = TogetherServerNetwork.deleteModelFolder(modelDir);
         if (!removed) {
             System.out.println("[BBSTogether] Model " + modelId + " was already gone from the server assets");
