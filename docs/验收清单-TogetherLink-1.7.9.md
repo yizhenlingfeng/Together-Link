@@ -4,6 +4,9 @@
 （当前 SHA-256：`40F64D0003A7D14742B734049B1241C9E10AD6437A64C86E64F1162E15B0CF06`，
 以实际 `dist` 为准）。
 
+> 注意：`E:\mc\PCL\LatestLaunch.bat` 当前指向 `Together 测试端 1.2`，该实例里仍是
+> Together 1.7.7。不要用它验收本清单，请启动 `Together测试端`（1.7.9）实例。
+
 ## 0. 启动与握手
 
 - [ ] 单人/集成服务器启动到主菜单，无 `Mixin apply` / `InjectionException`。
