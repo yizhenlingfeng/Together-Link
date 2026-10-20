@@ -261,8 +261,9 @@ Together Link（原名 BBS Together）是 [BBS FS](https://github.com)（Blockbe
 - 优化资产同步：清单携带修改时间并自动仲裁冲突，上传使用服务器 mtime 作为 CAS 令牌，两端不再互传同一文件
 - CDN 设置接入只读下载路径：优先从配置的 CDN 地址获取资产，校验 SHA-1/大小后落盘，失败自动回退服务器；上传和权限校验仍由服务器负责
 - 服务端把 `asset_sync_max_mb` / `coop_invite_seconds` 随 hello 下发给客户端，下载上限不再依赖两端各自配置
-- 服务端 manifest/请求/库存处理改用有界共享 I/O 线程池，客户端 SHA-1 缓存与删除 tombstone 加上限，避免长时间运行或恶意刷包无限增长
+- 服务端 manifest/请求/库存处理改用有界共享 I/O 线程池，上传分片改为单线程有序写入（不再占用服务器 tick 线程），客户端 SHA-1 缓存与删除 tombstone 加上限，避免长时间运行或恶意刷包无限增长
 - l10n 只保留 addon 事件这一处链接注册，去掉重复 registerOne，减少启动时重复加载语言文件
+- manifest resync 与行为上报增加每玩家限流，等级 1 客户端不能刷爆行为日志
 - 修复：点选等级分组标题过滤行为列表时崩溃
 - 注意：客户端与服务端必须使用相同版本；白名单模式下的 1 级玩家升级后默认禁止录制，需管理员执行 `grant record allow`
 
