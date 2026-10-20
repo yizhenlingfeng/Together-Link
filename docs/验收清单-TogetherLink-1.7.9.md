@@ -6,6 +6,9 @@
 
 > 注意：`E:\mc\PCL\LatestLaunch.bat` 当前指向 `Together 测试端 1.2`，该实例里仍是
 > Together 1.7.7。不要用它验收本清单，请启动 `Together测试端`（1.7.9）实例。
+>
+> 2026-10-20 22:22 已用 `Together测试端` 实例启动冒烟：Fabric 0.20.0 正常加载
+> `bbs_together 1.7.9-1.20.1`，无 `Mixin apply`/`InjectionException`。双端项目仍需人工执行。
 
 ## 0. 启动与握手
 
