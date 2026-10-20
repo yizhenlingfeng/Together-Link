@@ -61,7 +61,7 @@ public abstract class FormCellRendererTooLargeMixin
         context.batcher.text(label, tx, ty, 0xFFFFFFFF, true);
     }
 
-    /** Locked models get the same treatment as over-size ones, in grey. */
+    /** Locked models get the same treatment as over-size ones, in grey, but only when this player cannot edit them. */
     private static boolean together$paintLocked(UIContext context, Form form, int x, int y, int w, int h)
     {
         if (!(form instanceof ModelForm modelForm))
@@ -71,7 +71,7 @@ public abstract class FormCellRendererTooLargeMixin
 
         String id = modelForm.model.get();
 
-        if (id == null || AssetLockClient.get(AssetLockType.MODEL, id) == null)
+        if (id == null || !AssetLockClient.isLockedForSelf(AssetLockType.MODEL, id))
         {
             return false;
         }

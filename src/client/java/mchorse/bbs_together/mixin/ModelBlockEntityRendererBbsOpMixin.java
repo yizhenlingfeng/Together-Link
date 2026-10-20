@@ -39,7 +39,7 @@ public class ModelBlockEntityRendererBbsOpMixin
 
         String id = AssetLockManager.modelBlockId(entity.getWorld(), entity.getPos());
 
-        if (AssetLockClient.get(AssetLockType.MODEL_BLOCK, id) == null)
+        if (!AssetLockClient.isLockedForSelf(AssetLockType.MODEL_BLOCK, id))
         {
             return;
         }

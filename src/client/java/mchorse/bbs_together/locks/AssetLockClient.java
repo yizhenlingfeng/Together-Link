@@ -106,6 +106,16 @@ public final class AssetLockClient
         return lock.allows(self());
     }
 
+    /**
+     * Whether the lock badge should be shown to this client. A lock the local player may
+     * edit stays invisible to them: whitelisted players, players outside a blacklist and
+     * level-2 admins see no "locked" marker, while everyone the lock actually denies does.
+     */
+    public static boolean isLockedForSelf(AssetLockType type, String assetId)
+    {
+        return get(type, assetId) != null && !canEdit(type, assetId);
+    }
+
     /** Whether the current player may edit a model whose asset path starts with models/&lt;id&gt;. */
     public static boolean canEditModelPath(String relativePath)
     {
