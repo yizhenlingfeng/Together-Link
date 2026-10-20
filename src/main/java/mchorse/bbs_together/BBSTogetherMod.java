@@ -2,6 +2,7 @@ package mchorse.bbs_together;
 
 import mchorse.bbs_mod.blocks.ModelBlock;
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
+import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.locks.AssetLockManager;
@@ -157,7 +158,16 @@ implements ModInitializer {
 
         String id = AssetLockManager.modelBlockId(world, pos);
 
-        if (AssetLockManager.canEdit(player.getUuid(), AssetLockType.MODEL_BLOCK, id))
+        /* Only locked blocks are gated here. Unlocked model blocks keep their old
+         * behaviour; the domain check below closes the case of a domain-restricted
+         * player who happens to be whitelisted on the lock. */
+        if (AssetLockManager.get(AssetLockType.MODEL_BLOCK, id) == null)
+        {
+            return ActionResult.PASS;
+        }
+
+        if (BbsOpManager.isAllowed(player.getUuid(), BbsOpDomain.MODEL_BLOCKS)
+            && AssetLockManager.canEdit(player.getUuid(), AssetLockType.MODEL_BLOCK, id))
         {
             return ActionResult.PASS;
         }

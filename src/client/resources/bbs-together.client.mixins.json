@@ -32,6 +32,7 @@
         "UIModelEditorPanelBbsOpMixin",
         "ModelBlockEntityRendererBbsOpMixin",
         "ModelBlockPickBbsOpMixin",
+        "ModelBlockBreakGuardMixin",
         "UIClipsMixin",
         "UIFormCategoryModelSizeMixin",
         "FormCellRendererTooLargeMixin",

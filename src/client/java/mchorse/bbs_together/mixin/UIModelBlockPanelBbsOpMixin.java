@@ -94,7 +94,7 @@ public class UIModelBlockPanelBbsOpMixin
     private void together$veilEditingSide(UIContext context, CallbackInfo ci)
     {
         UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
-        boolean readOnly = !BbsOpClientState.canEdit("model_blocks");
+        boolean readOnly = !BbsOpClientState.canEdit("model_blocks") || this.together$assetLocked();
 
         if (this.together$lockSection != null)
         {
@@ -136,6 +136,23 @@ public class UIModelBlockPanelBbsOpMixin
         }
 
         ReadOnlyOverlay.drawVeil(context, veil);
-        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields, "model_blocks", covered);
+        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields,
+            () -> !BbsOpClientState.canEdit("model_blocks") || this.together$assetLocked(), covered);
+    }
+
+    /** The selected block is locked against this player (not just domain read-only). */
+    @Unique
+    private boolean together$assetLocked()
+    {
+        ModelBlockEntity entity = this.modelBlock;
+
+        if (entity == null || entity.getWorld() == null)
+        {
+            return false;
+        }
+
+        String key = AssetLockManager.modelBlockId(entity.getWorld(), entity.getPos());
+
+        return !AssetLockClient.canEdit(AssetLockType.MODEL_BLOCK, key);
     }
 }

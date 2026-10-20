@@ -59,15 +59,19 @@ public abstract class FormCellRendererTooLargeMixin
             context.batcher.text(label, tx, ty, 0xFFFFFFFF, true);
         }
 
-        together$paintOwnLock(context, form, x, y, w, h);
+        together$paintLockBadge(context, form, x, y, w, h);
     }
 
     /**
-     * The lock owner gets a small padlock in the cell's bottom-right corner so they can
-     * recognise the models they locked. The big grey overlay is for players the lock
-     * actually denies, in which case {@link #together$paintLocked} already returned.
+     * The lock owner gets a small closed padlock in the cell's bottom-right corner so they
+     * can recognise the models they locked. A level-2 admin who did not create the lock gets
+     * an open padlock there instead: they may edit the model but still need to find locks to
+     * manage. Other editors (whitelist / blacklist exceptions) see no badge.
+     *
+     * <p>The big grey overlay is for players the lock actually denies, in which case
+     * {@link #together$paintLocked} already returned.</p>
      */
-    private static void together$paintOwnLock(UIContext context, Form form, int x, int y, int w, int h)
+    private static void together$paintLockBadge(UIContext context, Form form, int x, int y, int w, int h)
     {
         if (!(form instanceof ModelForm modelForm))
         {
@@ -76,12 +80,20 @@ public abstract class FormCellRendererTooLargeMixin
 
         String id = modelForm.model.get();
 
-        if (id == null || !AssetLockClient.isOwnLock(AssetLockType.MODEL, id))
+        if (id == null || AssetLockClient.get(AssetLockType.MODEL, id) == null)
         {
             return;
         }
 
-        context.batcher.outlinedIcon(Icons.LOCKED, x + w - 9, y + h - 9, 0.5F, 0.5F);
+        boolean own = AssetLockClient.isOwnLock(AssetLockType.MODEL, id);
+        boolean manage = AssetLockClient.canManage();
+
+        if (!own && !manage)
+        {
+            return;
+        }
+
+        context.batcher.outlinedIcon(own ? Icons.LOCKED : Icons.UNLOCKED, x + w - 9, y + h - 9, 0.5F, 0.5F);
     }
 
     /** Locked models get the same treatment as over-size ones, in grey, but only when this player cannot edit them. */

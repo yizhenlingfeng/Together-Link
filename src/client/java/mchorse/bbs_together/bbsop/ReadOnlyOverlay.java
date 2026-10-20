@@ -9,6 +9,8 @@ import mchorse.bbs_mod.utils.colors.Colors;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 
+import java.util.function.BooleanSupplier;
+
 /**
  * Read-only overlay elements: a translucent grey wash with a centred padlock and the
  * localized "view only" caption, mirroring what {@code UIElement.renderLockedArea} draws
@@ -23,12 +25,18 @@ public final class ReadOnlyOverlay
     /** Builds a veil element sized via {@code relative(...)}, swallowing clicks and scrolls. */
     public static UIElement create(String domain)
     {
+        return create(() -> !BbsOpClientState.canEdit(domain));
+    }
+
+    /** Same, for a lock that is not a plain domain (for example one asset lock). */
+    public static UIElement create(BooleanSupplier locked)
+    {
         return new UIElement()
         {
             @Override
             public void render(UIContext context)
             {
-                if (!BbsOpClientState.canEdit(domain))
+                if (locked.getAsBoolean())
                 {
                     drawVeil(context, this.area);
                 }
@@ -40,14 +48,14 @@ public final class ReadOnlyOverlay
                 /* Only when locked AND the cursor is over the veil: BBS walks every child
                  * without an area pre-check, so an unconditional "true" would eat clicks meant
                  * for unrelated elements (it broke the timeline scrubbing once already). */
-                return !BbsOpClientState.canEdit(domain) && this.area.isInside(context);
+                return locked.getAsBoolean() && this.area.isInside(context);
             }
 
             @Override
             protected boolean subMouseScrolled(UIContext context)
             {
                 /* Scrolling a trackpad/spinbox edits values — swallow it too. */
-                return !BbsOpClientState.canEdit(domain) && this.area.isInside(context);
+                return locked.getAsBoolean() && this.area.isInside(context);
             }
         };
     }
@@ -56,12 +64,18 @@ public final class ReadOnlyOverlay
      * (context menus) are swallowed, left-click selection and scrolling pass through. */
     public static UIElement createClickThrough(String domain)
     {
+        return createClickThrough(() -> !BbsOpClientState.canEdit(domain));
+    }
+
+    /** Same, for a lock that is not a plain domain (for example one asset lock). */
+    public static UIElement createClickThrough(BooleanSupplier locked)
+    {
         return new UIElement()
         {
             @Override
             public void render(UIContext context)
             {
-                if (!BbsOpClientState.canEdit(domain))
+                if (locked.getAsBoolean())
                 {
                     drawVeil(context, this.area);
                 }
@@ -70,7 +84,7 @@ public final class ReadOnlyOverlay
             @Override
             protected boolean subMouseClicked(UIContext context)
             {
-                return !BbsOpClientState.canEdit(domain) && context.mouseButton == 1 && this.area.isInside(context);
+                return locked.getAsBoolean() && context.mouseButton == 1 && this.area.isInside(context);
             }
 
             @Override
@@ -95,9 +109,15 @@ public final class ReadOnlyOverlay
     /** Attaches one shield per {@code boundTo} element, in parallel with {@code slots}. */
     public static void ensureShieldsAttached(UIElement parent, UIElement[] slots, String domain, UIElement... boundTo)
     {
+        ensureShieldsAttached(parent, slots, () -> !BbsOpClientState.canEdit(domain), boundTo);
+    }
+
+    /** Same, for a lock that is not a plain domain (for example one asset lock). */
+    public static void ensureShieldsAttached(UIElement parent, UIElement[] slots, BooleanSupplier locked, UIElement... boundTo)
+    {
         for (int i = 0; i < boundTo.length; i++)
         {
-            ensureShieldAttached(parent, slots, i, domain, boundTo[i]);
+            ensureShieldAttached(parent, slots, i, locked, boundTo[i]);
         }
     }
 
@@ -108,6 +128,12 @@ public final class ReadOnlyOverlay
      * widgets.
      */
     public static void ensureShieldAttached(UIElement parent, UIElement[] slots, int slot, String domain, UIElement boundTo)
+    {
+        ensureShieldAttached(parent, slots, slot, () -> !BbsOpClientState.canEdit(domain), boundTo);
+    }
+
+    /** Same, for a lock that is not a plain domain (for example one asset lock). */
+    public static void ensureShieldAttached(UIElement parent, UIElement[] slots, int slot, BooleanSupplier locked, UIElement boundTo)
     {
         if (slots[slot] == null)
         {
@@ -122,13 +148,13 @@ public final class ReadOnlyOverlay
                 @Override
                 protected boolean subMouseClicked(UIContext context)
                 {
-                    return !BbsOpClientState.canEdit(domain) && this.syncArea().isInside(context);
+                    return locked.getAsBoolean() && this.syncArea().isInside(context);
                 }
 
                 @Override
                 protected boolean subMouseScrolled(UIContext context)
                 {
-                    return !BbsOpClientState.canEdit(domain) && this.syncArea().isInside(context);
+                    return locked.getAsBoolean() && this.syncArea().isInside(context);
                 }
 
                 /* The click path runs before (or instead of) render: sync here too, so the hit
