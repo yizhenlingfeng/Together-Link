@@ -250,6 +250,8 @@ public class TogetherServerNetwork {
     );
     private static final AtomicBoolean assetChangePingPending = new AtomicBoolean(false);
     private static final ConcurrentHashMap<UUID, Long> uploadRejectNoticeAt = new ConcurrentHashMap();
+    private static final ConcurrentHashMap<UUID, Long> manifestQueryAt = new ConcurrentHashMap();
+    private static final ConcurrentHashMap<UUID, Long> behaviorReportAt = new ConcurrentHashMap();
     private static final int ASSET_QUEUE_MAX = 4096;
     public static final int COMMIT_REJECTED_NO_CHANGE = 0;
     public static final int COMMIT_REJECTED_NO_FILM = 1;
@@ -409,6 +411,13 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_UPLOAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetUpload(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_HELLO, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleHello(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_RESYNC, (server, player, handler, buf, resp) -> {
+            long now = System.currentTimeMillis();
+            Long previous = manifestQueryAt.put(player.getUuid(), now);
+
+            if (previous != null && now - previous < 1000L) {
+                return;
+            }
+
             long clientVersion = buf.readableBytes() >= 8 ? buf.readLong() : 0L;
             TogetherServerNetwork.sendAssetManifest(server, player, clientVersion);
         });
@@ -570,6 +579,8 @@ public class TogetherServerNetwork {
             playerCrushers.remove(uuid);
             ServerCrusherPool.remove(uuid);
             uploadRejectNoticeAt.remove(uuid);
+            manifestQueryAt.remove(uuid);
+            behaviorReportAt.remove(uuid);
             String goneScreenFilm = playerInFilmScreen.remove(uuid);
             playerReceivePush.remove(uuid);
             playerOwnedAssets.remove(uuid);
@@ -2537,6 +2548,14 @@ public class TogetherServerNetwork {
         if (BbsOpManager.get(player.getUuid()) < 1) {
             return;
         }
+
+        long now = System.currentTimeMillis();
+        Long previous = behaviorReportAt.put(player.getUuid(), now);
+
+        if (previous != null && now - previous < 250L) {
+            return;
+        }
+
         int subType = buf.readInt();
         String target = buf.readString();
         int itemCount = buf.readInt();
