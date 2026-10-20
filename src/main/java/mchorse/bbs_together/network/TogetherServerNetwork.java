@@ -2956,10 +2956,7 @@ public class TogetherServerNetwork {
 
                 return;
             }
-            deletedFilmIds.add(filmId);
             AssetLockManager.removeForAsset(AssetLockType.FILM, filmId);
-            lastSavedFilmSnapshots.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
-            filmSaveDirty.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
             try {
                 BBSMod.getFilms().delete(filmId);
             }
@@ -2968,16 +2965,7 @@ public class TogetherServerNetwork {
             }
             FilmCommitStore.deleteFilm(filmId);
             FilmBranchStore.forgetFilm(filmId);
-            playerCommitSelections.entrySet().removeIf(entry -> filmId.equals(((CommitSelection)entry.getValue()).filmId));
-            playerEditingFilm.entrySet().removeIf(entry -> filmId.equals(entry.getValue()));
-            playerInFilmScreen.entrySet().removeIf(entry -> filmId.equals(entry.getValue()));
-            playerCursors.entrySet().removeIf(entry -> filmId.equals(((CursorData)entry.getValue()).filmId));
-            playerFormLocks.entrySet().removeIf(entry -> filmId.equals(((FormLockData)entry.getValue()).filmId));
-            for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
-                PacketByteBuf out = PacketByteBufs.create();
-                out.writeString(filmId);
-                ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_FILM_DELETED, (PacketByteBuf)out);
-            }
+            TogetherServerNetwork.applyFilmDeleteRuntime(server, filmId);
         });
     }
 
@@ -3005,48 +2993,143 @@ public class TogetherServerNetwork {
             AssetLockManager.rename(AssetLockType.FILM, oldId, newId);
             FilmCommitStore.renameFilm(oldId, newId);
             FilmBranchStore.renameFilm(oldId, newId);
-            for (Map.Entry<UUID, CommitSelection> entry : playerCommitSelections.entrySet()) {
-                if (!oldId.equals(entry.getValue().filmId)) continue;
+            TogetherServerNetwork.applyFilmRenameRuntime(server, oldId, newId, player.getUuid());
+        });
+    }
+
+    /**
+     * Drop every piece of per-player/per-branch runtime state that points at a deleted film.
+     * Callers are responsible for deleting the BBS film, its locks and its commit/branch
+     * folders; this method only handles the in-memory maps and the client notification.
+     */
+    public static void applyFilmDeleteRuntime(MinecraftServer server, String filmId) {
+        if (filmId == null || filmId.isEmpty()) {
+            return;
+        }
+
+        deletedFilmIds.add(filmId);
+        lastSavedFilmSnapshots.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
+        filmSaveDirty.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
+        filmSaveFirstDirty.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
+
+        java.util.ArrayList<String> deleteTaskKeys = new java.util.ArrayList<>();
+
+        for (String key : filmSaveTasks.keySet()) {
+            if (key.startsWith(filmId + "\t")) {
+                deleteTaskKeys.add(key);
+            }
+        }
+
+        for (String key : deleteTaskKeys) {
+            ScheduledFuture<?> task = filmSaveTasks.remove(key);
+
+            if (task != null) {
+                task.cancel(false);
+            }
+        }
+
+        playerCommitSelections.entrySet().removeIf(entry -> filmId.equals(entry.getValue().filmId));
+        playerEditingFilm.entrySet().removeIf(entry -> filmId.equals(entry.getValue()));
+        playerInFilmScreen.entrySet().removeIf(entry -> filmId.equals(entry.getValue()));
+        playerCursors.entrySet().removeIf(entry -> filmId.equals(entry.getValue().filmId));
+        playerFormLocks.entrySet().removeIf(entry -> filmId.equals(entry.getValue().filmId));
+
+        for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+            PacketByteBuf out = PacketByteBufs.create();
+            out.writeString(filmId);
+            ServerPlayNetworking.send(other, CLIENT_FILM_DELETED, out);
+        }
+    }
+
+    /**
+     * Move all runtime state and open clients from one film id to another. The BBS film,
+     * locks and commit/branch folders must already have been renamed by the caller.
+     */
+    public static void applyFilmRenameRuntime(MinecraftServer server, String oldId, String newId, UUID actor) {
+        if (oldId == null || newId == null || oldId.isEmpty() || newId.isEmpty() || oldId.equals(newId)) {
+            return;
+        }
+
+        for (Map.Entry<UUID, CommitSelection> entry : playerCommitSelections.entrySet()) {
+            if (oldId.equals(entry.getValue().filmId)) {
                 playerCommitSelections.put(entry.getKey(), new CommitSelection(newId, entry.getValue().commitId));
             }
-            TogetherServerNetwork.broadcastCommitSelections(server, oldId);
-            TogetherServerNetwork.broadcastCommitSelections(server, newId);
-            TogetherServerNetwork.renameBranchKeys(lastSavedFilmSnapshots, oldId, newId);
-            TogetherServerNetwork.renameBranchKeys(filmSaveDirty, oldId, newId);
-            for (Map.Entry<String, AtomicBoolean> entry : filmSaveDirty.entrySet()) {
-                int tab;
-                if (!((String)entry.getKey()).startsWith(newId + "\t") || !((AtomicBoolean)entry.getValue()).get() || (tab = ((String)entry.getKey()).lastIndexOf(9)) < 0) continue;
-                TogetherServerNetwork.scheduleFilmSave(server, newId, ((String)entry.getKey()).substring(tab + 1));
+        }
+
+        broadcastCommitSelections(server, oldId);
+        broadcastCommitSelections(server, newId);
+
+        renameBranchKeys(lastSavedFilmSnapshots, oldId, newId);
+        renameBranchKeys(filmSaveDirty, oldId, newId);
+        renameBranchKeys(filmSaveFirstDirty, oldId, newId);
+
+        java.util.ArrayList<String> oldTaskKeys = new java.util.ArrayList<>();
+
+        for (String key : filmSaveTasks.keySet()) {
+            if (key.startsWith(oldId + "\t")) {
+                oldTaskKeys.add(key);
             }
-            for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
-                if (!oldId.equals(entry.getValue())) continue;
-                playerEditingFilm.put((UUID)entry.getKey(), newId);
+        }
+
+        for (String key : oldTaskKeys) {
+            ScheduledFuture<?> task = filmSaveTasks.remove(key);
+
+            if (task != null) {
+                task.cancel(false);
             }
-            for (Map.Entry<UUID, String> entry : playerInFilmScreen.entrySet()) {
-                if (!oldId.equals(entry.getValue())) continue;
-                playerInFilmScreen.put((UUID)entry.getKey(), newId);
+        }
+
+        for (Map.Entry<String, AtomicBoolean> entry : filmSaveDirty.entrySet()) {
+            if (!entry.getKey().startsWith(newId + "\t") || !entry.getValue().get()) {
+                continue;
             }
-            TogetherServerNetwork.broadcastPlayerCommitPositions(server, oldId);
-            TogetherServerNetwork.broadcastPlayerCommitPositions(server, newId);
-            for (CursorData cursorData : playerCursors.values()) {
-                if (!oldId.equals(cursorData.filmId)) continue;
+
+            int tab = entry.getKey().lastIndexOf('\t');
+
+            if (tab >= 0) {
+                scheduleFilmSave(server, newId, entry.getKey().substring(tab + 1));
+            }
+        }
+
+        for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
+            if (oldId.equals(entry.getValue())) {
+                playerEditingFilm.put(entry.getKey(), newId);
+            }
+        }
+
+        for (Map.Entry<UUID, String> entry : playerInFilmScreen.entrySet()) {
+            if (oldId.equals(entry.getValue())) {
+                playerInFilmScreen.put(entry.getKey(), newId);
+            }
+        }
+
+        broadcastPlayerCommitPositions(server, oldId);
+        broadcastPlayerCommitPositions(server, newId);
+
+        for (CursorData cursorData : playerCursors.values()) {
+            if (oldId.equals(cursorData.filmId)) {
                 cursorData.filmId = newId;
             }
-            for (Map.Entry entry : playerFormLocks.entrySet()) {
-                if (!oldId.equals(((FormLockData)entry.getValue()).filmId)) continue;
-                playerFormLocks.put((UUID)entry.getKey(), new FormLockData(newId, ((FormLockData)entry.getValue()).replayIndex));
+        }
+
+        for (Map.Entry<UUID, FormLockData> entry : playerFormLocks.entrySet()) {
+            FormLockData lock = entry.getValue();
+
+            if (oldId.equals(lock.filmId)) {
+                playerFormLocks.put(entry.getKey(), new FormLockData(newId, lock.replayIndex));
             }
-            for (ServerPlayerEntity serverPlayerEntity : server.getPlayerManager().getPlayerList()) {
-                if (serverPlayerEntity.getUuid().equals(player.getUuid())) continue;
+        }
+
+        for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+            if (actor == null || !other.getUuid().equals(actor)) {
                 PacketByteBuf renameOut = PacketByteBufs.create();
                 renameOut.writeString(oldId);
                 renameOut.writeString(newId);
-                ServerPlayNetworking.send((ServerPlayerEntity)serverPlayerEntity, (Identifier)CLIENT_FILM_RENAMED, (PacketByteBuf)renameOut);
+                ServerPlayNetworking.send(other, CLIENT_FILM_RENAMED, renameOut);
             }
-            for (ServerPlayerEntity serverPlayerEntity : server.getPlayerManager().getPlayerList()) {
-                ServerPlayNetworking.send((ServerPlayerEntity)serverPlayerEntity, (Identifier)CLIENT_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
-            }
-        });
+
+            ServerPlayNetworking.send(other, CLIENT_FILM_LIST_CHANGED, PacketByteBufs.create());
+        }
     }
 
     private static <T> void renameBranchKeys(Map<String, T> map, String oldId, String newId) {

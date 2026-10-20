@@ -288,8 +288,10 @@ public class ServerNetworkBbsOpMixin
 
                         for (String oldId : moved)
                         {
-                            FilmCommitStore.renameFilm(oldId, to + oldId.substring(from.length()));
-                            FilmBranchStore.renameFilm(oldId, to + oldId.substring(from.length()));
+                            String newId = to + oldId.substring(from.length());
+                            FilmCommitStore.renameFilm(oldId, newId);
+                            FilmBranchStore.renameFilm(oldId, newId);
+                            TogetherServerNetwork.applyFilmRenameRuntime(server, oldId, newId, player.getUuid());
                         }
 
                         break;
@@ -321,6 +323,7 @@ public class ServerNetworkBbsOpMixin
                             AssetLockManager.removeForAsset(AssetLockType.FILM, deletedId);
                             FilmCommitStore.deleteFilm(deletedId);
                             FilmBranchStore.forgetFilm(deletedId);
+                            TogetherServerNetwork.applyFilmDeleteRuntime(server, deletedId);
                         }
 
                         break;
