@@ -8,6 +8,7 @@ import mchorse.bbs_mod.ui.utils.cells.CellState;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_together.locks.AssetLockClient;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.ui.AssetLockUi;
@@ -74,6 +75,31 @@ public class UIFormCategoryBbsOpMixin
     {
         UIFormCategory self = (UIFormCategory) (Object) this;
         Form form = self.getContextForm();
+        boolean locked = together$isLocked(form);
+
+        if (self.isGroupContext())
+        {
+            for (Form selected : self.selection.getItems())
+            {
+                if (together$isLocked(selected))
+                {
+                    locked = true;
+                    break;
+                }
+            }
+        }
+
+        /* Read-only/locked players get the two delete actions only. Clearing the manager
+         * here (instead of pre-empting UIElement.createContextMenu) keeps BBS-Cubed's
+         * RETURN-injected menu entries alive. */
+        if (!BbsOpClientState.canEdit("morph") || locked)
+        {
+            menu.actions.clear();
+            menu.icons.clear();
+            ModelDeleteActions.addActions(menu, self, form);
+
+            return;
+        }
 
         ModelDeleteActions.addActions(menu, self, form);
 
@@ -90,5 +116,17 @@ public class UIFormCategoryBbsOpMixin
                 });
             }
         }
+    }
+
+    private static boolean together$isLocked(Form form)
+    {
+        if (!(form instanceof ModelForm modelForm))
+        {
+            return false;
+        }
+
+        String id = modelForm.model.get();
+
+        return id != null && !AssetLockClient.canEdit(AssetLockType.MODEL, id);
     }
 }

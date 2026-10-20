@@ -23,7 +23,6 @@
         "FilmRecordingControllerBbsOpMixin",
         "FilmsBbsOpMixin",
         "UIFilmPreviewBbsOpMixin",
-        "UIElementContextMenuBbsOpMixin",
         "UIReplayPropertiesPanelBbsOpMixin",
         "UIReplaysListPanelBbsOpMixin",
         "UIFormListBbsOpMixin",
