@@ -68,6 +68,12 @@ public final class SyncBarRenderer {
             return;
         }
 
+        if (phase == AssetSyncTracker.Phase.IDLE) {
+            drawIdleDot(context, dashboard);
+            lastFrameAt = now;
+            return;
+        }
+
         float dt = lastFrameAt == 0L ? 0.016F : Math.min(0.1F, (now - lastFrameAt) / 1000F);
         lastFrameAt = now;
         float target = phase == AssetSyncTracker.Phase.FINISHED ? 1F : AssetSyncTracker.globalProgress();
