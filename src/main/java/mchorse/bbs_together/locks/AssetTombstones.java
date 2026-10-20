@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class AssetTombstones {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Map<String, Long> DELETED = new ConcurrentHashMap<>();
+    private static final int MAX_TOMBSTONES = 10_000;
     private static File file;
     private static boolean dirty;
 
@@ -56,6 +57,7 @@ public final class AssetTombstones {
         }
 
         DELETED.put(modelId, System.currentTimeMillis());
+        trim();
         dirty = true;
         save();
     }
@@ -72,6 +74,27 @@ public final class AssetTombstones {
 
     public static Map<String, Long> snapshot() {
         return Map.copyOf(DELETED);
+    }
+
+    private static void trim() {
+        while (DELETED.size() > MAX_TOMBSTONES) {
+            String oldest = null;
+            long oldestAt = Long.MAX_VALUE;
+
+            for (Map.Entry<String, Long> entry : DELETED.entrySet()) {
+                if (entry.getValue() < oldestAt) {
+                    oldestAt = entry.getValue();
+                    oldest = entry.getKey();
+                }
+            }
+
+            if (oldest == null) {
+                return;
+            }
+
+            DELETED.remove(oldest);
+            dirty = true;
+        }
     }
 
     private static void load() {
@@ -91,6 +114,8 @@ public final class AssetTombstones {
                     DELETED.put(entry.getKey(), entry.getValue().getAsLong());
                 }
             }
+
+            trim();
         }
         catch (Exception e) {
             System.err.println("[BBSTogether] Failed to load asset tombstones: " + e);

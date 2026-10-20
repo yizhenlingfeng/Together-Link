@@ -2,7 +2,6 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.film.Recorder;
-import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_together.BBSTogetherFix66Client;
 import mchorse.bbs_together.network.CoopClient;
 import net.fabricmc.api.EnvType;
@@ -30,7 +29,9 @@ public class BBSClientInitMixin {
 
     @Inject(method={"onInitializeClient"}, at={@At(value="TAIL")}, remap=false)
     private void onBBSClientInit(CallbackInfo ci) {
-        BBSModClient.getL10n().registerOne(lang -> new Link("bbs_together", "strings/" + lang + ".json"));
+        /* The link is registered once through BBSTogetherClient's RegisterL10nEvent.
+         * Older builds also called registerOne() here, which loaded every string file
+         * twice; only the post-init reload is still needed for addon strings. */
         BBSModClient.getL10n().reload();
         BBSTogetherFix66Client.registerSettingUIs();
     }

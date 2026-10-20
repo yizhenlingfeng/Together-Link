@@ -236,6 +236,18 @@ public class TogetherServerNetwork {
         t.setDaemon(true);
         return t;
     });
+    /** Shared I/O pool for manifest/inventory/request work. These used to create one
+     *  unbounded thread per packet, so a client spamming resync could exhaust the JVM. */
+    private static final java.util.concurrent.ThreadPoolExecutor ASSET_IO_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+        3, 3, 0L, TimeUnit.MILLISECONDS,
+        new java.util.concurrent.ArrayBlockingQueue<>(128),
+        r -> {
+            Thread t = new Thread(r, "BBSTogether-AssetIO");
+            t.setDaemon(true);
+            return t;
+        },
+        new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy()
+    );
     private static final AtomicBoolean assetChangePingPending = new AtomicBoolean(false);
     private static final ConcurrentHashMap<UUID, Long> uploadRejectNoticeAt = new ConcurrentHashMap();
     private static final int ASSET_QUEUE_MAX = 4096;
@@ -452,6 +464,7 @@ public class TogetherServerNetwork {
      * WARNING - Removed try catching itself - possible behaviour change.
      */
     public static void reset() {
+        ASSET_IO_EXECUTOR.getQueue().clear();
         playerCrushers.clear();
         ServerCrusherPool.reset();
         pendingUploadAggregates.clear();
@@ -878,7 +891,7 @@ public class TogetherServerNetwork {
         }
         File assetsRoot = assetsFolder;
         final Path assetsPath = assetsFolder.toPath();
-        Thread thread = new Thread(() -> {
+        ASSET_IO_EXECUTOR.execute(() -> {
             try {
                 final MapType manifest = new MapType();
                 final StringBuilder fingerprint = new StringBuilder();
@@ -921,9 +934,7 @@ public class TogetherServerNetwork {
             catch (Exception e) {
                 e.printStackTrace();
             }
-        }, "BBSTogether-AssetManifest");
-        thread.setDaemon(true);
-        thread.start();
+        });
     }
 
     private static long fingerprintVersion(String content) {
@@ -961,7 +972,7 @@ public class TogetherServerNetwork {
             paths.add(buf.readString());
         }
         assetRequestsSeen.addAndGet(paths.size());
-        Thread thread = new Thread(() -> {
+        ASSET_IO_EXECUTOR.execute(() -> {
             File assetsFolder = BBSMod.getAssetsFolder();
             ArrayList<String> sent = new ArrayList<>();
 
@@ -981,9 +992,7 @@ public class TogetherServerNetwork {
             }
 
             TogetherServerNetwork.recordDownloadBehavior(player, sent);
-        }, "BBSTogether-AssetSend");
-        thread.setDaemon(true);
-        thread.start();
+        });
     }
 
     /** Maps an asset path to the content domain that must also allow the write. */
@@ -1496,7 +1505,7 @@ public class TogetherServerNetwork {
             if (bytes == null) {
                 return;
             }
-            Thread thread = new Thread(() -> {
+            ASSET_IO_EXECUTOR.execute(() -> {
                 try {
                     BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
                     if (!data.isMap()) {
@@ -1537,9 +1546,7 @@ public class TogetherServerNetwork {
                 catch (Exception e) {
                     e.printStackTrace();
                 }
-            }, "BBSTogether-FilmInventory");
-            thread.setDaemon(true);
-            thread.start();
+            });
         });
     }
 

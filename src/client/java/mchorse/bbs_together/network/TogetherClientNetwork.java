@@ -213,16 +213,25 @@ public class TogetherClientNetwork {
                 return again.sha1;
             }
             String sha1 = sha1OfLocalFile(path);
-            localHashCache.put(path.toString(), new HashEntry(mtime, size, sha1));
+            putHashCache(path.toString(), new HashEntry(mtime, size, sha1));
             hashCacheDirty = true;
             return sha1;
         }
     }
 
+    /** Hard cap so a long session with many temporary assets cannot grow the cache forever. */
+    private static void putHashCache(String key, HashEntry entry) {
+        if (localHashCache.size() >= 250_000 && !localHashCache.containsKey(key)) {
+            localHashCache.clear();
+        }
+
+        localHashCache.put(key, entry);
+    }
+
     private static void cacheLocalSha1(Path path, String sha1) {
         if (sha1 == null || sha1.isEmpty()) return;
         try {
-            localHashCache.put(path.toString(), new HashEntry(Files.getLastModifiedTime(path).toMillis(), path.toFile().length(), sha1));
+            putHashCache(path.toString(), new HashEntry(Files.getLastModifiedTime(path).toMillis(), path.toFile().length(), sha1));
             hashCacheDirty = true;
         }
         catch (Exception ignored) {}
