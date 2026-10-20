@@ -248,6 +248,18 @@ public class TogetherServerNetwork {
         },
         new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy()
     );
+    /** Upload slices must hit the disk in packet order; one writer also keeps the
+     *  server thread free of large file writes. */
+    private static final java.util.concurrent.ThreadPoolExecutor ASSET_WRITE_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS,
+        new java.util.concurrent.LinkedBlockingQueue<>(2048),
+        r -> {
+            Thread t = new Thread(r, "BBSTogether-AssetWrite");
+            t.setDaemon(true);
+            return t;
+        },
+        new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy()
+    );
     private static final AtomicBoolean assetChangePingPending = new AtomicBoolean(false);
     private static final ConcurrentHashMap<UUID, Long> uploadRejectNoticeAt = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Long> manifestQueryAt = new ConcurrentHashMap();
@@ -474,6 +486,7 @@ public class TogetherServerNetwork {
      */
     public static void reset() {
         ASSET_IO_EXECUTOR.getQueue().clear();
+        ASSET_WRITE_EXECUTOR.getQueue().clear();
         playerCrushers.clear();
         ServerCrusherPool.reset();
         pendingUploadAggregates.clear();
@@ -1042,7 +1055,18 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.noticeUploadRejected(server, uploader);
             return;
         }
-        TogetherServerNetwork.crusherFor(uploader).receive(buf, (bytes, packetByteBuf) -> {
+        TogetherServerNetwork.crusherFor(uploader).receive(buf, (bytes, sourceBuf) -> {
+            int headerSize = sourceBuf.readableBytes();
+
+            if (headerSize < 0 || headerSize > 1024 * 1024) {
+                return;
+            }
+
+            byte[] header = new byte[headerSize];
+            sourceBuf.readBytes(header);
+            ASSET_WRITE_EXECUTOR.execute(() -> {
+            PacketByteBuf packetByteBuf = PacketByteBufs.create();
+            packetByteBuf.writeBytes(header);
             block19: {
                 int seqTotal;
                 String relativePath = packetByteBuf.readString();
@@ -1178,6 +1202,7 @@ public class TogetherServerNetwork {
                     e.printStackTrace();
                 }
             }
+            });
         });
     }
 
