@@ -104,6 +104,7 @@ public class TogetherClientNetwork {
     private static final ClientPacketCrusher crusher = new CompressedClientPacketCrusher();
     private static volatile boolean isBBSTogetherOnServer = false;
     private static volatile int serverProtocolVersion = 0;
+    private static volatile int serverAssetMaxMb = -1;
     /** A1/A2: what the server currently believes we own ({path: sha1}), so inventory reports can be
      * deltas instead of a full 100+ KB map every time. Cleared with the session. */
     private static final HashMap<String, String> lastReportedSha1 = new HashMap<>();
@@ -473,6 +474,7 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_COLOR, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitColorPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_HELLO, (client, handler, buf, resp) -> TogetherClientNetwork.handleHelloPacket(client, buf));
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_SERVER_LIMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleServerLimitsPacket(client, buf));
         BBSTogetherFix28Client.registerReceivers();
         BBSTogetherFixReplayStructure.registerClientReceiver();
     }
@@ -550,6 +552,7 @@ public class TogetherClientNetwork {
          * mode and spammed unknown custom payloads at it. */
         isBBSTogetherOnServer = false;
         serverProtocolVersion = 0;
+        serverAssetMaxMb = -1;
         TogetherClientNetwork.sendHello();
     }
 
@@ -576,6 +579,17 @@ public class TogetherClientNetwork {
             serverProtocolVersion = version;
             isBBSTogetherOnServer = true;
             TogetherClientNetwork.onServerReady();
+        });
+    }
+
+    private static void handleServerLimitsPacket(MinecraftClient client, PacketByteBuf buf) {
+        int assetMb = buf.isReadable(4) ? buf.readInt() : -1;
+        int coopSeconds = buf.isReadable(4) ? buf.readInt() : -1;
+
+        client.execute(() -> {
+            serverAssetMaxMb = assetMb;
+            /* coopSeconds is server-driven; keep the value available for UI/debug without
+             * changing the local setting that the server does not use. */
         });
     }
 
@@ -1240,6 +1254,18 @@ public class TogetherClientNetwork {
                             if (locallyMissing || !TogetherClientNetwork.together$isAutoFlip(relPath, 'D', manual)) {
                                 needed.add(relPath);
                             }
+                        }
+                        if (CdnDownloader.isConfigured() && !needed.isEmpty()) {
+                            /* Optional read-only CDN: verify against the manifest and only
+                             * request what the CDN could not provide from the server. */
+                            needed.removeIf(n -> CdnDownloader.tryDownload(
+                                n,
+                                serverSha1Map.get(n),
+                                serverSizeMap.getOrDefault(n, 0L),
+                                serverMtimeMap.getOrDefault(n, 0L),
+                                assetsPath,
+                                maxBytes
+                            ));
                         }
                         if (!needed.isEmpty()) {
                             int downloadCount = needed.size();
@@ -1963,7 +1989,7 @@ public class TogetherClientNetwork {
      * them as "too large" instead of hiding them), but no bytes ever travel for them. 0 means
      * "no ceiling". */
     public static long clientMaxAssetBytes() {
-        int mb = TogetherSettings.getAssetSyncMaxMb();
+        int mb = serverAssetMaxMb >= 0 ? serverAssetMaxMb : TogetherSettings.getAssetSyncMaxMb();
         if (mb <= 0) {
             return Long.MAX_VALUE;
         }
@@ -2102,6 +2128,11 @@ public class TogetherClientNetwork {
         /* The edit time travels with the content; the server stamps it onto its stored copy so
          * later manifest diffs compare edit times, not receipt times. */
         long mtime = Files.getLastModifiedTime(f.toPath()).toMillis();
+        long baseMtime;
+        synchronized (lastServerMtimeMap) {
+            Long known = lastServerMtimeMap.get(relPath);
+            baseMtime = known == null ? 0L : known;
+        }
         try (FileChannel ch = FileChannel.open(f.toPath(), StandardOpenOption.READ)){
             for (int seq = 0; seq < totalSlices; ++seq) {
                 long offset = (long)seq * batchBytes;
@@ -2134,6 +2165,10 @@ public class TogetherClientNetwork {
                     pbuf.writeLong(fSize);
                     pbuf.writeString(fSha);
                     pbuf.writeLong(fMtime);
+                    /* CAS token: the server mtime this content was based on. Old servers
+                     * ignore the trailing long; old clients send nothing and keep the
+                     * legacy last-writer-wins behaviour. */
+                    pbuf.writeLong(baseMtime);
                 });
                 /* The fixed sleep below is the pre-B1 pacing. When a byte budget is configured the
                  * bucket above already meters the slice, so sleeping again only halves the speed. */

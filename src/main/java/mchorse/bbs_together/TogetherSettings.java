@@ -123,6 +123,11 @@ public class TogetherSettings {
         return assetSyncMaxMb == null ? 256 : Math.max(0, (Integer) assetSyncMaxMb.get());
     }
 
+    public static int getCoopInviteSeconds()
+    {
+        return coopInviteSeconds == null ? 60 : Math.max(10, (Integer) coopInviteSeconds.get());
+    }
+
     public static KeyframeShape getDefaultKeyframeShape() {
         int n = defaultKeyframeShape == null ? 0 : (Integer)defaultKeyframeShape.get();
         KeyframeShape[] keyframeShapeArray = KeyframeShape.values();

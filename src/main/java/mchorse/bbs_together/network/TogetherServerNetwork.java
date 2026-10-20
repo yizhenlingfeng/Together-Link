@@ -127,6 +127,7 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_ASSET_UPLOAD = new Identifier("bbs_together", "s_asset_upload");
     public static final Identifier SERVER_HELLO = new Identifier("bbs_together", "s_hello");
     public static final Identifier CLIENT_HELLO = new Identifier("bbs_together", "c_hello");
+    public static final Identifier CLIENT_SERVER_LIMITS = new Identifier("bbs_together", "c_server_limits");
     public static final int PROTOCOL_VERSION = 2;
 
     public static final Identifier SERVER_ASSET_RESYNC = new Identifier("bbs_together", "s_asset_resync");
@@ -1035,6 +1036,9 @@ public class TogetherServerNetwork {
                 long totalSize = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : (bytes == null ? 0L : (long)bytes.length);
                 String sha1 = packetByteBuf.readableBytes() > 0 ? packetByteBuf.readString() : "";
                 long uploadMtime = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : 0L;
+                /* CAS token from new clients: the server mtime the content was based on.
+                 * Old clients omit it (0) and keep the legacy behaviour. */
+                long baseMtime = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : 0L;
                 long receivedAt = System.currentTimeMillis();
                 if (uploadMtime <= 0L || uploadMtime > receivedAt + 60000L) {
                     uploadMtime = receivedAt;
@@ -1069,11 +1073,16 @@ public class TogetherServerNetwork {
                 if (target == null || target.getParent() == null) {
                     return;
                 }
+                if (!TogetherServerNetwork.uploadBaseMatches(target, baseMtime)) {
+                    System.out.println("[BBS Assets] Upload rejected (stale base): " + relativePath);
+                    TogetherServerNetwork.sendAssetManifest(server, uploader);
+                    return;
+                }
                 try {
                     boolean changed;
                     String existingSha1;
                     Files.createDirectories(target.getParent(), new FileAttribute[0]);
-                    long now = System.currentTimeMillis();
+                    long stampMtime = uploadMtime > 0L ? uploadMtime : System.currentTimeMillis();
                     if (seqTotal > 1) {
                         Path tmp = target.resolveSibling(target.getFileName().toString() + "." + uploader.getUuid() + ".bbsup");
                         if (seq == 0) {
@@ -1102,9 +1111,15 @@ public class TogetherServerNetwork {
                             System.out.println("[BBS Assets] Upload rejected (sha1 mismatch): " + relativePath);
                             return;
                         }
+                        if (!TogetherServerNetwork.uploadBaseMatches(target, baseMtime)) {
+                            Files.deleteIfExists(tmp);
+                            System.out.println("[BBS Assets] Upload rejected (stale base at final slice): " + relativePath);
+                            TogetherServerNetwork.sendAssetManifest(server, uploader);
+                            return;
+                        }
                         TogetherServerNetwork.moveAtomically(tmp, target);
                         try {
-                            Files.setLastModifiedTime(target, FileTime.fromMillis(now));
+                            Files.setLastModifiedTime(target, FileTime.fromMillis(stampMtime));
                         }
                         catch (Exception stamp) {
                             // empty catch block
@@ -1120,11 +1135,16 @@ public class TogetherServerNetwork {
                     String string = existingSha1 = Files.exists(target, new LinkOption[0]) ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : null;
                     changed = existingSha1 == null || !existingSha1.equalsIgnoreCase(actual);
                     if (changed) {
+                        if (!TogetherServerNetwork.uploadBaseMatches(target, baseMtime)) {
+                            System.out.println("[BBS Assets] Upload rejected (stale base): " + relativePath);
+                            TogetherServerNetwork.sendAssetManifest(server, uploader);
+                            return;
+                        }
                         Path tmp = target.resolveSibling(target.getFileName().toString() + "." + uploader.getUuid() + ".bbsuptmp");
                         Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                         TogetherServerNetwork.moveAtomically(tmp, target);
                         try {
-                            Files.setLastModifiedTime(target, FileTime.fromMillis(now));
+                            Files.setLastModifiedTime(target, FileTime.fromMillis(stampMtime));
                         }
                         catch (Exception exception) {
                             // empty catch block
@@ -1400,6 +1420,13 @@ public class TogetherServerNetwork {
 
     private static void handleHello(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         int protocol = buf.isReadable(4) ? buf.readInt() : 0;
+        PacketByteBuf limits = PacketByteBufs.create();
+        limits.writeInt(TogetherSettings.getAssetSyncMaxMb());
+        limits.writeInt(TogetherSettings.getCoopInviteSeconds());
+        /* Limits first: the hello packet can immediately trigger the manifest query on the
+         * client, and that query should already see the server's size ceiling. */
+        ServerPlayNetworking.send(player, CLIENT_SERVER_LIMITS, limits);
+
         PacketByteBuf out = PacketByteBufs.create();
         out.writeInt(PROTOCOL_VERSION);
         out.writeInt(protocol);
@@ -1542,6 +1569,28 @@ public class TogetherServerNetwork {
         }
         catch (java.nio.file.AtomicMoveNotSupportedException e) {
             Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /**
+     * Compare-and-swap on the server-side mtime. The server stamps uploaded files with the
+     * client's edit time, so this value acts as a per-file version token without a new
+     * persistent revision file. A zero token means an old client and keeps legacy semantics.
+     */
+    private static boolean uploadBaseMatches(Path target, long baseMtime) {
+        if (baseMtime <= 0L) {
+            return true;
+        }
+
+        try {
+            if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                return false;
+            }
+
+            return Files.getLastModifiedTime(target).toMillis() == baseMtime;
+        }
+        catch (Exception e) {
+            return false;
         }
     }
 

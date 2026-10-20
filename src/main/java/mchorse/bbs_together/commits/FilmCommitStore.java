@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -345,7 +346,7 @@ public final class FilmCommitStore
             map.put("branches", branches);
             map.putString("current", store.current);
 
-            Files.write(new File(store.folder, INDEX).toPath(), DataStorageUtils.writeToBytes(map));
+            writeAtomic(new File(store.folder, INDEX), DataStorageUtils.writeToBytes(map));
         }
         catch (IOException e)
         {
@@ -1030,8 +1031,8 @@ public final class FilmCommitStore
             snapshotFile.getParentFile().mkdirs();
             diffFile.getParentFile().mkdirs();
 
-            Files.write(snapshotFile.toPath(), bytes);
-            Files.write(diffFile.toPath(), DataStorageUtils.writeToBytes(diff));
+            writeAtomic(snapshotFile, bytes);
+            writeAtomic(diffFile, DataStorageUtils.writeToBytes(diff));
             store.cacheSnapshot(commit.id, data);
         }
         catch (IOException e)
@@ -1385,6 +1386,24 @@ public final class FilmCommitStore
         catch (Exception e)
         {
             return Integer.toHexString((snapshot.length + author.hashCode() + (int) time) & 0xFFFFFF);
+        }
+    }
+
+    private static void writeAtomic(File target, byte[] bytes) throws IOException
+    {
+        target.getParentFile().mkdirs();
+
+        File temp = new File(target.getParentFile(), target.getName() + ".tmp");
+
+        Files.write(temp.toPath(), bytes);
+
+        try
+        {
+            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        }
+        catch (java.nio.file.AtomicMoveNotSupportedException e)
+        {
+            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
         }
     }
 }

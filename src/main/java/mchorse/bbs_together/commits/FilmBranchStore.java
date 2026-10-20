@@ -648,6 +648,14 @@ public final class FilmBranchStore
         File temp = new File(target.getParentFile(), target.getName() + ".tmp");
 
         Files.write(temp.toPath(), bytes);
-        Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+
+        try
+        {
+            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        }
+        catch (java.nio.file.AtomicMoveNotSupportedException e)
+        {
+            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 }
