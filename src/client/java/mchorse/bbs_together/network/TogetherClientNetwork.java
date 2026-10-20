@@ -1366,6 +1366,7 @@ public class TogetherClientNetwork {
                                         AssetSyncTracker.error(relPath);
                                     }
                                 }
+                                AssetSyncTracker.abortIfEmpty();
                                 MinecraftClient.getInstance().execute(() -> TogetherClientNetwork.sendAssetInventory());
                             }, "BBSTogether-AssetUpload").start();
                         }

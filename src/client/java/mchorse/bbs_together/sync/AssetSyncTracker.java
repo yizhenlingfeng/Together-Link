@@ -45,6 +45,8 @@ public final class AssetSyncTracker {
 
     /** How long the finished bar lingers on screen before fading back to idle. */
     public static final long HOLD_AFTER_DONE_MS = 1500L;
+    private static final long ACTIVE_TIMEOUT_MS = 30_000L;
+    private static final long PENDING_TIMEOUT_MS = 300_000L;
 
     private AssetSyncTracker() {}
 
@@ -52,6 +54,9 @@ public final class AssetSyncTracker {
 
     /** Called when the manifest has arrived and local files are being hashed/compared. */
     public static void beginScan() {
+        /* A new scan is a new run: drop tasks left behind by an interrupted previous
+         * upload/download so they can never keep SYNCING alive forever. */
+        assets.clear();
         phase = Phase.SCANNING;
         finishedAt = 0L;
     }
@@ -61,6 +66,14 @@ public final class AssetSyncTracker {
         assets.clear();
         phase = Phase.IDLE;
         finishedAt = 0L;
+    }
+
+    /** Stop SCANNING when no task was actually queued (all upload candidates were skipped). */
+    public static void abortIfEmpty() {
+        if (phase == Phase.SCANNING && assets.isEmpty()) {
+            phase = Phase.IDLE;
+            finishedAt = 0L;
+        }
     }
 
     public static void reset() {
@@ -94,6 +107,7 @@ public final class AssetSyncTracker {
         }
         s.state = State.ACTIVE;
         s.updatedAt = System.currentTimeMillis();
+        wakeFromScan();
     }
 
     /** A task finished successfully. */
@@ -107,6 +121,7 @@ public final class AssetSyncTracker {
         }
         s.state = State.DONE;
         s.updatedAt = System.currentTimeMillis();
+        wakeFromScan();
         maybeFinish();
     }
 
@@ -120,6 +135,7 @@ public final class AssetSyncTracker {
         }
         s.state = State.ERROR;
         s.updatedAt = System.currentTimeMillis();
+        wakeFromScan();
         maybeFinish();
     }
 
@@ -196,12 +212,32 @@ public final class AssetSyncTracker {
         }
         assets.entrySet().removeIf(e -> e.getValue().dir == Dir.PUSH
             && e.getValue().state == State.DONE && now - e.getValue().updatedAt > 3000L);
+
+        /* A dead upload thread must not keep the indicator in SYNCING forever. Active
+         * transfers refresh updatedAt per slice; pending entries get a much longer grace. */
+        boolean expired = false;
+
+        for (AssetState state : assets.values()) {
+            long limit = state.state == State.ACTIVE ? ACTIVE_TIMEOUT_MS : PENDING_TIMEOUT_MS;
+
+            if ((state.state == State.ACTIVE || state.state == State.PENDING)
+                && now - state.updatedAt > limit) {
+                state.state = State.ERROR;
+                state.updatedAt = now;
+                expired = true;
+            }
+        }
+
+        if (expired) {
+            wakeFromScan();
+            maybeFinish();
+        }
     }
 
     /* ---- internals ----------------------------------------------------- */
 
     private static void wakeFromScan() {
-        if (phase == Phase.SCANNING || phase == Phase.IDLE) {
+        if (phase != Phase.SYNCING) {
             phase = Phase.SYNCING;
             finishedAt = 0L;
         }
