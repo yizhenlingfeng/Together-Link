@@ -212,7 +212,21 @@ public class ServerNetworkBbsOpMixin
                             return;
                         }
 
-                        films.save(id, data.getMap("data"));
+                        String branch = FilmBranchStore.branchOf(id, player.getUuid());
+
+                        if (FilmBranchStore.isDefault(id, branch))
+                        {
+                            films.save(id, data.getMap("data"));
+                        }
+                        else
+                        {
+                            /* A player editing a feature branch must never overwrite the
+                             * BBS main film with that branch's working copy. Route the
+                             * manager save to the same branch store the Together save
+                             * packet uses. */
+                            FilmBranchStore.setWorking(id, branch, data.getMap("data"));
+                            FilmBranchStore.save(id, branch);
+                        }
                         break;
                     }
                     case RENAME:
