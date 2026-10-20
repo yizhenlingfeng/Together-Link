@@ -2,7 +2,7 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.framework.UIContext;
-import mchorse.bbs_together.sync.SyncBarRenderer;
+import mchorse.bbs_together.sync.SyncStatusRenderer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -23,7 +23,7 @@ public class SyncHudOverlayMixin {
         UIContext self = (UIContext) (Object) this;
 
         if (self.menu instanceof UIDashboard dashboard) {
-            SyncBarRenderer.render(self, dashboard);
+            SyncStatusRenderer.render(self, dashboard);
         }
     }
 }

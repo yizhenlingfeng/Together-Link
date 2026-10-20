@@ -1,7 +1,7 @@
 # Together Link 2.0 双端验收清单
 
 用于 2.0 安全/生命周期改动的真实双客户端回归。客户端与服务端必须使用同一个 jar
-（2.0 构建 SHA-256：`19CE1922CBED3BFA7967971177A99A8B4CFAB9819D957340A779ADC93C5A8D44`，
+（2.0 构建 SHA-256：`37336D67CD58ABF1A9B8AC942E7651C8B50E10431A97FA2EB6B48017411AC9F7`，
 以实际 `dist` 为准）。
 
 > 注意：`E:\mc\PCL\LatestLaunch.bat` 当前指向 `Together 测试端 1.2`，该实例里仍是

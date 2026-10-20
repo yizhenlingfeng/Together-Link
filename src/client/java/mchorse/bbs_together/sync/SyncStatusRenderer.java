@@ -23,7 +23,7 @@ import net.fabricmc.api.Environment;
  * task bars, menus and overlays; it is never a UIElement, so clicks pass through.</p>
  */
 @Environment(EnvType.CLIENT)
-public final class SyncBarRenderer {
+public final class SyncStatusRenderer {
 
     private static final int ACTIVE_W = 142;
     private static final int ACTIVE_H = 24;
@@ -40,7 +40,7 @@ public final class SyncBarRenderer {
     private static long lastFrameAt;
     private static float shownProgress;
 
-    private SyncBarRenderer() {}
+    private SyncStatusRenderer() {}
 
     public static void render(UIContext context, UIDashboard dashboard) {
         if (!(Boolean) TogetherSettings.assetSyncProgressBar.get()) return;
