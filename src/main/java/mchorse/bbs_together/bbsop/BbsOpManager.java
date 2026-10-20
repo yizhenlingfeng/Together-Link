@@ -14,9 +14,13 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.WorldSavePath;
 
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.Reader;
+import java.io.Writer;
 import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -123,15 +127,10 @@ public final class BbsOpManager
         return true;
     }
 
-    /** The integrated server's own player, or the first player of a dedicated world with no levels yet. */
+    /** The integrated server's own player. Dedicated servers are bootstrapped explicitly. */
     private static boolean isHost(MinecraftServer server, ServerPlayerEntity player)
     {
-        if (server.isHost(player.getGameProfile()))
-        {
-            return true;
-        }
-
-        return server.isDedicated() && levels.isEmpty();
+        return server.isHost(player.getGameProfile());
     }
 
     /** Effective level for a player; never-set players default to read-only (0). */
@@ -343,7 +342,7 @@ public final class BbsOpManager
             return;
         }
 
-        try (FileReader reader = new FileReader(file))
+        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8))
         {
             JsonObject root = GSON.fromJson(reader, JsonObject.class);
 
@@ -449,9 +448,21 @@ public final class BbsOpManager
             root.add("levels", levelData);
             root.add("grants", grantData);
 
-            try (FileWriter writer = new FileWriter(file))
+            Path target = file.toPath();
+            Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+
+            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8))
             {
                 GSON.toJson(root, writer);
+            }
+
+            try
+            {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (java.nio.file.AtomicMoveNotSupportedException e)
+            {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
             dirty = false;

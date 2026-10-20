@@ -28,7 +28,7 @@ public class MorphRendererMixin {
         if (player.getUuid().equals(mc.player.getUuid())) {
             return;
         }
-        String togetherFilmId = TogetherClientNetwork.filmSelections.get(player.getUuid());
+        String togetherFilmId = TogetherClientNetwork.playersInFilmScreen.get(player.getUuid());
         if (togetherFilmId != null && !togetherFilmId.isEmpty()) {
             ci.setReturnValue(true);
         }

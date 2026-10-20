@@ -60,7 +60,8 @@ public class UIFormPaletteBbsOpMixin
         {
             String id = modelForm.model.get();
 
-            return id == null || AssetLockClient.canEdit(AssetLockType.MODEL, id);
+            return id == null || (AssetLockClient.canEdit(AssetLockType.MODEL, id)
+                && BbsOpClientState.canEdit("model_editor"));
         }
 
         return true;

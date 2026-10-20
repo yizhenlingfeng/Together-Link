@@ -7,6 +7,7 @@ import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockType;
+import mchorse.bbs_together.locks.AssetTombstones;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -66,11 +67,13 @@ implements ModInitializer {
             BehaviorLogManager.onServerStarted(server);
             BbsOpManager.onServerStarted(server);
             AssetLockManager.onServerStarted(server);
+            AssetTombstones.onServerStarted(server);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             BehaviorLogManager.onServerStopping();
             BbsOpManager.onServerStopping();
             AssetLockManager.onServerStopping();
+            AssetTombstones.onServerStopping();
             TogetherServerNetwork.flushPendingFilmSaves(server);
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {

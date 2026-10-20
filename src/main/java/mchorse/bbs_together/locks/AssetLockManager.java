@@ -13,8 +13,12 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -39,6 +43,7 @@ import mchorse.bbs_together.network.TogetherServerNetwork;
  */
 public final class AssetLockManager
 {
+    private static final boolean CASE_INSENSITIVE = isCaseInsensitiveFileSystem();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final ConcurrentHashMap<String, AssetLock> locks = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> noticeAt = new ConcurrentHashMap<>();
@@ -91,7 +96,29 @@ public final class AssetLockManager
 
     public static String key(AssetLockType type, String assetId)
     {
-        return type.id + "\n" + assetId;
+        return type.id + "\n" + canonical(type, assetId);
+    }
+
+    private static boolean isCaseInsensitiveFileSystem()
+    {
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+
+        return os.contains("win") || os.contains("mac") || os.contains("darwin");
+    }
+
+    /**
+     * Windows (and usually macOS) resolves asset paths case-insensitively. Lock ids come
+     * from the UI and from upload packets, so {@code Foo/Bar} and {@code foo/bar} must map
+     * to the same lock on those filesystems or a case-changed upload bypasses the lock.
+     */
+    private static String canonical(AssetLockType type, String assetId)
+    {
+        if (assetId == null || !CASE_INSENSITIVE || type == AssetLockType.MODEL_BLOCK)
+        {
+            return assetId;
+        }
+
+        return assetId.toLowerCase(java.util.Locale.ROOT);
     }
 
     /**
@@ -446,7 +473,7 @@ public final class AssetLockManager
             return;
         }
 
-        try (FileReader reader = new FileReader(file))
+        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8))
         {
             JsonObject root = GSON.fromJson(reader, JsonObject.class);
 
@@ -576,9 +603,21 @@ public final class AssetLockManager
 
             root.add("locks", array);
 
-            try (FileWriter writer = new FileWriter(file))
+            Path target = file.toPath();
+            Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+
+            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8))
             {
                 GSON.toJson(root, writer);
+            }
+
+            try
+            {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (java.nio.file.AtomicMoveNotSupportedException e)
+            {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
             dirty = false;

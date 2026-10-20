@@ -71,6 +71,7 @@ import mchorse.bbs_together.locks.AssetLock;
 import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockMode;
 import mchorse.bbs_together.locks.AssetLockType;
+import mchorse.bbs_together.locks.AssetTombstones;
 import mchorse.bbs_together.network.AssetEgressBudget;
 import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.utils.AssetPaths;
@@ -124,6 +125,10 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_REPLAY_SWAP = new Identifier("bbs_together", "s_replay_swap");
     public static final Identifier SERVER_ASSET_REQUEST = new Identifier("bbs_together", "s_asset_request");
     public static final Identifier SERVER_ASSET_UPLOAD = new Identifier("bbs_together", "s_asset_upload");
+    public static final Identifier SERVER_HELLO = new Identifier("bbs_together", "s_hello");
+    public static final Identifier CLIENT_HELLO = new Identifier("bbs_together", "c_hello");
+    public static final int PROTOCOL_VERSION = 2;
+
     public static final Identifier SERVER_ASSET_RESYNC = new Identifier("bbs_together", "s_asset_resync");
     public static final Identifier SERVER_FILM_SCREEN = new Identifier("bbs_together", "s_film_screen");
     public static final Identifier SERVER_RECORDING_FINISHED = new Identifier("bbs_together", "s_recording_finished");
@@ -225,8 +230,6 @@ public class TogetherServerNetwork {
     private static final AtomicLong assetPendingDropped = new AtomicLong();
     private static final ConcurrentHashMap<String, String> pendingAssetHints = new ConcurrentHashMap();
     private static final AtomicBoolean assetHintPending = new AtomicBoolean(false);
-    private static final ConcurrentHashMap<String, Long> recentlyDeletedModels = new ConcurrentHashMap();
-    private static final long MODEL_TOMBSTONE_TTL_MS = 1800000L;
     private static final ScheduledExecutorService ASSET_CHANGE_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "BBSTogether-AssetChangePing");
         t.setDaemon(true);
@@ -391,6 +394,7 @@ public class TogetherServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REPLAY_SWAP, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplaySwap(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetRequest(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_UPLOAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetUpload(server, player, buf));
+        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_HELLO, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleHello(server, player, buf));
         ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_RESYNC, (server, player, handler, buf, resp) -> {
             long clientVersion = buf.readableBytes() >= 8 ? buf.readLong() : 0L;
             TogetherServerNetwork.sendAssetManifest(server, player, clientVersion);
@@ -448,6 +452,7 @@ public class TogetherServerNetwork {
      */
     public static void reset() {
         playerCrushers.clear();
+        ServerCrusherPool.reset();
         pendingUploadAggregates.clear();
         playerEditingFilm.clear();
         lastBranchStateSent.clear();
@@ -549,6 +554,8 @@ public class TogetherServerNetwork {
             CursorData goneCursor = playerCursors.remove(uuid);
             CommitSelection goneSelection = playerCommitSelections.remove(uuid);
             playerCrushers.remove(uuid);
+            ServerCrusherPool.remove(uuid);
+            uploadRejectNoticeAt.remove(uuid);
             String goneScreenFilm = playerInFilmScreen.remove(uuid);
             playerReceivePush.remove(uuid);
             playerOwnedAssets.remove(uuid);
@@ -887,6 +894,11 @@ public class TogetherServerNetwork {
                             if (AssetPaths.isTransferTemp(relativePath)) {
                                 return FileVisitResult.CONTINUE;
                             }
+                            String modelId = ModelPathUtils.extractModelId(relativePath);
+
+                            if (modelId != null && AssetTombstones.isTombstoned(modelId)) {
+                                return FileVisitResult.CONTINUE;
+                            }
                             String sha1 = TogetherServerNetwork.sha1OfPathCached(file, file.toFile());
                             String entry = sha1 + ":" + file.toFile().length() + ":" + attrs.lastModifiedTime().toMillis();
                             manifest.putString(relativePath, entry);
@@ -942,19 +954,20 @@ public class TogetherServerNetwork {
     }
 
     private static void handleAssetRequest(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        int count = buf.readInt();
+        int count = Math.min(buf.readInt(), 4096);
         ArrayList<String> paths = new ArrayList<String>();
         for (int i = 0; i < count; ++i) {
             paths.add(buf.readString());
         }
-        TogetherServerNetwork.recordDownloadBehavior(player, paths);
         assetRequestsSeen.addAndGet(paths.size());
         Thread thread = new Thread(() -> {
             File assetsFolder = BBSMod.getAssetsFolder();
+            ArrayList<String> sent = new ArrayList<>();
+
             for (String relativePath : paths) {
                 long syncMax;
                 File file;
-                if (!AssetPaths.isPublishable(relativePath) || !(file = new File(assetsFolder, relativePath.replace("/", File.separator))).exists() || !file.isFile() || file.length() > TogetherServerNetwork.maxAssetBytes() || file.length() == 0L || (syncMax = TogetherServerNetwork.syncMaxBytes()) > 0L && file.length() > syncMax) continue;
+                if (!AssetPaths.isPublishable(relativePath) || (file = AssetPaths.resolveExistingFile(assetsFolder, relativePath)) == null || file.length() > TogetherServerNetwork.maxAssetBytes() || file.length() == 0L || (syncMax = TogetherServerNetwork.syncMaxBytes()) > 0L && file.length() > syncMax) continue;
                 String sha1 = "";
                 try {
                     sha1 = TogetherServerNetwork.sha1OfPathCached(file.toPath(), file);
@@ -962,15 +975,38 @@ public class TogetherServerNetwork {
                 catch (Exception exception) {
                     // empty catch block
                 }
+                sent.add(relativePath);
                 TogetherServerNetwork.enqueueAssetSend(server, player, new AssetSendTask(relativePath, file, file.length(), sha1, false));
             }
+
+            TogetherServerNetwork.recordDownloadBehavior(player, sent);
         }, "BBSTogether-AssetSend");
         thread.setDaemon(true);
         thread.start();
     }
 
-    private static void noticeUploadRejected(MinecraftServer server, ServerPlayerEntity player) {
-        long now = System.currentTimeMillis();
+    /** Maps an asset path to the content domain that must also allow the write. */
+    private static BbsOpDomain assetContentDomain(String relativePath) {
+        if (relativePath == null) {
+            return null;
+        }
+        if (relativePath.startsWith("models/")) {
+            return BbsOpDomain.MODEL_EDITOR;
+        }
+        if (relativePath.startsWith("textures/")) {
+            return BbsOpDomain.TEXTURES;
+        }
+        if (relativePath.startsWith("audio/")) {
+            return BbsOpDomain.AUDIO;
+        }
+        if (relativePath.startsWith("particles/")) {
+            return BbsOpDomain.PARTICLES;
+        }
+
+        return null;
+    }
+
+    private static void noticeUploadRejected(MinecraftServer server, ServerPlayerEntity player) {        long now = System.currentTimeMillis();
         Long last = uploadRejectNoticeAt.get(player.getUuid());
         if (last != null && now - last < 30000L) {
             return;
@@ -989,6 +1025,11 @@ public class TogetherServerNetwork {
             block19: {
                 int seqTotal;
                 String relativePath = packetByteBuf.readString();
+                BbsOpDomain contentDomain = assetContentDomain(relativePath);
+
+                if (contentDomain != null && !BbsOpManager.isAllowed(uploader, contentDomain)) {
+                    return;
+                }
                 int seq = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 0;
                 int n = seqTotal = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 1;
                 long totalSize = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : (bytes == null ? 0L : (long)bytes.length);
@@ -999,6 +1040,9 @@ public class TogetherServerNetwork {
                     uploadMtime = receivedAt;
                 }
                 if (relativePath.contains("..") || relativePath.startsWith("/")) {
+                    return;
+                }
+                if (seqTotal < 1 || seqTotal > 4096 || seq < 0 || seq >= seqTotal) {
                     return;
                 }
                 if (bytes == null || totalSize > TogetherServerNetwork.maxAssetBytes()) {
@@ -1021,55 +1065,74 @@ public class TogetherServerNetwork {
                     AssetLockManager.notifyLocked(server, uploader, AssetLockType.MODEL);
                     return;
                 }
-                Path target = assetsFolder.toPath().resolve(relativePath.replace("/", File.separator));
-                if (target.getParent() == null) {
+                Path target = AssetPaths.resolveSafe(assetsFolder, relativePath);
+                if (target == null || target.getParent() == null) {
                     return;
                 }
                 try {
                     boolean changed;
                     String existingSha1;
                     Files.createDirectories(target.getParent(), new FileAttribute[0]);
+                    long now = System.currentTimeMillis();
                     if (seqTotal > 1) {
-                        Path tmp = target.resolveSibling(target.getFileName().toString() + ".bbsup");
+                        Path tmp = target.resolveSibling(target.getFileName().toString() + "." + uploader.getUuid() + ".bbsup");
                         if (seq == 0) {
                             Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                         } else {
+                            if (!Files.isRegularFile(tmp)) {
+                                return;
+                            }
                             Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                        }
+                        long received = Files.size(tmp);
+                        if ((totalSize > 0 && received > totalSize) || (uploadSyncMax > 0 && received > uploadSyncMax)) {
+                            Files.deleteIfExists(tmp);
+                            return;
                         }
                         if (seq < seqTotal - 1) {
                             return;
                         }
-                        if (!sha1.isEmpty() && !TogetherServerNetwork.sha1OfPath(tmp).equalsIgnoreCase(sha1)) {
+                        if (totalSize > 0 && received != totalSize) {
+                            Files.deleteIfExists(tmp);
+                            return;
+                        }
+                        String actual = TogetherServerNetwork.sha1OfPath(tmp);
+                        if (!sha1.isEmpty() && !actual.equalsIgnoreCase(sha1)) {
                             Files.deleteIfExists(tmp);
                             System.out.println("[BBS Assets] Upload rejected (sha1 mismatch): " + relativePath);
                             return;
                         }
-                        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                        TogetherServerNetwork.moveAtomically(tmp, target);
                         try {
-                            FileTime stamp = FileTime.fromMillis(uploadMtime);
-                            Files.setLastModifiedTime(target, stamp);
+                            Files.setLastModifiedTime(target, FileTime.fromMillis(now));
                         }
                         catch (Exception stamp) {
                             // empty catch block
                         }
-                        TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1, true);
+                        TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, actual, true);
                         break block19;
                     }
+                    String actual = TogetherServerNetwork.sha1OfBytes(bytes);
+                    if (!sha1.isEmpty() && !actual.equalsIgnoreCase(sha1)) {
+                        System.out.println("[BBS Assets] Upload rejected (sha1 mismatch): " + relativePath);
+                        return;
+                    }
                     String string = existingSha1 = Files.exists(target, new LinkOption[0]) ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : null;
-                    changed = existingSha1 == null || (sha1.isEmpty() ? !Arrays.equals(Files.readAllBytes(target), bytes) : !existingSha1.equalsIgnoreCase(sha1));
+                    changed = existingSha1 == null || !existingSha1.equalsIgnoreCase(actual);
                     if (changed) {
-                        Files.write(target, bytes, new OpenOption[0]);
+                        Path tmp = target.resolveSibling(target.getFileName().toString() + "." + uploader.getUuid() + ".bbsuptmp");
+                        Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                        TogetherServerNetwork.moveAtomically(tmp, target);
                         try {
-                            FileTime stamp = FileTime.fromMillis(uploadMtime);
-                            Files.setLastModifiedTime(target, stamp);
+                            Files.setLastModifiedTime(target, FileTime.fromMillis(now));
                         }
                         catch (Exception exception) {
                             // empty catch block
                         }
-                        TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1.isEmpty() ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : sha1, true);
+                        TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, actual, true);
                         break block19;
                     }
-                    TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, sha1, false);
+                    TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, actual, false);
                 }
                 catch (Exception e) {
                     e.printStackTrace();
@@ -1335,6 +1398,14 @@ public class TogetherServerNetwork {
         server.execute(() -> playerReceivePush.put(player.getUuid(), receive));
     }
 
+    private static void handleHello(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        int protocol = buf.isReadable(4) ? buf.readInt() : 0;
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeInt(PROTOCOL_VERSION);
+        out.writeInt(protocol);
+        ServerPlayNetworking.send(player, CLIENT_HELLO, out);
+    }
+
     private static void handleAssetReport(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
             if (bytes == null) {
@@ -1443,6 +1514,35 @@ public class TogetherServerNetwork {
             thread.setDaemon(true);
             thread.start();
         });
+    }
+
+    private static String sha1OfBytes(byte[] bytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-1");
+            digest.update(bytes);
+            byte[] hash = digest.digest();
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                int v = b & 0xFF;
+                if (v < 16) {
+                    sb.append('0');
+                }
+                sb.append(Integer.toHexString(v));
+            }
+            return sb.toString();
+        }
+        catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-1 not available", e);
+        }
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        }
+        catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private static String sha1OfPath(Path path) throws IOException {
@@ -2378,6 +2478,9 @@ public class TogetherServerNetwork {
     }
 
     private static void handleBehaviorReport(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        if (BbsOpManager.get(player.getUuid()) < 1) {
+            return;
+        }
         int subType = buf.readInt();
         String target = buf.readString();
         int itemCount = buf.readInt();
@@ -2566,7 +2669,8 @@ public class TogetherServerNetwork {
         UUID targetId = buf.readUuid();
         server.execute(() -> {
             try {
-                if (!BehaviorLogManager.isOperator(server, player)) {
+                if (!BehaviorLogManager.isOperator(server, player)
+                    && BbsOpManager.get(player.getUuid()) < 2) {
                     return;
                 }
                 int removed = BehaviorLogManager.removePlayerLogs(targetId);
@@ -2579,21 +2683,11 @@ public class TogetherServerNetwork {
     }
 
     private static boolean isModelTombstoned(String modelId) {
-        Long expiry = recentlyDeletedModels.get(modelId);
-        if (expiry == null) {
-            return false;
-        }
-        if (expiry < System.currentTimeMillis()) {
-            recentlyDeletedModels.remove(modelId);
-            return false;
-        }
-        return true;
+        return AssetTombstones.isTombstoned(modelId);
     }
 
     private static void tombstoneModel(String modelId) {
-        long now = System.currentTimeMillis();
-        recentlyDeletedModels.put(modelId, now + 1800000L);
-        recentlyDeletedModels.values().removeIf(expiry -> expiry < now);
+        AssetTombstones.tombstone(modelId, "");
     }
 
     private static boolean modelFolderHasFiles(File dir) {
@@ -2654,11 +2748,13 @@ public class TogetherServerNetwork {
                 if (entry == null || entry.type != BehaviorType.OTHER.id || entry.subType != 6 || !"pending".equals(entry.extra.get("status"))) {
                     return;
                 }
-                entry.extra.put("status", approve ? "approved" : "denied");
-                entry.extra.put("by", player.getGameProfile().getName());
-                entry.extra.put("byId", player.getUuid().toString());
-                entry.extra.put("decidedAt", String.valueOf(System.currentTimeMillis()));
-                BehaviorLogManager.bump();
+                synchronized (BehaviorLogManager.class) {
+                    entry.extra.put("status", approve ? "approved" : "denied");
+                    entry.extra.put("by", player.getGameProfile().getName());
+                    entry.extra.put("byId", player.getUuid().toString());
+                    entry.extra.put("decidedAt", String.valueOf(System.currentTimeMillis()));
+                    BehaviorLogManager.bump();
+                }
                 if (approve) {
                     TogetherServerNetwork.deleteServerModel(server, entry.target);
                 }
@@ -2731,13 +2827,28 @@ public class TogetherServerNetwork {
         }
     }
 
+    public static boolean isFilmDeleted(String filmId) {
+        return filmId != null && deletedFilmIds.contains(filmId);
+    }
+
+    /** Mark a film id as deleted so late saves/uploads cannot recreate it. */
+    public static void markFilmDeleted(String filmId) {
+        if (filmId != null && !filmId.isEmpty()) {
+            deletedFilmIds.add(filmId);
+        }
+    }
+
     private static void handleFilmDeleted(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         if (!BbsOpManager.isAllowed(player, BbsOpDomain.FILM)) {
             return;
         }
         String filmId = buf.readString();
         server.execute(() -> {
-            if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+            if (!FilmWriteGuard.canWrite(player, filmId)) {
+                if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, filmId)) {
+                    AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                }
+
                 return;
             }
             deletedFilmIds.add(filmId);
@@ -2772,10 +2883,12 @@ public class TogetherServerNetwork {
         String oldId = buf.readString();
         String newId = buf.readString();
         server.execute(() -> {
-            if (TogetherServerNetwork.denyLockedFilm(server, player, oldId)) {
-                return;
-            }
-            if (TogetherServerNetwork.denyLockedFilm(server, player, newId)) {
+            if (!FilmWriteGuard.canWrite(player, oldId) || !FilmWriteGuard.canWrite(player, newId)) {
+                if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, oldId)
+                    || !AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, newId)) {
+                    AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                }
+
                 return;
             }
             try {
@@ -3001,7 +3114,11 @@ public class TogetherServerNetwork {
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
                     return;
                 }
-                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                if (!FilmWriteGuard.canWrite(player, filmId, branch)) {
+                    if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, filmId)) {
+                        AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                    }
+
                     return;
                 }
                 TogetherServerNetwork.applyUndoSync(server, player, filmId, changes);

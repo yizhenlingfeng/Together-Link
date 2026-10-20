@@ -40,15 +40,11 @@ public class UIFilmPreviewNullGuardMixin {
         UIFilmPreview self = (UIFilmPreview) (Object) this;
 
         self.control.setEnabled(!readOnly);
-        self.recordReplay.setEnabled(!readOnly);
-        self.recordVideo.setEnabled(!readOnly);
 
         if (readOnly)
         {
             /* A small padlock over each disabled icon, same style as renderLockedArea. */
             context.batcher.outlinedIcon(Icons.LOCKED, self.control.area.mx(), self.control.area.my(), 0.5F, 0.5F);
-            context.batcher.outlinedIcon(Icons.LOCKED, self.recordReplay.area.mx(), self.recordReplay.area.my(), 0.5F, 0.5F);
-            context.batcher.outlinedIcon(Icons.LOCKED, self.recordVideo.area.mx(), self.recordVideo.area.my(), 0.5F, 0.5F);
         }
     }
 }

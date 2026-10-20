@@ -19,6 +19,8 @@ public final class PacketCompression
     private static final int FLAG_GZIP = 1;
     /** Smallest payload worth compressing; asset slices (by default 512 KB) stay raw. */
     private static final int COMPRESS_THRESHOLD = 1024 * 1024;
+    /** Hard ceiling for gzip output; prevents a tiny compressed payload from inflating to GBs. */
+    private static final int MAX_DECOMPRESSED = 256 * 1024 * 1024;
 
     private PacketCompression()
     {}
@@ -109,6 +111,11 @@ public final class PacketCompression
 
         while ((read = stream.read(buffer)) >= 0)
         {
+            if (out.size() > MAX_DECOMPRESSED - read)
+            {
+                throw new IOException("Decompressed payload exceeds " + MAX_DECOMPRESSED + " bytes");
+            }
+
             out.write(buffer, 0, read);
         }
 

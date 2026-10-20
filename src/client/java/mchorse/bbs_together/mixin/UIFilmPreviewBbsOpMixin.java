@@ -93,5 +93,11 @@ public class UIFilmPreviewBbsOpMixin
 
         this.recordReplay.setEnabled(canRecord);
         this.recordVideo.setEnabled(canRecord);
+
+        if (!canRecord)
+        {
+            context.batcher.outlinedIcon(Icons.LOCKED, this.recordReplay.area.mx(), this.recordReplay.area.my(), 0.5F, 0.5F);
+            context.batcher.outlinedIcon(Icons.LOCKED, this.recordVideo.area.mx(), this.recordVideo.area.my(), 0.5F, 0.5F);
+        }
     }
 }

@@ -62,37 +62,14 @@ public final class AssetLockUi
             boolean whitelistHasMembers = lock != null && !lock.whitelist.isEmpty();
             boolean blacklistHasMembers = lock != null && !lock.blacklist.isEmpty();
 
-            if (whitelistHasMembers && blacklistHasMembers)
-            {
-                /* Both lists carry players only after older data / a mode switch. Keep the
-                 * active mode's editor visible and let the other one be cleared normally. */
-                if (lock.mode == AssetLockMode.WHITELIST)
-                {
-                    menu.action(Icons.USER, whitelistLabel(lock), () ->
-                    {
-                        openPicker(context, type, assetId, AssetLockMode.WHITELIST, lock);
-                    });
-                }
-                else
-                {
-                    menu.action(Icons.USER, blacklistLabel(lock), () ->
-                    {
-                        openPicker(context, type, assetId, AssetLockMode.BLACKLIST, lock);
-                    });
-                }
-            }
-            else if (whitelistHasMembers)
+            /* Show both modes even when both lists already carry players. The old menu hid
+             * the inactive list, which made it impossible to switch a lock that had entries
+             * in both lists without first destroying the active one. */
+            if (whitelistHasMembers)
             {
                 menu.action(Icons.USER, whitelistLabel(lock), () ->
                 {
                     openPicker(context, type, assetId, AssetLockMode.WHITELIST, lock);
-                });
-            }
-            else if (blacklistHasMembers)
-            {
-                menu.action(Icons.USER, blacklistLabel(lock), () ->
-                {
-                    openPicker(context, type, assetId, AssetLockMode.BLACKLIST, lock);
                 });
             }
             else
@@ -101,7 +78,17 @@ public final class AssetLockUi
                 {
                     openPicker(context, type, assetId, AssetLockMode.WHITELIST, lock);
                 });
+            }
 
+            if (blacklistHasMembers)
+            {
+                menu.action(Icons.USER, blacklistLabel(lock), () ->
+                {
+                    openPicker(context, type, assetId, AssetLockMode.BLACKLIST, lock);
+                });
+            }
+            else
+            {
                 menu.action(Icons.USER, key("bbs_together.locks.menu.blacklist"), () ->
                 {
                     openPicker(context, type, assetId, AssetLockMode.BLACKLIST, lock);

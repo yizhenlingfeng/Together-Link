@@ -82,6 +82,7 @@ import mchorse.bbs_together.locks.AssetLockClient;
 import mchorse.bbs_together.locks.AssetLockMode;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherServerNetwork;
+import mchorse.bbs_together.utils.AssetPaths;
 import mchorse.bbs_together.sync.AssetAutoSyncWatcher;
 import mchorse.bbs_together.sync.AssetSyncTracker;
 import mchorse.bbs_together.ui.commits.CommitColors;
@@ -101,7 +102,8 @@ import net.minecraft.client.MinecraftClient;
 @Environment(value=EnvType.CLIENT)
 public class TogetherClientNetwork {
     private static final ClientPacketCrusher crusher = new CompressedClientPacketCrusher();
-    private static boolean isBBSTogetherOnServer = false;
+    private static volatile boolean isBBSTogetherOnServer = false;
+    private static volatile int serverProtocolVersion = 0;
     /** A1/A2: what the server currently believes we own ({path: sha1}), so inventory reports can be
      * deltas instead of a full 100+ KB map every time. Cleared with the session. */
     private static final HashMap<String, String> lastReportedSha1 = new HashMap<>();
@@ -470,7 +472,7 @@ public class TogetherClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COMMIT_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerCommitPositionsPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_COLOR, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitColorPacket(client, buf));
         ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
-        isBBSTogetherOnServer = true;
+        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_HELLO, (client, handler, buf, resp) -> TogetherClientNetwork.handleHelloPacket(client, buf));
         BBSTogetherFix28Client.registerReceivers();
         BBSTogetherFixReplayStructure.registerClientReceiver();
     }
@@ -543,7 +545,42 @@ public class TogetherClientNetwork {
     }
 
     public static void onJoin() {
-        isBBSTogetherOnServer = true;
+        /* Do not assume the server has Together. A BBS-only/vanilla server never answers the
+         * hello, and treating it as "connected" used to force every UI into level-0 read-only
+         * mode and spammed unknown custom payloads at it. */
+        isBBSTogetherOnServer = false;
+        serverProtocolVersion = 0;
+        TogetherClientNetwork.sendHello();
+    }
+
+    private static void sendHello() {
+        MinecraftClient client = MinecraftClient.getInstance();
+
+        if (client.getNetworkHandler() == null || client.player == null) {
+            return;
+        }
+
+        PacketByteBuf hello = PacketByteBufs.create();
+        hello.writeInt(TogetherServerNetwork.PROTOCOL_VERSION);
+        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_HELLO, hello);
+    }
+
+    private static void handleHelloPacket(MinecraftClient client, PacketByteBuf buf) {
+        int version = buf.isReadable(4) ? buf.readInt() : 0;
+
+        client.execute(() -> {
+            if (isBBSTogetherOnServer) {
+                return;
+            }
+
+            serverProtocolVersion = version;
+            isBBSTogetherOnServer = true;
+            TogetherClientNetwork.onServerReady();
+        });
+    }
+
+    /** Called once, after the server proved it speaks the Together protocol. */
+    private static void onServerReady() {
         /* Send the local player's color once on join (it used to be re-sent every client tick
          * by a mixin that targeted the screen-tick helper instead of joinWorld). */
         MinecraftClient joinClient = MinecraftClient.getInstance();
@@ -578,6 +615,22 @@ public class TogetherClientNetwork {
 
     public static boolean isConnected() {
         return isBBSTogetherOnServer;
+    }
+
+    /**
+     * Old Together servers do not know {@code s_hello}; their first permission/level sync
+     * still proves they are a Together server. Marking on that packet keeps 1.7.8 servers
+     * working while a BBS-only server (which sends neither) stays editable.
+     */
+    private static void markServerSeen() {
+        if (!isBBSTogetherOnServer) {
+            isBBSTogetherOnServer = true;
+            TogetherClientNetwork.onServerReady();
+        }
+    }
+
+    public static int serverProtocolVersion() {
+        return serverProtocolVersion;
     }
 
     /** Branch this client currently holds for a film, or empty when unknown yet. */
@@ -1433,9 +1486,15 @@ public class TogetherClientNetwork {
             TogetherClientNetwork.ASSET_WRITER.execute(() -> {
                     try {
                         AssetSyncTracker.active(relativePath, isPush ? AssetSyncTracker.Dir.PUSH : AssetSyncTracker.Dir.DOWNLOAD);
-                        File dest = new File(BBSMod.getAssetsFolder(), relativePath.replace("/", File.separator));
+                        Path safeDest = AssetPaths.resolveSafe(BBSMod.getAssetsFolder(), relativePath);
+
+                        if (safeDest == null) {
+                            throw new IOException("Unsafe asset path: " + relativePath);
+                        }
+
+                        File dest = safeDest.toFile();
                         dest.getParentFile().mkdirs();
-                        Path part = dest.toPath().resolveSibling(dest.getName() + ".bbspart");
+                        Path part = dest.toPath().resolveSibling(dest.getName() + "." + (sha1.isEmpty() ? "local" : sha1) + ".bbspart");
                         /* Keep the temp file open for the duration of the transfer: opening,
                          * appending and closing per 30 KB slice was ~35k syscall triplets. */
                         FileChannel sink = TogetherClientNetwork.OPEN_SINKS.get(part.toString());
@@ -1529,7 +1588,19 @@ public class TogetherClientNetwork {
             thread.setDaemon(true);
             return thread;
         },
-        new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+        new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy() {
+            @Override
+            public void rejectedExecution(Runnable r, java.util.concurrent.ThreadPoolExecutor executor) {
+                /* Blocking the netty thread applies TCP backpressure and, unlike CallerRuns,
+                 * keeps the single writer's slice order intact. */
+                try {
+                    executor.getQueue().put(r);
+                }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        });
 
     /** Open {@code .bbspart} sinks keyed by absolute path, so a transfer costs one open. */
     private static final java.util.concurrent.ConcurrentHashMap<String, FileChannel> OPEN_SINKS = new java.util.concurrent.ConcurrentHashMap<>();
@@ -2888,7 +2959,13 @@ public class TogetherClientNetwork {
         if (modelId == null || modelId.isEmpty() || modelId.contains("..")) {
             return false;
         }
-        File modelDir = new File(BBSMod.getAssetsFolder(), "models/" + modelId.replace('/', File.separatorChar));
+        Path safeDir = AssetPaths.resolveSafe(BBSMod.getAssetsFolder(), "models/" + modelId);
+
+        if (safeDir == null) {
+            return false;
+        }
+
+        File modelDir = safeDir.toFile();
         if (!modelDir.isDirectory()) {
             return false;
         }
@@ -2923,6 +3000,7 @@ public class TogetherClientNetwork {
         client.execute(() -> {
             isOperator = op;
             isManager = manager;
+            TogetherClientNetwork.markServerSeen();
         });
     }
 
@@ -2938,7 +3016,10 @@ public class TogetherClientNetwork {
             }
         }
         java.util.List<String> finalWhitelist = whitelist;
-        client.execute(() -> mchorse.bbs_together.bbsop.BbsOpClientState.sync(newLevel, finalWhitelist));
+        client.execute(() -> {
+            mchorse.bbs_together.bbsop.BbsOpClientState.sync(newLevel, finalWhitelist);
+            TogetherClientNetwork.markServerSeen();
+        });
     }
 
     private static void handleAssetLocksPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -2972,7 +3053,10 @@ public class TogetherClientNetwork {
             }
         }
         List<AssetLock> finalLocks = locks;
-        client.execute(() -> AssetLockClient.sync(finalLocks));
+        client.execute(() -> {
+            AssetLockClient.sync(finalLocks);
+            TogetherClientNetwork.markServerSeen();
+        });
     }
 
     private static void readLockMembers(PacketByteBuf buf, Map<UUID, String> target) {

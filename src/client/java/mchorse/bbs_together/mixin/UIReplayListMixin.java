@@ -19,7 +19,6 @@ import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.IUIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
-import mchorse.bbs_together.BBSTogetherFix33Client;
 import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
@@ -59,7 +58,7 @@ public class UIReplayListMixin {
         return BbsOpClientState.canEdit("film") && !mchorse.bbs_together.network.CoopClient.isInSession();
     }
 
-    @Inject(method={"pasteReplay"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"pasteReplay"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_fix1615BeforePasteReplay(MapType mapType, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -73,7 +72,7 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
-    @Inject(method={"fromModelBlock(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;)V"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"fromModelBlock(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;)V"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_fix1615BeforeFromModelBlock(ModelBlockEntity modelBlockEntity, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -87,7 +86,7 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
-    @Inject(method={"addReplay(Lorg/joml/Vector3d;FF)V"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"addReplay(Lorg/joml/Vector3d;FF)V"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_fix1615BeforeAddReplay(Vector3d vector3d, float f, float f2, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -101,7 +100,7 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
-    @Inject(method={"fromCamera"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"fromCamera"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_fix1615BeforeFromCamera(int n, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -115,7 +114,7 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
-    @Inject(method={"dupeReplay"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"dupeReplay"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_fix1615BeforeDupeReplay(CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -129,7 +128,7 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
-    @Inject(method={"removeReplay"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"removeReplay"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_fix1615BeforeRemoveReplay(CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -157,6 +156,7 @@ public class UIReplayListMixin {
 
     @Inject(method={"applyReplayCategory"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_blockApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
+        this.together_captureReplayStructure();
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
         }
@@ -164,11 +164,12 @@ public class UIReplayListMixin {
 
     @Inject(method={"applyReplayCategory"}, at={@At(value="TAIL")}, remap=false)
     private void together_fix133ApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
-        BBSTogetherFix33Client.broadcastReplayStructureChanged((UIReplayList)(Object)this);
+        this.together_sendReplayStructure();
     }
 
     @Inject(method={"removeReplayCategory"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_blockRemoveReplayCategory(String string, CallbackInfo callbackInfo) {
+        this.together_captureReplayStructure();
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
         }
@@ -176,10 +177,10 @@ public class UIReplayListMixin {
 
     @Inject(method={"removeReplayCategory"}, at={@At(value="TAIL")}, remap=false)
     private void together_fix133RemoveReplayCategory(String string, CallbackInfo callbackInfo) {
-        BBSTogetherFix33Client.broadcastReplayStructureChanged((UIReplayList)(Object)this);
+        this.together_sendReplayStructure();
     }
 
-    @Inject(method={"openFormEditor"}, at={@At(value="HEAD")}, remap=false)
+    @Inject(method={"openFormEditor"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void onOpenFormEditorHead(ValueForm valueForm, boolean bl, Consumer<?> consumer, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
@@ -235,11 +236,9 @@ public class UIReplayListMixin {
         if (uIFormPalette != null) {
             uIFormPalette.getEvents().register(UIRemovedEvent.class, uIRemovedEvent -> {
                 TogetherClientNetwork.sendReplayFormLock(string, n, false);
-                BBSTogetherFix33Client.broadcastReplayStructureChanged(uIReplayList);
             });
         } else {
             TogetherClientNetwork.sendReplayFormLock(string, n, false);
-            BBSTogetherFix33Client.broadcastReplayStructureChanged(uIReplayList);
         }
     }
 

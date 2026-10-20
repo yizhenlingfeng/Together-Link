@@ -685,10 +685,20 @@ public class BehaviorLogManager
 
             map.put("players", playerList);
 
-            Files.write(file.toPath(), DataStorageUtils.writeToBytes(map));
+            java.nio.file.Path target = file.toPath();
+            java.nio.file.Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+            Files.write(tmp, DataStorageUtils.writeToBytes(map));
+
+            try {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+
             dirty = false;
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
             System.err.println("Failed to save BBS Together behavior log: " + e);
         }

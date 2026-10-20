@@ -36,6 +36,13 @@ public class UIDataOverlayPanelMixin {
     @Shadow(remap=false)
     protected UIDataDashboardPanel panel;
 
+    @Unique
+    private String together$renameFrom;
+    @Unique
+    private String together$renameName;
+    @Unique
+    private String together$deleteId;
+
     @Inject(method={"addNewData(Lmchorse/bbs_mod/ui/framework/UIContext;Ljava/lang/String;Lmchorse/bbs_mod/data/types/MapType;)V"}, at={@At(value="TAIL")}, remap=false)
     private void onAddNewData(UIContext context, String name, MapType data, CallbackInfo ci) {
         this.together_syncNewFilm();
@@ -69,14 +76,19 @@ public class UIDataOverlayPanelMixin {
 
     @Inject(method={"renameData"}, at={@At(value="HEAD")}, remap=false)
     private void onRenameDataHead(String name, CallbackInfo ci) {
-        if (!TogetherClientNetwork.isConnected()) {
+        this.together$renameFrom = this.panel != null && this.panel.getData() != null ? this.panel.getData().getId() : null;
+        this.together$renameName = name;
+    }
+
+    @Inject(method={"renameData"}, at={@At(value="TAIL")}, remap=false)
+    private void onRenameDataTail(String name, CallbackInfo ci) {
+        if (this.together$renameFrom == null || name == null || this.panel == null || this.panel.getData() == null) {
             return;
         }
-        if (this.panel == null || this.panel.getData() == null) {
-            return;
+        /* BBS refuses empty/duplicate names; only mirror a rename that actually landed. */
+        if (name.equals(this.panel.getData().getId())) {
+            TogetherClientNetwork.sendFilmRenamed(this.together$renameFrom, name);
         }
-        String oldId = this.panel.getData().getId();
-        TogetherClientNetwork.sendFilmRenamed(oldId, name);
     }
 
     @Inject(method={"renameFolder"}, at={@At(value="TAIL")}, remap=false)
@@ -86,14 +98,14 @@ public class UIDataOverlayPanelMixin {
 
     @Inject(method={"removeData"}, at={@At(value="HEAD")}, remap=false)
     private void onRemoveDataHead(CallbackInfo ci) {
-        if (!TogetherClientNetwork.isConnected()) {
-            return;
+        this.together$deleteId = this.panel != null && this.panel.getData() != null ? this.panel.getData().getId() : null;
+    }
+
+    @Inject(method={"removeData"}, at={@At(value="TAIL")}, remap=false)
+    private void onRemoveDataTail(CallbackInfo ci) {
+        if (this.together$deleteId != null && this.panel != null && this.panel.getData() == null) {
+            TogetherClientNetwork.sendFilmDeleted(this.together$deleteId);
         }
-        if (this.panel == null || this.panel.getData() == null) {
-            return;
-        }
-        String filmId = this.panel.getData().getId();
-        TogetherClientNetwork.sendFilmDeleted(filmId);
     }
 
     @Inject(method={"removeFolder"}, at={@At(value="TAIL")}, remap=false)

@@ -7,8 +7,9 @@ import mchorse.bbs_mod.data.types.ByteType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.FilmManager;
+import mchorse.bbs_together.commits.FilmBranchStore;
+import mchorse.bbs_together.commits.FilmCommitStore;
 import mchorse.bbs_mod.network.ServerNetwork;
-import mchorse.bbs_mod.network.ServerPacketCrusher;
 import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.utils.DataPath;
 import mchorse.bbs_mod.utils.PermissionUtils;
@@ -19,13 +20,15 @@ import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.FilmLoadContext;
+import mchorse.bbs_together.network.FilmWriteGuard;
+import mchorse.bbs_together.network.ServerCrusherPool;
+import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -54,9 +57,6 @@ import java.util.List;
 @Mixin(value = ServerNetwork.class, remap = false)
 public class ServerNetworkBbsOpMixin
 {
-    @Shadow(remap = false)
-    private static ServerPacketCrusher crusher;
-
     /** BBS 2.6's manager-data LOAD calls {@code toData()} without a null check. */
     private static final boolean BBS_26 = FabricLoader.getInstance().getModContainer("bbs")
         .map((container) -> container.getMetadata().getVersion().getFriendlyString().startsWith("2.6"))
@@ -154,7 +154,7 @@ public class ServerNetworkBbsOpMixin
             return;
         }
 
-        crusher.receive(buf, (bytes, packetByteBuf) ->
+        ServerCrusherPool.get(player.getUuid()).receive(buf, (bytes, packetByteBuf) ->
         {
             FilmLoadContext.set(player);
 
@@ -197,9 +197,18 @@ public class ServerNetworkBbsOpMixin
 
                     case SAVE:
                     {
-                        if (!mayEditFilms || !AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, id))
+                        if (!mayEditFilms)
                         {
-                            AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                            return;
+                        }
+
+                        if (!FilmWriteGuard.canWrite(player, id))
+                        {
+                            if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, id))
+                            {
+                                AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                            }
+
                             return;
                         }
 
@@ -212,10 +221,15 @@ public class ServerNetworkBbsOpMixin
                         String to = data.getString("to");
 
                         if (!mayEditFilms
-                            || !AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, from)
-                            || !AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, to))
+                            || !FilmWriteGuard.canWrite(player, from)
+                            || !FilmWriteGuard.canWrite(player, to))
                         {
-                            AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                            if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, from)
+                                || !AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, to))
+                            {
+                                AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                            }
+
                             return;
                         }
 
@@ -225,9 +239,13 @@ public class ServerNetworkBbsOpMixin
                     }
                     case DELETE:
                     {
-                        if (!mayEditFilms || !AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, id))
+                        if (!mayEditFilms || !FilmWriteGuard.canWrite(player, id))
                         {
-                            AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                            if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, id))
+                            {
+                                AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
+                            }
+
                             return;
                         }
 
@@ -250,27 +268,61 @@ public class ServerNetworkBbsOpMixin
                         String from = data.getString("from");
                         String to = data.getString("to");
 
-                        if (!mayEditFilms || AssetLockManager.hasLockedFilmUnder(from, player.getUuid()))
+                        if (!mayEditFilms || !FilmWriteGuard.canWriteFolder(player, from))
                         {
-                            AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
                             return;
+                        }
+
+                        ArrayList<String> moved = new ArrayList<>();
+
+                        for (String key : films.getKeys())
+                        {
+                            if (key.equals(from) || key.startsWith(from + "/"))
+                            {
+                                moved.add(key);
+                            }
                         }
 
                         ServerNetwork.sendManagerData(player, callbackId, op, new ByteType(films.renameFolder(from, to)));
                         AssetLockManager.renamePrefix(AssetLockType.FILM, from, to);
+
+                        for (String oldId : moved)
+                        {
+                            FilmCommitStore.renameFilm(oldId, to + oldId.substring(from.length()));
+                            FilmBranchStore.renameFilm(oldId, to + oldId.substring(from.length()));
+                        }
+
                         break;
                     }
                     case DELETE_FOLDER:
                     {
                         String folder = data.getString("folder");
 
-                        if (!mayEditFilms || AssetLockManager.hasLockedFilmUnder(folder, player.getUuid()))
+                        if (!mayEditFilms || !FilmWriteGuard.canWriteFolder(player, folder))
                         {
-                            AssetLockManager.notifyLocked(server, player, AssetLockType.FILM);
                             return;
                         }
 
+                        ArrayList<String> deleted = new ArrayList<>();
+
+                        for (String key : films.getKeys())
+                        {
+                            if (key.equals(folder) || key.startsWith(folder + "/"))
+                            {
+                                deleted.add(key);
+                            }
+                        }
+
                         ServerNetwork.sendManagerData(player, callbackId, op, new ByteType(films.deleteFolder(folder)));
+
+                        for (String deletedId : deleted)
+                        {
+                            TogetherServerNetwork.markFilmDeleted(deletedId);
+                            AssetLockManager.removeForAsset(AssetLockType.FILM, deletedId);
+                            FilmCommitStore.deleteFilm(deletedId);
+                            FilmBranchStore.forgetFilm(deletedId);
+                        }
+
                         break;
                     }
                     default:
@@ -303,7 +355,7 @@ public class ServerNetworkBbsOpMixin
             return;
         }
 
-        crusher.receive(buf, (bytes, packetByteBuf) ->
+        ServerCrusherPool.get(player.getUuid()).receive(buf, (bytes, packetByteBuf) ->
         {
             try
             {
