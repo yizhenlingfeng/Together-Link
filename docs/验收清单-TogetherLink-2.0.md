@@ -1,11 +1,14 @@
-# Together Link 1.7.9 双端验收清单
+# Together Link 2.0 双端验收清单
 
-用于 1.7.9 安全/生命周期改动的真实双客户端回归。客户端与服务端必须使用同一个 jar
-（当前 SHA-256：`6BA29C9E4B775E53DFCBBBD646B157C0764FB463A679FCDCABF2855827E569C2`，
+用于 2.0 安全/生命周期改动的真实双客户端回归。客户端与服务端必须使用同一个 jar
+（2.0 构建 SHA-256：`9C90CF509A97B2E4D4308A9C996D476936211025DF85A29B6BBD8207A3A82A73`，
 以实际 `dist` 为准）。
 
 > 注意：`E:\mc\PCL\LatestLaunch.bat` 当前指向 `Together 测试端 1.2`，该实例里仍是
-> Together 1.7.7。不要用它验收本清单，请启动 `Together测试端`（1.7.9）实例。
+> Together 1.7.7。不要用它验收本清单，请启动 `Together测试端` 实例并仅保留 2.0 jar。
+>
+> 以下 22:22–22:28 的冒烟记录属于 1.7.9 基线；2.0 构建已通过，但 2.0 客户端启动与
+> 双端交互仍需复测。
 >
 > 2026-10-20 22:22 已用 `Together测试端` 实例启动冒烟：Fabric 0.20.0 正常加载
 > `bbs_together 1.7.9-1.20.1`，无 `Mixin apply`/`InjectionException`。

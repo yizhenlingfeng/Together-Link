@@ -80,14 +80,6 @@ public final class SyncBarRenderer {
         float speed = 1F - (float) Math.exp(-dt * 12F);
         shownProgress += (target - shownProgress) * speed;
 
-        if (phase == AssetSyncTracker.Phase.FINISHED && now - finishAt > AssetSyncTracker.HOLD_AFTER_DONE_MS) {
-            if (always) {
-                drawIdleDot(context, dashboard);
-            }
-
-            return;
-        }
-
         drawPill(context, dashboard, phase, now, always);
     }
 
