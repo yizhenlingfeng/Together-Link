@@ -8,7 +8,12 @@
 > Together 1.7.7。不要用它验收本清单，请启动 `Together测试端`（1.7.9）实例。
 >
 > 2026-10-20 22:22 已用 `Together测试端` 实例启动冒烟：Fabric 0.20.0 正常加载
-> `bbs_together 1.7.9-1.20.1`，无 `Mixin apply`/`InjectionException`。双端项目仍需人工执行。
+> `bbs_together 1.7.9-1.20.1`，无 `Mixin apply`/`InjectionException`。
+>
+> 2026-10-20 22:25 已用 `gradlew runServer` 启动 1.7.9 开发服，生产客户端
+> `Together测试端` 通过 `--quickPlayMultiplayer 127.0.0.1:25565` 成功加入；服务端
+> 记录 `yizhenlingfeng joined the game`，并成功处理模型的锁定/解锁动作。未出现
+> Together 服务端异常。**仍是单客户端测试，双人权限/同步项需人工执行。**
 
 ## 0. 启动与握手
 
