@@ -52,6 +52,15 @@ public class UIModelBlockPanelBbsOpMixin
 
         this.together$lockSection = new UIModelBlockLockSection(this::together$selectedBlock, () -> self.scrollView.resize());
         self.editor.addAfter(self.lookAt, this.together$lockSection);
+
+        /* Attach the click shields once, outside the render pass. Adding children from render()
+         * while BBS is walking the element tree can leave the panel's layout half-updated. */
+        UIElement[] covered = { self.editor, self.bodySection, self.equipmentSection };
+
+        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields,
+            () -> !BbsOpClientState.canEdit("model_blocks") || this.together$assetLocked(), covered);
+
+        this.together$lockSection.refresh();
     }
 
     @Unique
@@ -90,22 +99,26 @@ public class UIModelBlockPanelBbsOpMixin
         }
     }
 
-    @Inject(method = "render", at = @At("TAIL"), remap = false)
-    private void together$veilEditingSide(UIContext context, CallbackInfo ci)
+    @Inject(method = "fill(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;Z)V", at = @At("TAIL"), remap = false)
+    private void together$refreshAfterFill(ModelBlockEntity modelBlock, boolean select, CallbackInfo ci)
     {
-        UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
-        boolean readOnly = !BbsOpClientState.canEdit("model_blocks") || this.together$assetLocked();
-
         if (this.together$lockSection != null)
         {
             this.together$lockSection.refresh();
         }
+    }
+
+    @Inject(method = "render", at = @At("TAIL"), remap = false)
+    private void together$veilEditingSide(UIContext context, CallbackInfo ci)
+    {
+        UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
 
         /* The pick button's callback dereferences this.modelBlock unconditionally; with fill
-         * cancelled it is null, so the button must be dead or clicking it NPEs. */
-        self.pickEdit.setEnabled(!readOnly);
+         * cancelled it is null, so the button must be dead or clicking it NPEs. This is a
+         * widget-state change only (no children are added), so it is safe during render. */
+        self.pickEdit.setEnabled(!this.together$readOnly());
 
-        if (!readOnly)
+        if (!this.together$readOnly())
         {
             return;
         }
@@ -136,8 +149,12 @@ public class UIModelBlockPanelBbsOpMixin
         }
 
         ReadOnlyOverlay.drawVeil(context, veil);
-        ReadOnlyOverlay.ensureShieldsAttached(self, this.together$shields,
-            () -> !BbsOpClientState.canEdit("model_blocks") || this.together$assetLocked(), covered);
+    }
+
+    @Unique
+    private boolean together$readOnly()
+    {
+        return !BbsOpClientState.canEdit("model_blocks") || this.together$assetLocked();
     }
 
     /** The selected block is locked against this player (not just domain read-only). */
