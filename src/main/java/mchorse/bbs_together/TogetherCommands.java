@@ -60,19 +60,19 @@ public class TogetherCommands {
                 ServerCommandSource source = ctx.getSource();
 
                 if (!AssetTombstones.restore(modelId)) {
-                    source.sendError(Text.literal("No delete tombstone for model \"" + modelId + "\""));
+                    source.sendError(Text.translatable("bbs_together.command.restore.none", modelId));
                     return 0;
                 }
 
                 TogetherServerNetwork.broadcastAssetsChanged(source.getServer());
-                source.sendFeedback(() -> Text.literal("Tombstone cleared for \"" + modelId + "\". Deleted files are not restored; clients may upload the model again."), true);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.restore.done", modelId), true);
                 return 1;
             }))));
 
         /* E1: /bbstogether diag — where the asset bytes are going right now. */
         dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("diag").executes(ctx -> {
-            for (String line : TogetherServerNetwork.diagLines(ctx.getSource().getServer())) {
-                ctx.getSource().sendFeedback(() -> Text.literal(line), false);
+            for (Text line : TogetherServerNetwork.diagLines(ctx.getSource().getServer())) {
+                ctx.getSource().sendFeedback(() -> line, false);
             }
             return 1;
         })));
@@ -85,8 +85,7 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             for (ServerPlayerEntity player : players) {
                 int level = BbsOpManager.get(player.getUuid());
-                String msg = player.getGameProfile().getName() + ": BBS permission level " + level + " (0 = view only)";
-                source.sendFeedback(() -> Text.literal(msg), false);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.query", player.getGameProfile().getName(), level), false);
             }
             return players.size();
         });
@@ -97,8 +96,7 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             for (ServerPlayerEntity player : players) {
                 BbsOpManager.set(player.getUuid(), level);
-                String msg = "Set " + player.getGameProfile().getName() + "'s BBS permission level to " + level;
-                source.sendFeedback(() -> Text.literal(msg), false);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.set", player.getGameProfile().getName(), level), false);
                 System.out.println("[BBSTogether] " + source.getName() + " set " + player.getGameProfile().getName() + " BBS op level to " + level);
             }
             /* Push immediately so every online client refreshes its UI lock state. */
@@ -114,7 +112,7 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             mchorse.bbs_together.bbsop.BbsOpDomain domain = BbsOpDomain.byId(domainId);
             if (domain == null) {
-                source.sendError(Text.literal("Unknown domain: " + domainId + " (valid: morph, film, model_blocks, particles, model_editor, textures, audio, upload)"));
+                source.sendError(Text.translatable("bbs_together.command.bbsop.unknown_domain", domainId));
                 return 0;
             }
             boolean allowed;
@@ -123,13 +121,12 @@ public class TogetherCommands {
             } else if (mode.equalsIgnoreCase("deny") || mode.equalsIgnoreCase("off") || mode.equalsIgnoreCase("false")) {
                 allowed = false;
             } else {
-                source.sendError(Text.literal("Mode must be allow or deny"));
+                source.sendError(Text.translatable("bbs_together.command.bbsop.bad_mode"));
                 return 0;
             }
             for (ServerPlayerEntity player : players) {
                 BbsOpManager.setGrant(player.getUuid(), domain, allowed);
-                String msg = (allowed ? "Allowed " : "Denied ") + domain.id + " for " + player.getGameProfile().getName();
-                source.sendFeedback(() -> Text.literal(msg), false);
+                source.sendFeedback(() -> Text.translatable(allowed ? "bbs_together.command.bbsop.granted" : "bbs_together.command.bbsop.denied", domain.id, player.getGameProfile().getName()), false);
             }
             BbsOpManager.syncToAll(source.getServer());
             return players.size();
@@ -138,8 +135,7 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             for (ServerPlayerEntity player : players) {
                 BbsOpManager.resetGrants(player.getUuid());
-                String msg = "Reset domain grants for " + player.getGameProfile().getName() + " (unrestricted again)";
-                source.sendFeedback(() -> Text.literal(msg), false);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.reset", player.getGameProfile().getName()), false);
             }
             BbsOpManager.syncToAll(source.getServer());
             return players.size();

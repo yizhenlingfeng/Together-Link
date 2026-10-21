@@ -9,6 +9,7 @@
         "ChillinWithDylan"
     ],
     "license": "MIT",
+    "icon": "assets/bbs_together/icon.png",
     "environment": "*",
     "entrypoints": {
         "bbs-addon": [

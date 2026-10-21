@@ -130,7 +130,9 @@ public abstract class FormCellRendererTooLargeMixin
         {
             String id = modelForm.model.get();
 
-            return id != null && TogetherClientNetwork.tooLargeModels.contains(id) ? "模型过大" : null;
+            return id != null && TogetherClientNetwork.tooLargeModels.contains(id)
+                ? L10n.lang("bbs_together.sync.oversized.model").get()
+                : null;
         }
 
         if (OversizedAssets.isEmpty())
@@ -150,7 +152,7 @@ public abstract class FormCellRendererTooLargeMixin
 
             if (effect != null && !effect.isEmpty() && OversizedAssets.sizeOf("particles/" + effect + ".json") != null)
             {
-                return "文件过大";
+                return L10n.lang("bbs_together.sync.oversized.file").get();
             }
 
             link = particleForm.texture.get();
@@ -161,6 +163,8 @@ public abstract class FormCellRendererTooLargeMixin
             return null;
         }
 
-        return OversizedAssets.sizeOf(link.toString()) != null ? "文件过大" : null;
+        return OversizedAssets.sizeOf(link.toString()) != null
+            ? L10n.lang("bbs_together.sync.oversized.file").get()
+            : null;
     }
 }

@@ -38,6 +38,21 @@ public final class FilmCommit
     /** How many hex characters of the id are shown in the UI. */
     public static final int SHORT_ID = 7;
 
+    /**
+     * Prefix of server-generated commit messages that are translated when displayed.
+     *
+     * <p>Automatic commits happen on the server without a player language to resolve against,
+     * and the message is persisted, so the stored value stays language-neutral: it is a marker
+     * that the client expands through BBS's language table (see {@code CommitText}).</p>
+     */
+    public static final String AUTO_PREFIX = "@bbs_together/auto:";
+
+    /** Marker of a baseline commit made when a film is first imported. */
+    public static final String AUTO_IMPORT = AUTO_PREFIX + "import";
+
+    /** Marker of an automatic commit with no countable changes. */
+    public static final String AUTO_COMMIT = AUTO_PREFIX + "commit";
+
     public String id = "";
     public String filmId = "";
 
@@ -64,6 +79,18 @@ public final class FilmCommit
     public String shortId()
     {
         return this.id.length() > SHORT_ID ? this.id.substring(0, SHORT_ID) : this.id;
+    }
+
+    /** Marker of an automatic commit that summarizes the given change counts. */
+    public static String autoSummary(int clips, int replays, int keyframes)
+    {
+        return AUTO_PREFIX + "summary:" + clips + "," + replays + "," + keyframes;
+    }
+
+    /** Marker of the automatic commit made before a player switches branches to join a coop session. */
+    public static String autoCoop(String branch)
+    {
+        return AUTO_PREFIX + "coop:" + (branch == null ? "" : branch);
     }
 
     public String parent()

@@ -131,7 +131,7 @@ public class UICommitInfo extends UIElement
 
         if (node != null)
         {
-            this.message.setText(node.commit.message);
+            this.message.setText(CommitText.display(node.commit.message));
             this.apply.active(false);
 
             this.requestDiff();
@@ -356,7 +356,7 @@ public class UICommitInfo extends UIElement
 
         text = text.trim();
 
-        if (text.isEmpty() || text.equals(this.node.commit.message))
+        if (text.isEmpty() || text.equals(CommitText.display(this.node.commit.message)))
         {
             return;
         }

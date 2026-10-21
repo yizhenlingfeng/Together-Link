@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.WorldSavePath;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -383,10 +384,9 @@ public final class AssetLockManager
 
         noticeAt.put(id, now);
 
-        String what = type == AssetLockType.FILM ? "影片" : (type == AssetLockType.MODEL ? "模型" : "模型方块");
-        String message = "\u00a7e[BBS Together]\u00a7f 该" + what + "已被锁定，无法编辑";
+        Text message = Text.translatable("bbs_together.lock.notify.locked", Text.translatable("bbs_together.lock.noun." + type.id)).formatted(Formatting.YELLOW);
 
-        server.execute(() -> player.sendMessage(Text.literal(message), false));
+        server.execute(() -> player.sendMessage(message, false));
     }
 
     /* Validation */

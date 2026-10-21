@@ -2282,7 +2282,7 @@ public class TogetherClientNetwork {
             }
             catch (Exception ignored) {}
             if (count > 0) {
-                System.out.println("[BBS Together] 清理残留传输临时文件: " + count + " 个 / " + (removed / 1024L / 1024L) + " MiB");
+                System.out.println("[BBS Together] Removed leftover transfer temp files: " + count + " file(s), " + (removed / 1024L / 1024L) + " MiB");
             }
         }, "BBSTogether-TempCleanup");
         thread.setDaemon(true);
@@ -3579,7 +3579,7 @@ public class TogetherClientNetwork {
             }
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc != null && mc.inGameHud != null) {
-                mc.inGameHud.setOverlayMessage(Text.literal("§e撤销未生效：该区域刚被其他玩家修改，已同步为最新内容"), false);
+                mc.inGameHud.setOverlayMessage(Text.translatable("bbs_together.commit.undo.rejected").formatted(net.minecraft.util.Formatting.YELLOW), false);
             }
         });
     }

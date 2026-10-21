@@ -1,5 +1,7 @@
 # Together Link
 
+**简体中文** | [English](README_en.md)
+
 Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) 的多人协作扩展，基于 Minecraft 1.20.1 Fabric。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限/资产锁、资产同步和服务器审计。
 
 ## 版本与前置

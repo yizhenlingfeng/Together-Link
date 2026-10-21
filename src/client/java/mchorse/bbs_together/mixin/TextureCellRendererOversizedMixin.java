@@ -1,5 +1,6 @@
 package mchorse.bbs_together.mixin;
 
+import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.ui.framework.elements.utils.FontRenderer;
@@ -52,7 +53,7 @@ public abstract class TextureCellRendererOversizedMixin
         /* Cells are small: fit the size on the label only when it actually leaves room for it. */
         String label = font.getWidth(OversizedAssets.label(size.longValue())) <= w - 8
             ? OversizedAssets.label(size.longValue())
-            : "文件过大";
+            : L10n.lang("bbs_together.sync.oversized.file").get();
         int labelX = x + (w - font.getWidth(label)) / 2;
         int labelY = y + (h - font.getHeight()) / 2;
 

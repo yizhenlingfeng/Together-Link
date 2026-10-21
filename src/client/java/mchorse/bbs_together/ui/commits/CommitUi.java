@@ -191,7 +191,7 @@ public final class CommitUi
             {
                 String message = text == null ? "" : text.trim();
 
-                if (!message.isEmpty() && !message.equals(commit.message))
+                if (!message.isEmpty() && !message.equals(CommitText.display(commit.message)))
                 {
                     TogetherClientNetwork.sendCommitRename(filmId, commitId, message);
                 }
@@ -199,7 +199,7 @@ public final class CommitUi
         );
 
         panel.text.textbox.setLength(FilmCommit.MAX_MESSAGE);
-        panel.text.setText(commit.message);
+        panel.text.setText(CommitText.display(commit.message));
         UIOverlay.addOverlay(context, panel);
     }
 

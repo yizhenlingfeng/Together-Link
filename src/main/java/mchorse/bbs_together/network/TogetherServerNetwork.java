@@ -84,6 +84,7 @@ import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.Identifier;
 
 public class TogetherServerNetwork {
@@ -537,12 +538,17 @@ public class TogetherServerNetwork {
         BBSTogetherFix28Server.resetState();
     }
 
-    public static List<String> diagLines(MinecraftServer server) {
-        ArrayList<String> lines = new ArrayList<String>();
+    public static List<Text> diagLines(MinecraftServer server) {
+        ArrayList<Text> lines = new ArrayList<Text>();
         long rate = AssetEgressBudget.rateBytesPerSec();
-        lines.add("\u00a76[BBS Together] \u8d44\u4ea7\u51fa\u53e3\u8bca\u65ad");
-        lines.add("\u00a77\u9884\u7b97: \u00a7f" + (String)(rate <= 0L ? "\u4e0d\u9650\u901f\uff080\uff09" : rate / 1024L + " KiB/s (" + (double)(rate / 1024L) / 1024.0 + " MiB/s)"));
-        lines.add("\u00a77\u5f53\u524d\u53ef\u7528: \u00a7f" + AssetEgressBudget.availableBytes() / 1024L + " KiB");
+        lines.add(Text.translatable("bbs_together.diag.title").formatted(Formatting.GOLD));
+
+        Text budget = rate <= 0L
+            ? Text.translatable("bbs_together.diag.budget.unlimited")
+            : Text.literal(rate / 1024L + " KiB/s (" + (double)(rate / 1024L) / 1024.0 + " MiB/s)");
+
+        lines.add(Text.translatable("bbs_together.diag.budget", budget).formatted(Formatting.GRAY));
+        lines.add(Text.translatable("bbs_together.diag.available", diagValue(AssetEgressBudget.availableBytes() / 1024L)).formatted(Formatting.GRAY));
         int queued = 0;
         boolean anyQueue = false;
         if (server != null) {
@@ -552,22 +558,30 @@ public class TogetherServerNetwork {
                 if (q == null || (n = q.size()) <= 0) continue;
                 anyQueue = true;
                 queued += n;
-                lines.add("\u00a77  " + p.getGameProfile().getName() + ": \u00a7f" + n + " \u4e2a\u6587\u4ef6\u6392\u961f" + (assetDrainActive.containsKey(p.getUuid()) ? "\uff08\u6b63\u5728\u53d1\u9001\uff09" : "\uff08\u7a7a\u95f2\uff0c\u7b49\u5f85\u6392\u7a0b\uff09"));
+                Text state = Text.translatable(assetDrainActive.containsKey(p.getUuid()) ? "bbs_together.diag.player.sending" : "bbs_together.diag.player.idle");
+                lines.add(Text.translatable("bbs_together.diag.player", Text.literal(p.getGameProfile().getName()), diagValue(n), state).formatted(Formatting.GRAY));
             }
         }
         if (!anyQueue) {
-            lines.add("\u00a77\u6392\u961f: \u00a7f\u65e0\u5f85\u53d1\u8d44\u4ea7");
+            lines.add(Text.translatable("bbs_together.diag.queue.empty").formatted(Formatting.GRAY));
         } else {
-            lines.add("\u00a77\u6392\u961f\u5408\u8ba1: \u00a7f" + queued + " \u4e2a\u6587\u4ef6");
+            lines.add(Text.translatable("bbs_together.diag.queue.total", diagValue(queued)).formatted(Formatting.GRAY));
         }
-        lines.add("\u00a77\u672c\u6b21\u8fd0\u884c\u5df2\u53d1: \u00a7f" + assetBytesSent.get() / 1024L / 1024L + " MiB / " + assetTasksSent.get() + " \u4e2a\u6587\u4ef6");
-        lines.add("\u00a77\u5df2\u5904\u7406\u4e0b\u8f7d\u8bf7\u6c42: \u00a7f" + assetRequestsSeen.get() + " \u4e2a\u8def\u5f84");
-        lines.add("\u00a77\u8282\u6d41\u53c2\u6570: \u00a7f\u95f4\u9694 " + TogetherServerNetwork.sendIntervalMs() + " ms / \u5206\u6279 " + TogetherServerNetwork.sendBatchBytes() / 1024L + " KiB\uff08\u6bcf\u73a9\u5bb6\uff09");
+        lines.add(Text.translatable("bbs_together.diag.sent", diagValue(assetBytesSent.get() / 1024L / 1024L), diagValue(assetTasksSent.get())).formatted(Formatting.GRAY));
+        lines.add(Text.translatable("bbs_together.diag.requests", diagValue(assetRequestsSeen.get())).formatted(Formatting.GRAY));
+        lines.add(Text.translatable("bbs_together.diag.pacing", diagValue(TogetherServerNetwork.sendIntervalMs()), diagValue(TogetherServerNetwork.sendBatchBytes() / 1024L)).formatted(Formatting.GRAY));
         long syncMax = TogetherServerNetwork.syncMaxBytes();
-        lines.add("\u00a77\u6e05\u5355\u4f53\u79ef\u4e0a\u9650: \u00a7f" + (String)(syncMax <= 0L ? "\u4e0d\u9650\uff08\u6240\u6709\u6587\u4ef6\u90fd\u4f1a\u540c\u6b65\uff09" : syncMax / 1024L / 1024L + " MiB\uff08\u66f4\u5927\u7684\u6587\u4ef6\u4e0d\u540c\u6b65\uff0c\u7559\u5728\u670d\u52a1\u5668\u4e0a\uff09"));
-        lines.add("\u00a77\u4e22\u5305: \u00a7f" + assetPendingDropped.get() + " \u4e2a\u6587\u4ef6\uff08\u961f\u5217\u8d85\u957f\u88ab\u4e22\u5f03\uff0c\u89c1 asset.queue");
-        lines.add("\u00a77\u63d0\u793a: \u00a7f\u9884\u7b97 0 \u8868\u793a\u5173\u95ed\u9650\u901f\uff1b2048 KiB/s \u7ea6\u7b49\u4e8e\u4e3a\u5fc3\u8df3\u7559\u51fa\u4f59\u91cf\u7684\u5bb6\u7528\u4e0a\u884c\uff1b\u5355\u73a9\u5bb6\u4e0a\u9650\u4ecd\u7531\u4e0a\u9762\u7684\u8282\u6d41\u53c2\u6570\u51b3\u5b9a");
+        Text limit = syncMax <= 0L
+            ? Text.translatable("bbs_together.diag.sync_max.unlimited")
+            : Text.translatable("bbs_together.diag.sync_max.value", diagValue(syncMax / 1024L / 1024L));
+        lines.add(Text.translatable("bbs_together.diag.sync_max", limit).formatted(Formatting.GRAY));
+        lines.add(Text.translatable("bbs_together.diag.dropped", diagValue(assetPendingDropped.get())).formatted(Formatting.GRAY));
+        lines.add(Text.translatable("bbs_together.diag.hint").formatted(Formatting.GRAY));
         return lines;
+    }
+
+    private static Text diagValue(long value) {
+        return Text.literal(String.valueOf(value)).formatted(Formatting.WHITE);
     }
 
     /*
@@ -1046,8 +1060,7 @@ public class TogetherServerNetwork {
             return;
         }
         uploadRejectNoticeAt.put(player.getUuid(), now);
-        String message = "[BBS Together] \u4e0a\u4f20\u88ab\u62d2\u7edd\uff1a\u4f60\u7684 BBS \u6743\u9650\u662f\u53ea\u8bfb\uff08\u7b49\u7ea7 0\uff09\uff0c\u521a\u4e0a\u4f20\u7684\u8d44\u4ea7\u6ca1\u6709\u5199\u5165\u670d\u52a1\u5668\u3002\u8bf7\u7ba1\u7406\u5458\u7528 /bbsop \u7ed9\u4f60\u6388\u6743\u540e\u518d\u4e0a\u4f20\u3002";
-        server.execute(() -> player.sendMessage((Text)Text.literal((String)message), false));
+        server.execute(() -> player.sendMessage(Text.translatable("bbs_together.sync.upload.rejected"), false));
     }
 
     private static void handleAssetUpload(MinecraftServer server, ServerPlayerEntity uploader, PacketByteBuf buf) {
@@ -2169,7 +2182,7 @@ public class TogetherServerNetwork {
             }
             FilmCommit squashed = FilmCommitStore.squash(filmId, commitId, player.getUuid().toString(), player.getGameProfile().getName(), null);
             if (squashed == null) {
-                player.sendMessage(Text.literal("§e[BBS Together] 无法合并到此提交：该历史区间被其他分支引用，或提交已不在当前分支上"), false);
+                player.sendMessage(Text.translatable("bbs_together.commit.squash.failed").formatted(Formatting.YELLOW), false);
                 return;
             }
             playerEditingFilm.put(player.getUuid(), filmId);
@@ -2231,10 +2244,12 @@ public class TogetherServerNetwork {
         return data != null && data.isMap() ? data.asMap() : null;
     }
 
-    private static void branchCheckoutMessage(ServerPlayerEntity player, String branch, String reason, boolean success) {
-        String message = success ? "\u00a7a[BBS Together] \u5df2\u5207\u6362\u5230\u5206\u652f \u00a7f" + branch : "\u00a7e[BBS Together] \u65e0\u6cd5\u5207\u6362\u5230\u5206\u652f \u00a7f" + branch + "\u00a7e\uff1a" + reason;
-        player.sendMessage((Text)Text.literal((String)message), success);
-        System.out.println("[BBSTogether] Branch checkout " + (success ? "ok" : "failed") + " player=" + player.getGameProfile().getName() + " film=" + playerEditingFilm.get(player.getUuid()) + " branch=" + branch + (String)(success ? "" : " reason=" + reason));
+    private static void branchCheckoutMessage(ServerPlayerEntity player, String branch, String reasonKey, boolean success, Object... reasonArgs) {
+        Text message = success
+            ? Text.translatable("bbs_together.branch.checkout.ok", Text.literal(branch).formatted(Formatting.WHITE)).formatted(Formatting.GREEN)
+            : Text.translatable("bbs_together.branch.checkout.failed", Text.literal(branch).formatted(Formatting.WHITE), Text.translatable(reasonKey, reasonArgs)).formatted(Formatting.YELLOW);
+        player.sendMessage(message, success);
+        System.out.println("[BBSTogether] Branch checkout " + (success ? "ok" : "failed") + " player=" + player.getGameProfile().getName() + " film=" + playerEditingFilm.get(player.getUuid()) + " branch=" + branch + (String)(success ? "" : " reason=" + reasonKey));
     }
 
     private static void handleBranchCreate(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -2267,29 +2282,29 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             System.out.println("[BBSTogether] Branch checkout request player=" + player.getGameProfile().getName() + " film=" + filmId + " branch=" + branch);
             if (CoopSessionManager.isPlayerInSession(player.getUuid())) {
-                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u5408\u4f5c\u5f55\u5236\u6216\u9080\u8bf7\u4e2d\u4e0d\u80fd\u5207\u6362\u5206\u652f", false);
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.coop", false);
                 return;
             }
             FilmCommitStore.Store store = FilmCommitStore.get(filmId);
             if (store == null || !store.branches.containsKey(branch) && !branch.equals(FilmBranchStore.defaultBranch(filmId))) {
-                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u5206\u652f\u4e0d\u5b58\u5728", false);
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.missing", false);
                 return;
             }
             if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
-                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u8be5\u5206\u652f\u6b63\u5728\u88ab\u5408\u4f5c\u5f55\u5236\u5360\u7528", false);
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.busy", false);
                 return;
             }
             if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
-                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u8be5\u5f71\u7247\u5df2\u88ab\u9501\u5b9a", false);
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.locked", false);
                 return;
             }
             if (!FilmBranchStore.setBranch(filmId, player.getUuid(), branch)) {
-                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u65e0\u6cd5\u4fdd\u5b58\u5206\u652f\u9009\u62e9", false);
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.save_failed", false);
                 return;
             }
             String actual = FilmBranchStore.branchOf(filmId, player.getUuid());
             if (!branch.equals(actual)) {
-                TogetherServerNetwork.branchCheckoutMessage(player, branch, "\u5206\u652f\u9009\u62e9\u672a\u751f\u6548\uff08\u5f53\u524d\u4e3a " + actual + "\uff09", false);
+                TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.not_applied", false, actual);
                 return;
             }
             playerEditingFilm.put(player.getUuid(), filmId);
@@ -2335,7 +2350,7 @@ public class TogetherServerNetwork {
             System.out.println("[BBSTogether] Coop branch switch refused (no working data) player=" + player.getGameProfile().getName() + " film=" + filmId + " branch=" + current);
             return false;
         }
-        FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), "\u5408\u4f5c\u5f55\u5236\u524d\u81ea\u52a8\u63d0\u4ea4\uff08\u5207\u6362\u5230 " + targetBranch + "\uff09", current);
+        FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), FilmCommit.autoCoop(targetBranch), current);
         if (commit != null || incomingData != null) {
             TogetherServerNetwork.saveBranchNow(filmId, current, data);
             lastSavedFilmSnapshots.put(TogetherServerNetwork.branchKey(filmId, current), data);
@@ -2361,7 +2376,7 @@ public class TogetherServerNetwork {
         TogetherServerNetwork.broadcastReplayFormLocks(server, filmId);
         TogetherServerNetwork.together_broadcastCursorSnapshot(server, filmId);
         TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
-        player.sendMessage((Text)Text.literal((String)("\u00a7a[BBS Together] \u5df2\u63d0\u4ea4\u5f53\u524d\u5206\u652f \u00a7f" + current + "\u00a7a\uff0c\u5e76\u5207\u6362\u5230 \u00a7f" + targetBranch + "\u00a7a \u4ee5\u52a0\u5165\u5408\u4f5c\u5f55\u5236")), false);
+        player.sendMessage(Text.translatable("bbs_together.branch.coop.switched", Text.literal(current).formatted(Formatting.WHITE), Text.literal(targetBranch).formatted(Formatting.WHITE)).formatted(Formatting.GREEN), false);
         System.out.println("[BBSTogether] Coop branch switch player=" + player.getGameProfile().getName() + " film=" + filmId + " from=" + current + " to=" + targetBranch + (String)(commit == null ? " (nothing to commit)" : " commit=" + commit.id));
         return true;
     }
@@ -3413,7 +3428,7 @@ public class TogetherServerNetwork {
         byte[] payload = new byte[out.readableBytes()];
         out.readBytes(payload);
         TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_UNDO_REJECTED, payload, null);
-        player.sendMessage((Text)Text.literal((String)"\u00a7e[BBS Together]\u00a7f \u64a4\u9500\u672a\u751f\u6548\uff1a\u8be5\u533a\u57df\u521a\u88ab\u5176\u4ed6\u73a9\u5bb6\u4fee\u6539\uff0c\u5df2\u4e3a\u4f60\u6062\u590d\u6700\u65b0\u5185\u5bb9"), false);
+        player.sendMessage(Text.translatable("bbs_together.commit.undo.rejected").formatted(Formatting.YELLOW), false);
     }
 
     private static BaseValue resolveServerValue(Film film, List<String> path) {

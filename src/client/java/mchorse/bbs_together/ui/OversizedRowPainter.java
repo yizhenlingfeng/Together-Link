@@ -12,7 +12,7 @@ import mchorse.bbs_together.sync.OversizedAssets;
  * <p>BBS draws rows in several unrelated classes ({@code UIList} and the sound list override it
  * separately), so the drawing lives here once and each hook calls it. The row is dimmed with a
  * translucent scrim — the name underneath reads as greyed out — and tagged with
- * {@code 文件尺寸过大 · 706.6 MB} on the right, but only when the tag does not collide with the
+ * {@code File too large · 706.6 MB} on the right, but only when the tag does not collide with the
  * name itself.</p>
  */
 public final class OversizedRowPainter

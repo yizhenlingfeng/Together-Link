@@ -803,7 +803,7 @@ public class UICommitGraph extends UIElement
             int avatarSpace = this.avatarSpace(watchers);
             int rowRight = this.columnX(node.column) + this.columnWidth() - 12;
             int textRight = rowRight - 4 - avatarSpace;
-            String text = this.fit(context, node.commit.shortId() + "  " + node.commit.message, Math.max(24, textRight - this.textX(node)));
+            String text = this.fit(context, node.commit.shortId() + "  " + CommitText.display(node.commit.message), Math.max(24, textRight - this.textX(node)));
             int textY = node.y - context.batcher.getFont().getHeight() / 2;
 
             context.batcher.textShadow(text, this.textX(node), textY, node.active ? RowStyle.textColor(lit) : RowStyle.textColor(lit, Colors.GRAY));

@@ -33,7 +33,7 @@ public class BBSCommandsMixin {
             if (class_32223 == class_32222) continue;
             TogetherServerNetwork.sendAssetManifest(minecraftServer, class_32223);
         }
-        class_21682.sendFeedback(() -> Text.literal((String)"BBSTogether: requested asset upload and server asset refresh."), false);
+        class_21682.sendFeedback(() -> Text.translatable("bbs_together.command.upload.refreshed"), false);
         return 1;
     }
 }

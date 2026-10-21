@@ -2,6 +2,7 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.forms.ModelForm;
+import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.cells.CellState;
@@ -23,7 +24,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * A model that exists locally but was never uploaded to the server (others can't see it) gets a
- * grey gradient fading up from the bottom of its cell and a "（仅本地）" suffix in its tooltip.
+ * grey gradient fading up from the bottom of its cell and a localized "local only" suffix in its
+ * tooltip.
  * (The read-only block on the category's right-click menu lives in
  * {@link UIElementContextMenuBbsOpMixin} — the subclasses each register their own menus.)
  *
@@ -66,7 +68,7 @@ public class UIFormCategoryBbsOpMixin
     {
         if (together$isLocalOnly(form))
         {
-            cir.setReturnValue(cir.getReturnValue() + "（仅本地）");
+            cir.setReturnValue(cir.getReturnValue() + L10n.lang("bbs_together.models.local_only").get());
         }
     }
 

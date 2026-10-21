@@ -16,6 +16,7 @@ import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -377,7 +378,7 @@ public final class CoopSessionManager {
                 ServerPlayerEntity hostPlayer = server.getPlayerManager().getPlayer(session.host);
 
                 if (hostPlayer != null) {
-                    hostPlayer.sendMessage(Text.literal("§e[BBS Together] " + player.getGameProfile().getName() + " 无法自动提交并切换分支，未能接受邀请"), false);
+                    hostPlayer.sendMessage(Text.translatable("bbs_together.coop.notify.host_branch_failed", player.getGameProfile().getName()).formatted(Formatting.YELLOW), false);
                 }
 
                 if (session.invited.isEmpty() && session.members.size() <= 1) {

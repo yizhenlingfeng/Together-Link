@@ -1317,37 +1317,12 @@ public final class FilmCommitStore
 
         if (clips == 0 && replays == 0 && keyframes == 0)
         {
-            return kind == FilmCommit.KIND_IMPORT ? "初始快照" : "自动提交";
+            return kind == FilmCommit.KIND_IMPORT ? FilmCommit.AUTO_IMPORT : FilmCommit.AUTO_COMMIT;
         }
 
-        StringBuilder builder = new StringBuilder();
-
-        if (clips > 0)
-        {
-            builder.append(clips).append(" 个剪辑");
-        }
-
-        if (replays > 0)
-        {
-            if (builder.length() > 0)
-            {
-                builder.append(" · ");
-            }
-
-            builder.append(replays).append(" 个回放");
-        }
-
-        if (keyframes > 0)
-        {
-            if (builder.length() > 0)
-            {
-                builder.append(" · ");
-            }
-
-            builder.append(keyframes).append(" 个关键帧");
-        }
-
-        return builder.toString();
+        /* A language-neutral marker; the client translates it, because automatic commits are
+         * made by the server for every player, not by one player with one language. */
+        return FilmCommit.autoSummary(clips, replays, keyframes);
     }
 
     private static int count(MapType stats, String group, String action)

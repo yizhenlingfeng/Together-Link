@@ -4,6 +4,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import mchorse.bbs_mod.l10n.L10n;
+
 /**
  * Client-side registry of server assets that are bigger than the configured sync size limit
  * ({@code asset_sync_max_mb}).
@@ -17,9 +19,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class OversizedAssets
 {
-    /** Shown next to every dimmed entry. Kept in one place so grids and lists agree. */
-    public static final String LABEL = "文件尺寸过大";
-
     private static final Map<String, Long> FILES = new ConcurrentHashMap<String, Long>();
 
     private OversizedAssets() {}
@@ -93,10 +92,10 @@ public final class OversizedAssets
         return String.format(Locale.ROOT, "%.2f GB", mb / 1024D);
     }
 
-    /** The full tag: {@code 文件尺寸过大 · 706.6 MB}. */
+    /** The full tag: {@code File too large · 706.6 MB}. */
     public static String label(long size)
     {
-        return LABEL + " · " + humanSize(size);
+        return L10n.lang("bbs_together.sync.oversized.tag").get() + " · " + humanSize(size);
     }
 
     /**
