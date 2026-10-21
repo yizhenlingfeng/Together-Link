@@ -64,7 +64,8 @@ repositories {
 	mavenLocal()
 }
 
-def devRunDir = mcver == '1.20.1' ? 'run' : "run-${mcver}"
+def clientRunDir = mcver == '1.20.1' ? 'run' : "run-${mcver}-client"
+def serverRunDir = mcver == '1.20.1' ? 'run' : "run-${mcver}-server"
 
 loom {
 	splitEnvironmentSourceSets()
@@ -80,21 +81,26 @@ loom {
 		}
 	}
 
-	/* 开发运行配置：客户端与服务端共享同一游戏目录，避免重复生成 run 目录。
-	 * 1.20.1 保持 run/，1.20.4 使用 run-1.20.4/，world、config、mods 完全隔离。 */
+	/* 开发运行配置：客户端与服务端默认共享同一游戏目录，避免重复生成 run 目录。
+	 * 1.20.4 使用独立的 client/server 目录，防止同时联调时 world、logs、config 互相覆盖。 */
 	runs {
 		client {
 			client()
 			ideConfigGenerated true
-			runDir = devRunDir
+			runDir = clientRunDir
 			/* 给 Minecraft 开发环境分配足够堆内存 */
 			vmArg '-Xmx3G'
 			vmArg '-Xms1G'
+
+			/* 可选：-PjoinServer=127.0.0.1:25565 时启动后直接进服，便于双端冒烟。 */
+			if (providers.gradleProperty('joinServer').isPresent()) {
+				programArgs '--quickPlayMultiplayer', providers.gradleProperty('joinServer').get()
+			}
 		}
 		server {
 			server()
 			ideConfigGenerated true
-			runDir = devRunDir
+			runDir = serverRunDir
 			vmArg '-Xmx2G'
 			vmArg '-Xms512M'
 		}
