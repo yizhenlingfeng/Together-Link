@@ -2,6 +2,7 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.blocks.entities.ModelBlockEntity;
 import mchorse.bbs_mod.client.renderer.ModelBlockEntityRenderer;
+import mchorse.bbs_together.compat.ClientCompat;
 import mchorse.bbs_together.locks.AssetLockClient;
 import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockType;
@@ -32,7 +33,7 @@ public class ModelBlockEntityRendererBbsOpMixin
     {
         MinecraftClient client = MinecraftClient.getInstance();
 
-        if (!client.options.debugEnabled || !TogetherClientNetwork.isConnected())
+        if (!ClientCompat.isDebugHudVisible(client) || !TogetherClientNetwork.isConnected())
         {
             return;
         }

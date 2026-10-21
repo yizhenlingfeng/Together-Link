@@ -9,6 +9,7 @@ import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.DataPath;
 import mchorse.bbs_mod.utils.colors.Colors;
+import mchorse.bbs_together.compat.ClientCompat;
 import mchorse.bbs_together.locks.AssetLockClient;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.network.TogetherClientNetwork;
@@ -98,7 +99,7 @@ public class UIDataPathListMixin implements IFilmListMarker {
                 if (entry == null) {
                     return -1;
                 }
-                Identifier skinId = entry.getSkinTexture();
+                Identifier skinId = ClientCompat.skinTexture(entry);
                 return MinecraftClient.getInstance().getTextureManager().getTexture(skinId).getGlId();
             });
             if (glId < 0) continue;

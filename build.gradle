@@ -2,11 +2,51 @@ plugins {
 	id 'fabric-loom' version '1.15.5'
 }
 
-version = project.mod_version + "-" + project.minecraft_version
+/* ---------------------------------------------------------------------------
+ * 目标 Minecraft 版本选择
+ *
+ *   gradlew build                 -> 1.20.1（默认）
+ *   gradlew build -Pmcver=1.20.4  -> 1.20.4
+ *
+ * 每个版本的依赖与 fabric.mod.json 兼容范围放在
+ * gradle/versions/<mcver>.properties，避免把两套版本号混在同一个文件里。
+ * ------------------------------------------------------------------------- */
+def mcver = providers.gradleProperty('mcver').orElse('1.20.1').get()
+def versionFile = file("gradle/versions/${mcver}.properties")
+
+if (!versionFile.exists()) {
+	throw new GradleException("Unknown mcver '${mcver}': ${versionFile} does not exist.")
+}
+
+def versionProps = new Properties()
+versionFile.withReader('UTF-8') { versionProps.load(it) }
+
+def vprop = { String key ->
+	def value = versionProps.getProperty(key)
+
+	if (value == null) {
+		throw new GradleException("Missing '${key}' in ${versionFile}.")
+	}
+
+	return value
+}
+
+def minecraftVersion = vprop('minecraft_version')
+def minecraftRange = vprop('minecraft_range')
+def bbsVersion = vprop('bbs_version')
+def bbsRange = vprop('bbs_range')
+
+version = project.mod_version + "-" + minecraftVersion
 group = project.maven_group
 
 base {
 	archivesName = project.archives_base_name
+}
+
+/* 1.20.1 继续使用 build/，保持现有脚本与 IDE 路径不变；1.20.4 使用独立目录，
+ * 防止两个版本的 classes/resources 与 Loom 产物互相覆盖。 */
+if (mcver != '1.20.1') {
+	layout.buildDirectory.set(file("build-${mcver}"))
 }
 
 repositories {
@@ -24,8 +64,14 @@ repositories {
 	mavenLocal()
 }
 
+def devRunDir = mcver == '1.20.1' ? 'run' : "run-${mcver}"
+
 loom {
 	splitEnvironmentSourceSets()
+
+	/* Loom 1.15 remaps mixin annotations in remapJar directly, so no refmap is generated
+	 * or needed. Do not add a loom.mixin/defaultRefmapName block: that only enables the
+	 * legacy Mixin AP and prints a deprecation warning. */
 
 	mods {
 		"bbs_together" {
@@ -34,12 +80,13 @@ loom {
 		}
 	}
 
-	/* 开发运行配置：客户端与服务端共享同一游戏目录，避免重复生成 run 目录 */
+	/* 开发运行配置：客户端与服务端共享同一游戏目录，避免重复生成 run 目录。
+	 * 1.20.1 保持 run/，1.20.4 使用 run-1.20.4/，world、config、mods 完全隔离。 */
 	runs {
 		client {
 			client()
 			ideConfigGenerated true
-			runDir = "run"
+			runDir = devRunDir
 			/* 给 Minecraft 开发环境分配足够堆内存 */
 			vmArg '-Xmx3G'
 			vmArg '-Xms1G'
@@ -47,26 +94,38 @@ loom {
 		server {
 			server()
 			ideConfigGenerated true
-			runDir = "run"
+			runDir = devRunDir
 			vmArg '-Xmx2G'
 			vmArg '-Xms512M'
 		}
 	}
 }
 
+/* 版本专属源码：只有对应版本的构建才会加入。目录允许不存在。 */
+sourceSets {
+	main {
+		java.srcDir "src/versions/${mcver}/java"
+		resources.srcDir "src/versions/${mcver}/resources"
+	}
+	client {
+		java.srcDir "src/versions/${mcver}/client/java"
+		resources.srcDir "src/versions/${mcver}/client/resources"
+	}
+}
+
 dependencies {
-	// To change the versions see the gradle.properties file
-	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	// To change the versions see the gradle/versions/<mcver>.properties files
+	minecraft "com.mojang:minecraft:${minecraftVersion}"
+	mappings "net.fabricmc:yarn:${vprop('yarn_mappings')}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${vprop('loader_version')}"
 
 	// Fabric API
-	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${vprop('fabric_version')}"
 
-	/* BBS 2.6 dependency. transitive = false keeps BBS's own Sodium, Iris and glsl-transformer
+	/* BBS 2.7 dependency. transitive = false keeps BBS's own Sodium, Iris and glsl-transformer
 	 * out of this build. The consequence is worth knowing: the dev client then runs BBS without
 	 * Sodium and Iris, its mixins into them are skipped with a warning. */
-	modImplementation("mchorse:bbs:${project.bbs_version}") { transitive = false }
+	modImplementation("mchorse:bbs:${bbsVersion}") { transitive = false }
 }
 
 /* 强制 LWJGL 3.3.1 以兼容 Sodium（Loom 默认使用 3.3.2-snapshot，Sodium 要求 3.3.1） */
@@ -84,7 +143,7 @@ configurations.all {
 /* Loom caches the remapped BBS by its Maven coordinates, and BBS's version does not change while
  * it is being worked on — so a rebuilt BBS is silently ignored. This notices on its own: if the
  * published jar is newer than the cached remap, the cache goes. */
-def bbsJar = new File(new File(System.getProperty("user.home")), ".m2/repository/mchorse/bbs/${project.bbs_version}/bbs-${project.bbs_version}.jar")
+def bbsJar = new File(new File(System.getProperty("user.home")), ".m2/repository/mchorse/bbs/${bbsVersion}/bbs-${bbsVersion}.jar")
 def remapCache = file(".gradle/loom-cache/remapped_mods/remapped/mchorse")
 
 if (bbsJar.exists() && remapCache.exists() && bbsJar.lastModified() > remapCache.lastModified()) {
@@ -94,17 +153,47 @@ if (bbsJar.exists() && remapCache.exists() && bbsJar.lastModified() > remapCache
 
 processResources {
 	inputs.property "version", project.version
+	inputs.property "minecraft_range", minecraftRange
+	inputs.property "bbs_range", bbsRange
 
 	filesMatching("fabric.mod.json") {
-		expand "version": project.version
+		expand(
+			"version": project.version,
+			"minecraft_range": minecraftRange,
+			"bbs_range": bbsRange
+		)
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 17
+	it.options.encoding = 'UTF-8'
 }
 
 java {
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
 }
+
+/* ---------------------------------------------------------------------------
+ * 便捷任务：用嵌套 Gradle 构建切换 mcver。
+ *
+ * 这样可以直接 `gradlew build1204` / `gradlew runClient1204`，不必在
+ * PowerShell 里手动拼 -P 参数；嵌套构建也能让两个版本各自使用独立的
+ * build 目录与 run 目录。
+ * ------------------------------------------------------------------------- */
+def registerVersionTask = { String name, String target, List<String> taskList, String description ->
+	tasks.register(name, GradleBuild) {
+		group = 'fabric'
+		description = description
+		dir = rootDir
+		tasks = taskList
+		startParameter.projectProperties = [mcver: target]
+	}
+}
+
+registerVersionTask('build1201', '1.20.1', ['build'], '构建 1.20.1 产物（build/libs）。')
+registerVersionTask('build1204', '1.20.4', ['build'], '构建 1.20.4 产物（build-1.20.4/libs）。')
+registerVersionTask('runClient1201', '1.20.1', ['runClient'], '以 1.20.1 启动开发客户端（run/）。')
+registerVersionTask('runClient1204', '1.20.4', ['runClient'], '以 1.20.4 启动开发客户端（run-1.20.4/）。')
+registerVersionTask('runServer1204', '1.20.4', ['runServer'], '以 1.20.4 启动开发服务端（run-1.20.4/）。')

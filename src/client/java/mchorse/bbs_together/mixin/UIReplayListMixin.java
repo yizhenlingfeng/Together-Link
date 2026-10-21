@@ -21,6 +21,7 @@ import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
 import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_together.compat.ClientCompat;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -341,7 +342,7 @@ public class UIReplayListMixin {
         if (entry == null) {
             return -1;
         }
-        return mc.getTextureManager().getTexture(entry.getSkinTexture()).getGlId();
+        return mc.getTextureManager().getTexture(ClientCompat.skinTexture(entry)).getGlId();
     }
 
     private void together_captureReplayStructure() {

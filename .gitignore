@@ -33,6 +33,10 @@ bin/
 run/
 run_2/
 run_server/
+run-*/
+
+# 多版本构建输出（1.20.4 使用 build-1.20.4/）
+build-*/
 
 # java
 

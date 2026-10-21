@@ -26,6 +26,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>The normal client does this lookup itself before sending the creative pick packet;
  * returning an empty stack makes the copy a no-op. The server-side break path is gated in
  * {@code BBSTogetherMod} via {@code PlayerBlockBreakEvents}.</p>
+ *
+ * <p>1.20.1 version: the target method takes {@link BlockView}.</p>
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = ModelBlock.class, remap = false)

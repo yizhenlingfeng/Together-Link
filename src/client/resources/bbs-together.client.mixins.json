@@ -49,6 +49,5 @@
     ],
     "injectors": {
         "defaultRequire": 1
-    },
-    "refmap": "client-bbs-together-refmap.json"
+    }
 }

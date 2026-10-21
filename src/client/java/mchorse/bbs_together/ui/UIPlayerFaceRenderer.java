@@ -7,6 +7,7 @@ import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_mod.utils.resources.PlayerSkins;
 import mchorse.bbs_mod.resources.Link;
+import mchorse.bbs_together.compat.ClientCompat;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.util.Identifier;
@@ -79,7 +80,7 @@ public class UIPlayerFaceRenderer
                 return false;
             }
 
-            Identifier skin = entry.getSkinTexture();
+            Identifier skin = ClientCompat.skinTexture(entry);
 
             if (skin == null)
             {
