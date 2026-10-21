@@ -143,18 +143,6 @@ public class UIReplayListMixin {
         this.together_sendReplayStructure();
     }
 
-    // TODO: BBS 2.6 中 handleSwap 已移除，暂时禁用
-    // @Inject(method={"handleSwap"}, at={@At(value="HEAD")}, remap=false)
-    private void together_fix1615BeforeHandleSwap(int n, int n2, CallbackInfo callbackInfo) {
-        this.together_captureReplayStructure();
-    }
-
-    // TODO: BBS 2.6 中 handleSwap 已移除，暂时禁用
-    // @Inject(method={"handleSwap"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133HandleSwap(int n, int n2, CallbackInfo callbackInfo) {
-        this.together_sendReplayStructure();
-    }
-
     @Inject(method={"applyReplayCategory"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void together_blockApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
         this.together_captureReplayStructure();

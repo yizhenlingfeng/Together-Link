@@ -17,13 +17,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Stops a locked model block from being copied by pick-block.
+ * Cancels pick-block for locked model blocks.
  *
- * <p>The previous implementation injected into BBS' {@code ModelBlock.getPickStack}, whose
- * parameter changed from {@code BlockView} to {@code WorldView} in 1.20.4 — a mixin cannot
- * have one descriptor for both versions. {@code MinecraftClient.doItemPick()} has no
- * arguments and the same intermediary name ({@code method_1511}) in 1.20.1 and 1.20.4, so it
- * is the stable place to cancel the local pick action for both versions.</p>
+ * <p>{@code MinecraftClient.doItemPick()} is stable across 1.20.1 and 1.20.4
+ * ({@code method_1511} in both), unlike BBS' {@code ModelBlock.getPickStack} whose
+ * parameter type changed from {@code BlockView} to {@code WorldView}.</p>
  */
 @Environment(EnvType.CLIENT)
 @Mixin(MinecraftClient.class)

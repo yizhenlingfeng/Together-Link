@@ -35,7 +35,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = UIModelBlockPanel.class, remap = false)
 public class UIModelBlockPanelBbsOpMixin
 {
-    /** Click shields over the editor column and the two sections, attached lazily. */
+    /** Click shields over the editor column and the two sections, attached once in the constructor. */
     @Unique
     private final UIElement[] together$shields = new UIElement[3];
 

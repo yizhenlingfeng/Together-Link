@@ -2,16 +2,16 @@
 
 **English** | [简体中文](README.md)
 
-Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension for [BBS FS](https://github.com), built on Minecraft 1.20.1–1.20.4 Fabric. While keeping BBS's original editing experience, it adds real-time multiplayer collaboration, film version history, server-side permissions and asset locks, asset synchronization, and server auditing.
+Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension for [BBS FS](https://modrinth.com/mod/bbs-mod), available for Minecraft 1.20.1–1.20.4 on Fabric. While retaining BBS's original editing experience, it adds real-time multiplayer collaboration, film version history, server-side permissions and asset locks, asset synchronization, and server auditing.
 
-> One jar supports both 1.20.1 and 1.20.4; there is no longer a per-version release.
+> A single build supports both Minecraft 1.20.1 and 1.20.4; no per-version installation is required.
 
 ## Version and requirements
 
 | Item | Requirement |
 |---|---|
-| Current version | 2.0 |
-| Minecraft | 1.20.1 – 1.20.4 (one jar) |
+| Current version | 2.0.1 |
+| Minecraft | 1.20.1 – 1.20.4 (single build) |
 | BBS FS | >= 2.6 (2.7 recommended) |
 | Fabric Loader | >= 0.15.6 |
 | Fabric API | Required |
@@ -109,7 +109,7 @@ Feature domains: `morph`, `film`, `record`, `model_blocks`, `particles`, `model_
 | Step | Action |
 |---|---|
 | 1 | Install Minecraft 1.20.1 or 1.20.4, Fabric Loader, Fabric API, and the matching BBS FS version |
-| 2 | Put `together-link-2.0-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
+| 2 | Put `together-link-2.0.1-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
 | 3 | Start the server, then run `/bbsop <player> 2` from the console or as OP to set up an admin |
 | 4 | Connect all clients to the same server; client and server must run the same version |
 | 5 | Open the BBS dashboard to start collaborating |
@@ -151,8 +151,8 @@ Config file: `config/bbs/settings/bbs_together.json`.
 
 | Command | Description |
 |---|---|
-| `.\gradlew.bat build` | Build the universal jar (1.20.1 / 1.20.4) |
-| `build/libs/together-link-2.0-1.20.1-1.20.4.jar` | Build artifact (the only release jar) |
+| `.\gradlew.bat build` | Build the universal artifact (1.20.1 / 1.20.4) |
+| `build/libs/together-link-2.0.1-1.20.1-1.20.4.jar` | Build artifact (the only release artifact) |
 | `.\gradlew.bat build "-Pmcver=1.20.4"` | Compile/run verification for 1.20.4 only; the artifact has a `-verify` suffix and is not released |
 | `dist/` | Release copies |
 
@@ -173,6 +173,25 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 | `src/client/resources/bbs-together.client.mixins.json` | Client mixin config |
 
 ## Changelog
+
+### v2.0.1
+
+#### Added
+
+- Added Minecraft 1.20.4 support. Releases are consolidated into a single build compatible with 1.20.1–1.20.4.
+- Verified 1.20.4 dedicated server and client startup and join paths.
+
+#### Fixed
+
+- Fixed the model block panel rendering blank on first open in 1.20.4 while its buttons remained clickable.
+- Fixed the 1.20.4 binary incompatibility in the model block NBT size check (`PacketByteBuf.writeNbt`).
+- Fixed locked model block pick-block handling in 1.20.4 by intercepting `MinecraftClient.doItemPick`.
+- Removed the legacy refmap file; Loom now remaps Mixin annotations directly during `remapJar`.
+
+#### Compatibility
+
+- Minecraft 1.20.4 requires BBS `2.7-1.20.4`; the public `2.3.3` release does not satisfy the `>=2.6` dependency.
+- Client and server must run the same Minecraft version.
 
 ### v2.0
 

@@ -2,16 +2,16 @@
 
 **简体中文** | [English](README_en.md)
 
-Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) 的多人协作扩展，基于 Minecraft 1.20.1–1.20.4 Fabric。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限/资产锁、资产同步和服务器审计。
+Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/mod/bbs-mod) 的多人协作扩展，适用于 Minecraft 1.20.1–1.20.4 的 Fabric 环境。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限与资产锁、资产同步及服务器审计。
 
-> 同一个 jar 同时支持 1.20.1 与 1.20.4，不再按版本分开发布。
+> 单一构建产物同时支持 Minecraft 1.20.1 与 1.20.4，无需按版本分别安装。
 
 ## 版本与前置
 
 | 项目 | 要求 |
 |---|---|
-| 当前版本 | 2.0 |
-| Minecraft | 1.20.1 – 1.20.4（同一个 jar） |
+| 当前版本 | 2.0.1 |
+| Minecraft | 1.20.1 – 1.20.4（单一构建产物） |
 | BBS FS | >= 2.6（推荐 2.7） |
 | Fabric Loader | >= 0.15.6 |
 | Fabric API | 必需 |
@@ -109,7 +109,7 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) �
 | 步骤 | 操作 |
 |---|---|
 | 1 | 安装 Minecraft 1.20.1 或 1.20.4、Fabric Loader、Fabric API、对应版本的 BBS FS |
-| 2 | 将 `together-link-2.0-1.20.1-1.20.4.jar` 放入客户端和服务端的 `mods/` |
+| 2 | 将 `together-link-2.0.1-1.20.1-1.20.4.jar` 放入客户端和服务端的 `mods/` |
 | 3 | 启动服务器，使用控制台或 OP 执行 `/bbsop <玩家> 2` 初始化管理员 |
 | 4 | 所有客户端连接同一服务器；服务端与客户端必须使用同一版本 |
 | 5 | 进入 BBS 仪表盘即可开始协作 |
@@ -151,8 +151,8 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) �
 
 | 命令 | 说明 |
 |---|---|
-| `.\gradlew.bat build` | 构建通用 jar（1.20.1 / 1.20.4） |
-| `build/libs/together-link-2.0-1.20.1-1.20.4.jar` | 构建产物（唯一发布 jar） |
+| `.\gradlew.bat build` | 构建通用产物（1.20.1 / 1.20.4） |
+| `build/libs/together-link-2.0.1-1.20.1-1.20.4.jar` | 构建产物（唯一发布产物） |
 | `.\gradlew.bat build "-Pmcver=1.20.4"` | 仅编译/运行验证 1.20.4，产物带 `-verify`，不发布 |
 | `dist/` | 发布副本 |
 
@@ -173,6 +173,25 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) �
 | `src/client/resources/bbs-together.client.mixins.json` | 客户端 mixin 配置 |
 
 ## 更新日志
+
+### v2.0.1
+
+#### 新增
+
+- 新增 Minecraft 1.20.4 支持，发布物合并为单一构建产物，兼容 1.20.1–1.20.4。
+- 完成 1.20.4 专用服务器与客户端的启动、进服验证。
+
+#### 修复
+
+- 修复 1.20.4 首次打开模型方块面板时 UI 不显示、按钮仍可点击的问题。
+- 修复 1.20.4 模型方块 NBT 体积检查的二进制不兼容（`PacketByteBuf.writeNbt`）。
+- 修复 1.20.4 拾取锁定模型方块时的兼容性问题，改由 `MinecraftClient.doItemPick` 拦截。
+- 移除历史 refmap 文件；Loom 在 `remapJar` 阶段直接重映射 Mixin 注解。
+
+#### 兼容性
+
+- Minecraft 1.20.4 需要 BBS `2.7-1.20.4`；公开版 `2.3.3` 不满足 `>=2.6` 依赖。
+- 客户端与服务端必须使用相同的 Minecraft 版本。
 
 ### v2.0
 

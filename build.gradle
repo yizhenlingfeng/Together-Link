@@ -3,13 +3,12 @@ plugins {
 }
 
 /* ---------------------------------------------------------------------------
- * 目标 Minecraft 版本选择
+ * 目标 Minecraft 版本
  *
- *   gradlew build                 -> 1.20.1（默认）
- *   gradlew build -Pmcver=1.20.4  -> 1.20.4
+ *   gradlew build                 -> 通用 jar（1.20.1 - 1.20.4）
+ *   gradlew build -Pmcver=1.20.4  -> 1.20.4 编译/运行验证（不作为发布物）
  *
- * 每个版本的依赖与 fabric.mod.json 兼容范围放在
- * gradle/versions/<mcver>.properties，避免把两套版本号混在同一个文件里。
+ * 依赖与 fabric.mod.json 兼容范围放在 gradle/versions/<mcver>.properties。
  * ------------------------------------------------------------------------- */
 def mcver = providers.gradleProperty('mcver').orElse('1.20.1').get()
 def versionFile = file("gradle/versions/${mcver}.properties")
@@ -44,8 +43,7 @@ base {
 	archivesName = project.archives_base_name
 }
 
-/* 1.20.1 继续使用 build/，保持现有脚本与 IDE 路径不变；1.20.4 使用独立目录，
- * 防止两个版本的 classes/resources 与 Loom 产物互相覆盖。 */
+/* 1.20.1 兼容构建使用 build/；1.20.4 验证构建使用独立目录，避免产物互相覆盖。 */
 if (mcver != '1.20.1') {
 	layout.buildDirectory.set(file("build-${mcver}"))
 }
@@ -82,8 +80,8 @@ loom {
 		}
 	}
 
-	/* 开发运行配置：客户端与服务端默认共享同一游戏目录，避免重复生成 run 目录。
-	 * 1.20.4 使用独立的 client/server 目录，防止同时联调时 world、logs、config 互相覆盖。 */
+	/* 开发运行配置：1.20.1 使用 run/；1.20.4 的客户端与服务端使用独立目录，
+	 * 避免同时联调时 world、logs、config 互相覆盖。 */
 	runs {
 		client {
 			client()
@@ -108,20 +106,8 @@ loom {
 	}
 }
 
-/* 版本专属源码：只有对应版本的构建才会加入。目录允许不存在。 */
-sourceSets {
-	main {
-		java.srcDir "src/versions/${mcver}/java"
-		resources.srcDir "src/versions/${mcver}/resources"
-	}
-	client {
-		java.srcDir "src/versions/${mcver}/client/java"
-		resources.srcDir "src/versions/${mcver}/client/resources"
-	}
-}
-
 dependencies {
-	// To change the versions see the gradle/versions/<mcver>.properties files
+	// Version-specific coordinates are defined in gradle/versions/<mcver>.properties
 	minecraft "com.mojang:minecraft:${minecraftVersion}"
 	mappings "net.fabricmc:yarn:${vprop('yarn_mappings')}:v2"
 	modImplementation "net.fabricmc:fabric-loader:${vprop('loader_version')}"
@@ -183,11 +169,8 @@ java {
 }
 
 /* ---------------------------------------------------------------------------
- * 便捷任务：用嵌套 Gradle 构建切换 mcver。
- *
- * 这样可以直接 `gradlew build1204` / `gradlew runClient1204`，不必在
- * PowerShell 里手动拼 -P 参数；嵌套构建也能让两个版本各自使用独立的
- * build 目录与 run 目录。
+ * 便捷任务：用嵌套 Gradle 构建切换 mcver，避免 PowerShell 下 -P 参数被截断。
+ * 默认 build/runClient 面向 1.20.1；1.20.4 仅用于编译与运行验证。
  * ------------------------------------------------------------------------- */
 def registerVersionTask = { String name, String target, List<String> taskList, String description ->
 	tasks.register(name, GradleBuild) {
@@ -199,8 +182,6 @@ def registerVersionTask = { String name, String target, List<String> taskList, S
 	}
 }
 
-registerVersionTask('build1201', '1.20.1', ['build'], '构建 1.20.1 产物（build/libs）。')
-registerVersionTask('build1204', '1.20.4', ['build'], '构建 1.20.4 产物（build-1.20.4/libs）。')
-registerVersionTask('runClient1201', '1.20.1', ['runClient'], '以 1.20.1 启动开发客户端（run/）。')
-registerVersionTask('runClient1204', '1.20.4', ['runClient'], '以 1.20.4 启动开发客户端（run-1.20.4/）。')
-registerVersionTask('runServer1204', '1.20.4', ['runServer'], '以 1.20.4 启动开发服务端（run-1.20.4/）。')
+registerVersionTask('build1204', '1.20.4', ['build'], '1.20.4 编译/运行验证，产物仅用于测试。')
+registerVersionTask('runClient1204', '1.20.4', ['runClient'], '以 1.20.4 启动开发客户端（run-1.20.4-client/）。')
+registerVersionTask('runServer1204', '1.20.4', ['runServer'], '以 1.20.4 启动开发服务端（run-1.20.4-server/）。')
