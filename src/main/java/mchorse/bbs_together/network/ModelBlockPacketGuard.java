@@ -1,8 +1,10 @@
 package mchorse.bbs_together.network;
 
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.network.PacketByteBuf;
+import net.minecraft.nbt.NbtCompound;
+
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 
 /**
  * Vanilla rejects a play packet larger than 8 MiB. A BBS model block carries its full
@@ -21,9 +23,14 @@ public final class ModelBlockPacketGuard {
 
     public static int nbtSize(BlockEntity entity) {
         try {
-            PacketByteBuf buffer = PacketByteBufs.create();
-            buffer.writeNbt(entity.toInitialChunkDataNbt());
-            return buffer.readableBytes();
+            NbtCompound nbt = entity.toInitialChunkDataNbt();
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(bytes);
+
+            nbt.write(out);
+            out.flush();
+
+            return bytes.size();
         }
         catch (Exception e) {
             return Integer.MAX_VALUE;

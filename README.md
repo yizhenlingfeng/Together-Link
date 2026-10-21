@@ -2,14 +2,16 @@
 
 **简体中文** | [English](README_en.md)
 
-Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) 的多人协作扩展，基于 Minecraft 1.20.1 Fabric。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限/资产锁、资产同步和服务器审计。
+Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) 的多人协作扩展，基于 Minecraft 1.20.1–1.20.4 Fabric。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限/资产锁、资产同步和服务器审计。
+
+> 同一个 jar 同时支持 1.20.1 与 1.20.4，不再按版本分开发布。
 
 ## 版本与前置
 
 | 项目 | 要求 |
 |---|---|
 | 当前版本 | 2.0 |
-| Minecraft | 1.20.1 |
+| Minecraft | 1.20.1 – 1.20.4（同一个 jar） |
 | BBS FS | >= 2.6（推荐 2.7） |
 | Fabric Loader | >= 0.15.6 |
 | Fabric API | 必需 |
@@ -106,8 +108,8 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) �
 
 | 步骤 | 操作 |
 |---|---|
-| 1 | 安装 Minecraft 1.20.1、Fabric Loader、Fabric API、BBS FS |
-| 2 | 将 `together-link-2.0-1.20.1.jar` 放入客户端和服务端的 `mods/` |
+| 1 | 安装 Minecraft 1.20.1 或 1.20.4、Fabric Loader、Fabric API、对应版本的 BBS FS |
+| 2 | 将 `together-link-2.0-1.20.1-1.20.4.jar` 放入客户端和服务端的 `mods/` |
 | 3 | 启动服务器，使用控制台或 OP 执行 `/bbsop <玩家> 2` 初始化管理员 |
 | 4 | 所有客户端连接同一服务器；服务端与客户端必须使用同一版本 |
 | 5 | 进入 BBS 仪表盘即可开始协作 |
@@ -149,10 +151,10 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://github.com) �
 
 | 命令 | 说明 |
 |---|---|
-| `.\gradlew.bat build` | 构建并运行检查 |
-| `build/libs/together-link-2.0-1.20.1.jar` | 构建产物 |
+| `.\gradlew.bat build` | 构建通用 jar（1.20.1 / 1.20.4） |
+| `build/libs/together-link-2.0-1.20.1-1.20.4.jar` | 构建产物（唯一发布 jar） |
+| `.\gradlew.bat build "-Pmcver=1.20.4"` | 仅编译/运行验证 1.20.4，产物带 `-verify`，不发布 |
 | `dist/` | 发布副本 |
-| `E:\mc\.minecraft\versions\Together测试端\mods\` | 测试端部署位置 |
 
 构建工具 Loom 固定为 `1.15.5`，避免快照版本导致构建差异。
 

@@ -31,7 +31,7 @@
         "UIModelBlockPanelBbsOpMixin",
         "UIModelEditorPanelBbsOpMixin",
         "ModelBlockEntityRendererBbsOpMixin",
-        "ModelBlockPickBbsOpMixin",
+        "ModelBlockPickGuardMixin",
         "ModelBlockBreakGuardMixin",
         "UIClipsMixin",
         "UIFormCategoryModelSizeMixin",

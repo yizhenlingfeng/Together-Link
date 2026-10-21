@@ -35,8 +35,9 @@ def minecraftVersion = vprop('minecraft_version')
 def minecraftRange = vprop('minecraft_range')
 def bbsVersion = vprop('bbs_version')
 def bbsRange = vprop('bbs_range')
+def artifactSuffix = versionProps.getProperty('artifact_suffix', minecraftVersion)
 
-version = project.mod_version + "-" + minecraftVersion
+version = project.mod_version + "-" + artifactSuffix
 group = project.maven_group
 
 base {

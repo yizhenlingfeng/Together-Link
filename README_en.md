@@ -2,14 +2,16 @@
 
 **English** | [简体中文](README.md)
 
-Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension for [BBS FS](https://github.com), built on Minecraft 1.20.1 Fabric. While keeping BBS's original editing experience, it adds real-time multiplayer collaboration, film version history, server-side permissions and asset locks, asset synchronization, and server auditing.
+Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension for [BBS FS](https://github.com), built on Minecraft 1.20.1–1.20.4 Fabric. While keeping BBS's original editing experience, it adds real-time multiplayer collaboration, film version history, server-side permissions and asset locks, asset synchronization, and server auditing.
+
+> One jar supports both 1.20.1 and 1.20.4; there is no longer a per-version release.
 
 ## Version and requirements
 
 | Item | Requirement |
 |---|---|
 | Current version | 2.0 |
-| Minecraft | 1.20.1 |
+| Minecraft | 1.20.1 – 1.20.4 (one jar) |
 | BBS FS | >= 2.6 (2.7 recommended) |
 | Fabric Loader | >= 0.15.6 |
 | Fabric API | Required |
@@ -106,8 +108,8 @@ Feature domains: `morph`, `film`, `record`, `model_blocks`, `particles`, `model_
 
 | Step | Action |
 |---|---|
-| 1 | Install Minecraft 1.20.1, Fabric Loader, Fabric API, and BBS FS |
-| 2 | Put `together-link-2.0-1.20.1.jar` into the `mods/` folder on both client and server |
+| 1 | Install Minecraft 1.20.1 or 1.20.4, Fabric Loader, Fabric API, and the matching BBS FS version |
+| 2 | Put `together-link-2.0-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
 | 3 | Start the server, then run `/bbsop <player> 2` from the console or as OP to set up an admin |
 | 4 | Connect all clients to the same server; client and server must run the same version |
 | 5 | Open the BBS dashboard to start collaborating |
@@ -149,10 +151,10 @@ Config file: `config/bbs/settings/bbs_together.json`.
 
 | Command | Description |
 |---|---|
-| `.\gradlew.bat build` | Build and run checks |
-| `build/libs/together-link-2.0-1.20.1.jar` | Build artifact |
+| `.\gradlew.bat build` | Build the universal jar (1.20.1 / 1.20.4) |
+| `build/libs/together-link-2.0-1.20.1-1.20.4.jar` | Build artifact (the only release jar) |
+| `.\gradlew.bat build "-Pmcver=1.20.4"` | Compile/run verification for 1.20.4 only; the artifact has a `-verify` suffix and is not released |
 | `dist/` | Release copies |
-| `E:\mc\.minecraft\versions\Together测试端\mods\` | Test client deployment location |
 
 Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapshot versions.
 
