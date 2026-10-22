@@ -502,6 +502,10 @@ public final class CoopSessionManager {
             ServerPlayerEntity p = server.getPlayerManager().getPlayer(member.uuid);
 
             if (p != null) {
+                /* A member may not hold the film yet (an invitee that never opened it has no
+                 * local copy at all), so ship the branch's film just before the begin packet. */
+                TogetherServerNetwork.sendBranchFilmTo(server, p, session.filmId, session.branch);
+
                 PacketByteBuf out = PacketByteBufs.create();
 
                 out.writeLong(session.id);

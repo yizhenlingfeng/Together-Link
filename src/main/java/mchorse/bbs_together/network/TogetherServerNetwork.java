@@ -368,6 +368,25 @@ public class TogetherServerNetwork {
         });
     }
 
+    /** Deliver one branch's complete film to a player, whichever branch that player is on. */
+    public static void sendBranchFilmTo(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch) {
+        if (filmId == null || filmId.isEmpty()) {
+            return;
+        }
+        MapType data;
+        try {
+            data = FilmBranchStore.workingData(filmId, branch);
+        } catch (RuntimeException exception) {
+            System.err.println("[BBSTogether] Could not serialize film " + filmId + " / " + branch + ": " + exception);
+            return;
+        }
+        if (data == null) {
+            return;
+        }
+        TogetherServerNetwork.sendFilmBranchStateTo(server, player, filmId, branch, data);
+        TogetherServerNetwork.markBranchStateDelivered(player, filmId, branch);
+    }
+
     private static String sha1OfPathCached(Path path, File file) throws IOException {
         long mtime = Files.getLastModifiedTime(path, new LinkOption[0]).toMillis();
         long size = file.length();

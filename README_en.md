@@ -186,6 +186,9 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Fixed the model block panel rendering blank on first open in 1.20.4 while its buttons remained clickable.
 - Fixed the 1.20.4 binary incompatibility in the model block NBT size check (`PacketByteBuf.writeNbt`).
 - Fixed locked model block pick-block handling in 1.20.4 by intercepting `MinecraftClient.doItemPick`.
+- Fixed player skins and the F3 debug HUD state being unreadable on a released client: lookups now accept both development and production method names.
+- Fixed a client crash while the film and replay lists drew collaborator faces (a missing skin is no longer requested from the texture manager as a null texture).
+- Fixed invited players being told the film was missing locally, which stopped them from recording replays; the session's branch film is now sent before recording starts.
 - Removed the legacy refmap file; Loom now remaps Mixin annotations directly during `remapJar`.
 
 #### Compatibility

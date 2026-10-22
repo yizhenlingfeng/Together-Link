@@ -1,7 +1,6 @@
 package mchorse.bbs_together.mixin;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -21,13 +20,10 @@ import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
 import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
-import mchorse.bbs_together.compat.ClientCompat;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.ui.UIPlayerFaceRenderer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.network.PlayerListEntry;
 import org.joml.Vector3d;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -47,8 +43,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class UIReplayListMixin {
     private String together_lockFilmId = null;
     private int together_lockIndex = -1;
-    private final Map<UUID, Integer> together_skinCache = new HashMap<UUID, Integer>();
-    private int together_lastSelectionsSize = -1;
     private List<Replay> together_replaysBeforeStructureChange;
 
     /** Read-only (level 0) gate: cancel the operation when the player may not edit films.
@@ -289,16 +283,6 @@ public class UIReplayListMixin {
         if (arrayList.isEmpty()) {
             return;
         }
-        MinecraftClient mc = MinecraftClient.getInstance();
-        ClientPlayNetworkHandler networkHandler = mc.getNetworkHandler();
-        if (networkHandler == null) {
-            return;
-        }
-        int n6 = TogetherClientNetwork.replaySelections.size();
-        if (n6 != this.together_lastSelectionsSize) {
-            this.together_skinCache.clear();
-            this.together_lastSelectionsSize = n6;
-        }
         if ((n4 = arrayList.size()) <= 0) {
             return;
         }
@@ -311,26 +295,17 @@ public class UIReplayListMixin {
         }
         int n11 = 0;
         for (UUID uUID3 : arrayList) {
-            int n12 = this.together_skinCache.computeIfAbsent(uUID3, arg_0 -> this.together_getSkinTextureLambda(networkHandler, mc, arg_0));
-            if (n12 < 0) continue;
-            int n13 = n10 + n11;
-            int n14 = n3 + 1;
-            Integer n15 = TogetherClientNetwork.playerColors.get(uUID3);
-            if (n15 != null) {
-                uIContext.batcher.box((float)(n13 - 1), (float)(n14 - 1), (float)(n13 + n7 + 1), (float)(n14 + n7 + 1), n15 | 0xFF000000);
+            int n12 = n10 + n11;
+            int n13 = n3 + 1;
+            Integer n14 = TogetherClientNetwork.playerColors.get(uUID3);
+            if (n14 != null) {
+                uIContext.batcher.box((float)(n12 - 1), (float)(n13 - 1), (float)(n12 + n7 + 1), (float)(n13 + n7 + 1), n14 | 0xFF000000);
             }
-            uIContext.batcher.texturedBox(n12, -1, (float)n13, (float)n14, (float)n7, (float)n7, 8.0f, 8.0f, 16.0f, 16.0f, 64, 64);
-            uIContext.batcher.texturedBox(n12, -1, (float)n13, (float)n14, (float)n7, (float)n7, 40.0f, 8.0f, 48.0f, 16.0f, 64, 64);
+            /* Shared face renderer: it copes with a player whose skin is unavailable — resolving
+             * a null skin identifier through the texture manager used to crash the client. */
+            UIPlayerFaceRenderer.draw(uIContext.batcher, TogetherClientNetwork.playerName(uUID3), uUID3, n12, n13, n7);
             n11 += n7 + n8;
         }
-    }
-
-    private int together_getSkinTexture(ClientPlayNetworkHandler networkHandler, MinecraftClient mc, UUID uUID) {
-        PlayerListEntry entry = networkHandler.getPlayerListEntry(uUID);
-        if (entry == null) {
-            return -1;
-        }
-        return mc.getTextureManager().getTexture(ClientCompat.skinTexture(entry)).getGlId();
     }
 
     private void together_captureReplayStructure() {
@@ -341,10 +316,6 @@ public class UIReplayListMixin {
         List<Replay> list = this.together_replaysBeforeStructureChange;
         this.together_replaysBeforeStructureChange = null;
         BBSTogetherFixReplayStructure.sendIfChanged((UIReplayList)(Object)this, list);
-    }
-
-    private Integer together_getSkinTextureLambda(ClientPlayNetworkHandler networkHandler, MinecraftClient mc, UUID uUID) {
-        return this.together_getSkinTexture(networkHandler, mc, uUID);
     }
 }
 

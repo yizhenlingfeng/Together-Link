@@ -1,6 +1,7 @@
 package mchorse.bbs_together.network;
 
 import mchorse.bbs_mod.BBSModClient;
+import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.Films;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
@@ -587,16 +588,13 @@ public final class CoopClient {
                 return;
             }
 
-            /* Prefer the live editor film: after accepting an invite from another branch the
-             * authoritative branch state was applied in memory, but BBS may not have written
-             * it to disk yet. The recorded replay must be the host branch's replay. */
-            UIFilmPanel panel = CommitUi.filmPanel();
-            Object panelData = panel == null ? null : panel.getData();
-            Film film = panelData instanceof Film && filmId.equals(((Film) panelData).getId())
-                ? (Film) panelData
-                : (Film) mchorse.bbs_mod.BBSMod.getFilms().load(filmId);
+            /* The film the take records into: the editor's copy, the copy the server sent for
+             * this session's branch, or the file on disk. */
+            Film film = resolveSessionFilm(filmId);
 
             if (film == null || replayIndex < 0 || replayIndex >= film.replays.getList().size()) {
+                System.out.println("[BBSTogether] Coop begin failed for film " + filmId + ", replay " + replayIndex
+                    + (film == null ? ": no film" : ": " + film.replays.getList().size() + " replay(s)"));
                 sendMessage("bbs_together.coop.notify.begin_failed");
                 return;
             }
@@ -610,6 +608,39 @@ public final class CoopClient {
             closeRoomScreen();
             sendMessage("bbs_together.coop.notify.recording_started");
         });
+    }
+
+    /**
+     * The film a take records into: the editor's copy, the copy the server sent for the session's
+     * branch, or the file on disk. An invitee that never opened the film has no local file at all,
+     * so the copy arriving with the begin packet is what makes its take possible.
+     */
+    private static Film resolveSessionFilm(String filmId) {
+        UIFilmPanel panel = CommitUi.filmPanel();
+        Object panelData = panel == null ? null : panel.getData();
+
+        if (panelData instanceof Film film && filmId.equals(film.getId())) {
+            return film;
+        }
+
+        MapType received = TogetherClientNetwork.cachedFilmData(filmId);
+
+        if (received != null) {
+            try {
+                Film film = new Film();
+
+                film.setId(filmId);
+                film.fromData(received);
+                /* Saved from a copy: saving stamps a format version into the data. */
+                TogetherClientNetwork.saveReceivedFilm(filmId, (MapType) received.copy());
+
+                return film;
+            } catch (Exception exception) {
+                /* Unreadable cached data falls back to the local file. */
+            }
+        }
+
+        return (Film) mchorse.bbs_mod.BBSMod.getFilms().load(filmId);
     }
 
     private static void sendMessage(String key) {

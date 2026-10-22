@@ -3829,6 +3829,14 @@ public class TogetherClientNetwork {
         }
     }
 
+    /** Write a film received from the server into BBS's local film manager. */
+    public static void saveReceivedFilm(String filmId, MapType data) {
+        if (filmId == null || filmId.isEmpty() || data == null) {
+            return;
+        }
+        TogetherClientNetwork.together_saveReceivedFilm(filmId, data);
+    }
+
     private static void together_applyHiddenFilmDataUpdate(UIFilmPanel panel, MapType data) {
         Film film = (Film)panel.getData();
         int currentIdx = together_getCurrentReplayIndex(panel, film);
