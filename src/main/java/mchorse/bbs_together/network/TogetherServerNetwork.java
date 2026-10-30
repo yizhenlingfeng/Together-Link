@@ -129,7 +129,7 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_HELLO = new Identifier("bbs_together", "s_hello");
     public static final Identifier CLIENT_HELLO = new Identifier("bbs_together", "c_hello");
     public static final Identifier CLIENT_SERVER_LIMITS = new Identifier("bbs_together", "c_server_limits");
-    public static final int PROTOCOL_VERSION = 2;
+    public static final int PROTOCOL_VERSION = 3;
 
     public static final Identifier SERVER_ASSET_RESYNC = new Identifier("bbs_together", "s_asset_resync");
     public static final Identifier SERVER_FILM_SCREEN = new Identifier("bbs_together", "s_film_screen");
@@ -1445,6 +1445,9 @@ public class TogetherServerNetwork {
         String key = TogetherServerNetwork.branchKey(filmId, branch);
         AtomicBoolean flag = filmSaveDirty.computeIfAbsent(key, k -> new AtomicBoolean(false));
         flag.set(true);
+        /* In-place edit paths (replay, undo) never go through setWorking, so the working copy
+         * needs to be flagged here or a shutdown could drop a pending edit. */
+        FilmBranchStore.markDirty(filmId, branch);
         long now = System.currentTimeMillis();
         long first = filmSaveFirstDirty.computeIfAbsent(key, k -> now);
         long delay = Math.min(FILM_SAVE_DELAY_MS, Math.max(0L, first + FILM_SAVE_MAX_MS - now));
@@ -1484,6 +1487,10 @@ public class TogetherServerNetwork {
     }
 
     public static void flushPendingFilmSaves(MinecraftServer server) {
+        long started = System.currentTimeMillis();
+        int debounced = filmSaveDirty.size();
+        int dirty = FilmBranchStore.dirtyCount();
+        int cached = FilmBranchStore.workingBranchCount();
         for (ScheduledFuture<?> task : filmSaveTasks.values()) {
             task.cancel(false);
         }
@@ -1493,7 +1500,8 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.saveIfDirty(key);
         }
         filmSaveDirty.clear();
-        FilmBranchStore.saveAll();
+        int written = FilmBranchStore.saveAll();
+        System.out.println("[BBSTogether] Flushed film saves: " + written + " written, " + dirty + " dirty, " + debounced + " debounced, " + cached + " cached, " + (System.currentTimeMillis() - started) + " ms");
     }
 
     private static void handleSyncPref(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -1887,6 +1895,9 @@ public class TogetherServerNetwork {
             }
             String filmId = packetByteBuf.readString();
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
+            /* True when the save button asked for a commit on the player's current branch head;
+             * duplication and recorded keyframe syncs keep it false, older clients omit it. */
+            boolean commitOnSave = packetByteBuf.isReadable() && packetByteBuf.readBoolean();
             BaseType incoming = DataStorageUtils.readFromBytes((byte[])bytes);
             if (!incoming.isMap()) {
                 return;
@@ -1932,8 +1943,21 @@ public class TogetherServerNetwork {
                 TogetherServerNetwork.broadcastFilmSaved(server, filmId, branch, merged);
                 TogetherServerNetwork.broadcastFilmSelections(server);
                 TogetherServerNetwork.broadcastReplaySelections(server, filmId);
+                if (commitOnSave) {
+                    TogetherServerNetwork.commitAfterSave(server, player, filmId, branch, merged);
+                }
             });
         });
+    }
+
+    /** Record what was just saved as a commit on the player's current branch. */
+    private static void commitAfterSave(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, MapType merged) {
+        FilmCommit commit = FilmCommitStore.commit(filmId, merged, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), "", branch);
+        if (commit == null) {
+            return;
+        }
+        TogetherServerNetwork.broadcastCommitAdded(server, filmId, commit);
+        TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
     }
 
     private static void handleCommitIndex(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -3244,33 +3268,42 @@ public class TogetherServerNetwork {
         }
     }
 
-    private static void applyPathToFilm(Film film, List<String> path, BaseType data) {
+    /**
+     * Resolves the value a sync path points at, at whatever depth it lives. Keyframe edits carry
+     * five segments, so a channel-only lookup would feed a single keyframe into the channel.
+     */
+    private static BaseValue resolveSyncTarget(Film film, List<String> path) {
+        if (film == null || path == null || path.isEmpty()) {
+            return null;
+        }
+        BaseValue generic = TogetherServerNetwork.resolveServerValue(film, path);
+        if (generic != null) {
+            return generic;
+        }
+        if (!"replays".equals(path.get(0)) || path.size() < 4) {
+            return null;
+        }
         try {
-            KeyframeChannel ch;
-            TrackId trackId;
-            if (path.size() < 4 || data == null) {
-                return;
-            }
             int replayIdx = Integer.parseInt(path.get(1));
-            String group = path.get(2);
-            String chanId = path.get(3);
             List replays = film.replays.getList();
             if (replayIdx < 0 || replayIdx >= replays.size()) {
-                return;
+                return null;
             }
             Replay replay = (Replay)replays.get(replayIdx);
+            String group = path.get(2);
+            String chanId = path.get(3);
             if ("keyframes".equals(group)) {
-                BaseValue ch2 = replay.keyframes.get(chanId);
-                if (ch2 != null) {
-                    ch2.fromData(data);
-                }
-            } else if ("properties".equals(group) && (trackId = TrackId.parse((String)chanId)) != null && (ch = replay.properties.get(trackId)) != null) {
-                ch.fromData(data);
+                return replay.keyframes.get(chanId);
+            }
+            if ("properties".equals(group)) {
+                TrackId trackId = TrackId.parse(chanId);
+                return trackId == null ? null : replay.properties.get(trackId);
             }
         }
         catch (Exception e) {
-            e.printStackTrace();
+            return null;
         }
+        return null;
     }
 
     private static void handleFilmDataSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -3317,9 +3350,17 @@ public class TogetherServerNetwork {
                         }
                     });
                 }
-                if (path.size() >= 4 && "replays".equals(path.get(0)) && (film = FilmBranchStore.working(filmId, branch)) != null) {
+                if (path.size() >= 2 && "replays".equals(path.get(0)) && (film = FilmBranchStore.working(filmId, branch)) != null) {
                     lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)film.toData());
-                    TogetherServerNetwork.applyPathToFilm(film, path, DataStorageUtils.readFromBytes((byte[])bytes));
+                    BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, path);
+                    if (target != null) {
+                        try {
+                            target.fromData(DataStorageUtils.readFromBytes((byte[])bytes));
+                        }
+                        catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
                     TogetherServerNetwork.scheduleFilmSave(server, filmId, branch);
                 }
             });
@@ -3331,9 +3372,8 @@ public class TogetherServerNetwork {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
-            if (bytes == null) {
-                return;
-            }
+            /* An empty crusher payload travels as a one-byte sentinel and arrives as null; the
+             * undo data lives in the trailing metadata, so a null payload is expected here. */
             String filmId = packetByteBuf.readString();
             int count = packetByteBuf.readInt();
             ArrayList<UndoChange> changes = new ArrayList<UndoChange>();
@@ -3349,8 +3389,7 @@ public class TogetherServerNetwork {
                 int expectedLen = packetByteBuf.readInt();
                 byte[] expected = new byte[expectedLen];
                 packetByteBuf.readBytes(expected);
-                boolean checkable = packetByteBuf.readBoolean();
-                changes.add(new UndoChange(path, data, expected, checkable));
+                changes.add(new UndoChange(path, data, expected));
             }
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
             server.execute(() -> {
@@ -3370,30 +3409,42 @@ public class TogetherServerNetwork {
         });
     }
 
+    /**
+     * Whether the server mirrors a sync path in its branch working copy. Only replay data is
+     * applied there; everything else is relayed to the other editors and compared by nobody.
+     */
+    private static boolean isServerTracked(List<String> path) {
+        return path != null && path.size() >= 2 && "replays".equals(path.get(0));
+    }
+
     private static void applyUndoSync(MinecraftServer server, ServerPlayerEntity player, String filmId, ArrayList<UndoChange> changes) {
         if (deletedFilmIds.contains(filmId)) {
             return;
         }
         String branch = TogetherServerNetwork.playerBranch(filmId, player);
         playerEditingFilm.put(player.getUuid(), filmId);
-        Film film = null;
-        for (UndoChange c : changes) {
-            if (!c.checkable) continue;
-            film = FilmBranchStore.working(filmId, branch);
-            break;
-        }
+        Film film = FilmBranchStore.working(filmId, branch);
+        /* Validate every mirrored path, keyframe-level ones included, so a rollback that would
+         * wipe another player's newer edit is refused instead of being relayed. */
         if (film != null) {
             for (UndoChange c : changes) {
-                byte[] actual;
                 BaseValue current;
-                if (!c.checkable || (current = TogetherServerNetwork.resolveServerValue(film, c.path)) == null || Arrays.equals(actual = DataStorageUtils.writeToBytes((BaseType)current.toData()), c.expected)) continue;
+                if (!TogetherServerNetwork.isServerTracked(c.path) || (current = TogetherServerNetwork.resolveSyncTarget(film, c.path)) == null) continue;
+                byte[] actual = DataStorageUtils.writeToBytes((BaseType)current.toData());
+                if (Arrays.equals(actual, c.expected)) continue;
                 TogetherServerNetwork.rejectUndo(server, player, film, changes);
                 return;
             }
         }
         boolean dirty = false;
-        Film filmCopy = film;
         for (UndoChange c : changes) {
+            boolean tracked = TogetherServerNetwork.isServerTracked(c.path);
+            BaseValue target = tracked && film != null ? TogetherServerNetwork.resolveSyncTarget(film, c.path) : null;
+            if (tracked && target == null) {
+                /* Can't mirror an unresolvable path, but the other editors still need the
+                 * rollback; relay it like an ordinary untracked data sync. */
+                System.out.println("[BBSTogether] Undo change relayed without mirroring, unresolvable path: " + String.join(".", c.path));
+            }
             for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
                 ServerPlayerEntity other;
                 if (!entry.getValue().equals(filmId) || entry.getKey().equals(player.getUuid()) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
@@ -3406,9 +3457,11 @@ public class TogetherServerNetwork {
                     }
                 });
             }
-            if (!c.checkable || filmCopy == null) continue;
-            lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)filmCopy.toData());
-            TogetherServerNetwork.applyPathToFilm(filmCopy, c.path, DataStorageUtils.readFromBytes((byte[])c.data));
+            if (!tracked || target == null) {
+                continue;
+            }
+            lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)film.toData());
+            target.fromData(DataStorageUtils.readFromBytes((byte[])c.data));
             dirty = true;
         }
         if (dirty) {
@@ -3420,11 +3473,9 @@ public class TogetherServerNetwork {
         ArrayList<byte[]> current = new ArrayList<byte[]>();
         int count = 0;
         for (UndoChange c : changes) {
-            if (!c.checkable) {
-                current.add(null);
-                continue;
-            }
-            BaseValue value = TogetherServerNetwork.resolveServerValue(film, c.path);
+            /* Only push back mirrored values; a film-level copy would overwrite state the
+             * server never tracked. */
+            BaseValue value = TogetherServerNetwork.isServerTracked(c.path) ? TogetherServerNetwork.resolveSyncTarget(film, c.path) : null;
             byte[] data = value == null ? null : DataStorageUtils.writeToBytes((BaseType)value.toData());
             current.add(data);
             if (data == null) continue;
@@ -3580,13 +3631,11 @@ public class TogetherServerNetwork {
         final ArrayList<String> path;
         final byte[] data;
         final byte[] expected;
-        final boolean checkable;
 
-        UndoChange(ArrayList<String> path, byte[] data, byte[] expected, boolean checkable) {
+        UndoChange(ArrayList<String> path, byte[] data, byte[] expected) {
             this.path = path;
             this.data = data;
             this.expected = expected;
-            this.checkable = checkable;
         }
     }
 }

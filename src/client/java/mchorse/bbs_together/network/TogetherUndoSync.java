@@ -9,6 +9,7 @@ import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.utils.undo.ValueChangeUndo;
 import mchorse.bbs_mod.utils.undo.CompoundUndo;
 import mchorse.bbs_mod.utils.undo.IUndo;
+import mchorse.bbs_together.BBSTogetherFix67UndoPath;
 
 /**
  * Undo/redo broadcast with a server-side optimistic lock (s_undo_sync).
@@ -59,23 +60,25 @@ public final class TogetherUndoSync {
         ArrayList<TogetherClientNetwork.UndoChangePayload> payloads = new ArrayList<TogetherClientNetwork.UndoChangePayload>();
         ArrayList<BaseValue> claimed = new ArrayList<BaseValue>();
         for (ValueChangeUndo change : changes) {
-            BaseValue value = film.findRecursively(change.name);
-            if (value == null) {
+            List<String> path = new ArrayList<String>(change.name.strings);
+            /* Film.findRecursively() only resolves the first segment, so a nested path would send
+             * the whole replays group instead of the value that actually changed. */
+            BaseValue value = BBSTogetherFix67UndoPath.resolve(film, path);
+            BaseType postImage = redo ? change.newValue : change.oldValue;
+            BaseType preImage = redo ? change.oldValue : change.newValue;
+            if (postImage == null || preImage == null) {
                 continue;
             }
-            List<String> path = new ArrayList<String>(change.name.strings);
-            /* Server-authoritative = live-applied channel syncs; anything else is relayed
-             * unchecked, exactly like an ordinary data sync. */
-            boolean checkable = path.size() == 4 && "replays".equals(path.get(0));
-            if (checkable && TogetherEditSyncQueue.contains(value)) {
-                /* The edit that produced this entry never reached the network: send its
-                 * recorded post-edit state first (the value's current data is already
-                 * rolled back here, so the entry's snapshot is the only truthful source),
-                 * or the server would validate against a stale baseline and refuse. */
-                TogetherClientNetwork.sendSyncDataPayload(filmId, path, redo ? change.oldValue : change.newValue);
+            boolean tracked = path.size() >= 2 && "replays".equals(path.get(0));
+            if (tracked && value != null && TogetherEditSyncQueue.contains(value)) {
+                /* The edit never left this client, so send its post-edit state first or the
+                 * server would validate the rollback against a stale baseline. */
+                TogetherClientNetwork.sendSyncDataPayload(filmId, path, preImage);
             }
-            claimed.add(value);
-            payloads.add(new TogetherClientNetwork.UndoChangePayload(path, value.toData(), redo ? change.oldValue : change.newValue, checkable));
+            if (value != null) {
+                claimed.add(value);
+            }
+            payloads.add(new TogetherClientNetwork.UndoChangePayload(path, postImage, preImage));
         }
         if (payloads.isEmpty()) {
             return;

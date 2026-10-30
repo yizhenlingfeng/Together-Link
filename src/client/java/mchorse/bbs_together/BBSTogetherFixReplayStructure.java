@@ -191,7 +191,7 @@ public final class BBSTogetherFixReplayStructure {
                 uIFilmPanel.replayEditor.setReplay(null);
             } else {
                 Replay replay = (Replay)list.get(n3);
-                uIFilmPanel.replayEditor.setReplay(replay);
+                TogetherClientNetwork.together_bindReplayKeepingCamera(uIFilmPanel.replayEditor, replay);
                 uIFilmPanel.replayEditor.updateChannelsList();
                 if (uIFilmPanel.replayEditor.replaysList != null && uIFilmPanel.replayEditor.replaysList.replays != null) {
                     uIFilmPanel.replayEditor.replaysList.replays.scrollToReplay(replay);

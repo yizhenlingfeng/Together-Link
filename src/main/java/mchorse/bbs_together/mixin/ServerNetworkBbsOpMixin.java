@@ -378,11 +378,11 @@ public class ServerNetworkBbsOpMixin
             {
                 String filmId = packetByteBuf.readString();
                 List<String> path = new ArrayList<>();
-                int count = buf.readInt();
+                int count = packetByteBuf.readInt();
 
                 for (int i = 0; i < count; i++)
                 {
-                    path.add(buf.readString());
+                    path.add(packetByteBuf.readString());
                 }
 
                 BaseType data = DataStorageUtils.readFromBytes(bytes);

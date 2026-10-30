@@ -576,6 +576,40 @@ public final class FilmCommitStore
     /* Recording */
 
     /**
+     * Whether two film payloads carry the same authored content. {@code time_spent_active} ticks
+     * every second, so comparing it would turn every save into a commit.
+     */
+    public static boolean sameContent(MapType a, MapType b)
+    {
+        if (a == b)
+        {
+            return true;
+        }
+
+        if (a == null || b == null)
+        {
+            return false;
+        }
+
+        return BaseType.equals(withoutTimeSpent(a), withoutTimeSpent(b));
+    }
+
+    private static MapType withoutTimeSpent(MapType data)
+    {
+        MapType copy = new MapType();
+
+        for (String key : data.keys())
+        {
+            if (!"time_spent_active".equals(key))
+            {
+                copy.put(key, data.get(key));
+            }
+        }
+
+        return copy;
+    }
+
+    /**
      * Record the film as it is now, on {@code branch}. The client picks the branch from the
      * commit the author is looking at, so committing never requires a checkout first; an
      * unknown branch falls back to the branch the film is on.
@@ -605,7 +639,7 @@ public final class FilmCommitStore
         FilmCommit head = store.find(store.branches.get(target));
         MapType headData = head == null ? null : snapshot(store, head.id);
 
-        if (headData != null && BaseType.equals(headData, data))
+        if (headData != null && sameContent(headData, data))
         {
             return null;
         }

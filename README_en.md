@@ -37,6 +37,7 @@ Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension 
 | Film sync | Film selection, screen state, and keyframe/track edits are pushed in real time |
 | List sync | Every client refreshes after a film is added, renamed, or deleted |
 | Commits | Each film keeps a commit graph, snapshots, and diffs, up to 300 entries by default |
+| Save as commit | Saving appends the current edits as a commit on the player's current branch; periodic saves only refresh the working copy |
 | Branch isolation | Each player can work on a separate branch without overwriting others |
 | Reset / squash | Reset that either keeps or deletes later commits, plus squashing consecutive commits |
 | Commit details | Shows the commit message, author, time, clip/keyframe stats, and the diff |
@@ -173,6 +174,26 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 | `src/client/resources/bbs-together.client.mixins.json` | Client mixin config |
 
 ## Changelog
+
+### v2.0.2
+
+#### Added
+
+- The save button appends the current edits as a commit on the player's current branch, so saved content is no longer reported as uncommitted. Periodic saves, film duplication, and post-recording saves still refresh the working copy only.
+- Saving identical content does not create an empty commit (`time_spent_active` is ignored in the comparison).
+
+#### Fixed
+
+- Shutdown no longer stalls when players have joined: branch working copies are dirtiness-tracked, only changed copies are written on shutdown, and a `Flushed film saves` timing line is logged.
+- Undo now reaches other players: the server dropped every undo packet because its empty crusher payload arrives as null, and the packet carried the wrong value for nested paths. Local undo of nested values is fixed as well.
+- Camera clip keyframe edits are no longer silently dropped for other players (the first path segment was skipped).
+- Rolling back a keyframe no longer reverts another player's newer edit: every replay path is validated, and unresolvable paths are still relayed to the other editors.
+- Saving no longer pulls the editor's orbit camera back to the previous shot; rebinding a replay after a remote update keeps the pivot in place.
+- Fixed a buffer mix-up in the BBS delta sync entry point that made native syncs fail to parse.
+
+#### Compatibility
+
+- Protocol version is now 3; clients and servers must both update to 2.0.2.
 
 ### v2.0.1
 

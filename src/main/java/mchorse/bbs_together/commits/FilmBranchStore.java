@@ -15,7 +15,9 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -51,6 +53,12 @@ public final class FilmBranchStore
      * copied into a BBS backup every few seconds. Only the 32-byte digest is kept.
      */
     private static final Map<String, byte[]> LAST_SAVED = new HashMap<>();
+    /**
+     * Working copies changed since the last successful write, keyed by {@link #workspaceKey}.
+     * Only these are written by {@link #saveAll()} on shutdown; joining a server loads the whole
+     * film library into {@link #WORKING}, and rewriting all of it made stopping look like a freeze.
+     */
+    private static final Set<String> DIRTY = new LinkedHashSet<>();
 
     private FilmBranchStore()
     {}
@@ -325,10 +333,45 @@ public final class FilmBranchStore
         }
 
         WORKING.computeIfAbsent(filmId, key -> new HashMap<>()).put(actual, film);
+        DIRTY.add(workspaceKey(filmId, actual));
     }
 
-    /** Write one branch's working copy to disk. */
-    public static synchronized void save(String filmId, String branch)
+    /* Dirty tracking */
+
+    /**
+     * Flag a branch working copy as changed for the debounced save and {@link #saveAll()}; needed
+     * by the paths that mutate the cached {@link Film} in place instead of using setWorking.
+     */
+    public static synchronized void markDirty(String filmId, String branch)
+    {
+        DIRTY.add(workspaceKey(filmId, normalize(filmId, branch)));
+    }
+
+    /** Amount of branch working copies waiting to be written. */
+    public static synchronized int dirtyCount()
+    {
+        return DIRTY.size();
+    }
+
+    /** Amount of branch working copies currently held in memory. */
+    public static synchronized int workingBranchCount()
+    {
+        int count = 0;
+
+        for (Map<String, Film> branches : WORKING.values())
+        {
+            count += branches.size();
+        }
+
+        return count;
+    }
+
+    /**
+     * Write one branch's working copy to disk.
+     *
+     * @return whether the workspace file was actually written (unchanged copies are skipped)
+     */
+    public static synchronized boolean save(String filmId, String branch)
     {
         String actual = normalize(filmId, branch);
         Map<String, Film> branches = WORKING.get(filmId);
@@ -336,7 +379,7 @@ public final class FilmBranchStore
 
         if (film == null)
         {
-            return;
+            return false;
         }
 
         try
@@ -345,7 +388,7 @@ public final class FilmBranchStore
 
             if (folder == null)
             {
-                return;
+                return false;
             }
 
             folder.mkdirs();
@@ -361,7 +404,10 @@ public final class FilmBranchStore
 
             if (Arrays.equals(LAST_SAVED.get(savedKey), digest))
             {
-                return;
+                /* Already on disk, nothing left to flush. */
+                DIRTY.remove(savedKey);
+
+                return false;
             }
 
             writeAtomic(new File(folder, branchKey(actual) + EXTENSION), bytes);
@@ -403,21 +449,33 @@ public final class FilmBranchStore
                 if (!saved)
                 {
                     /* Keep LAST_SAVED unset so the next debounced save retries the main file. */
-                    return;
+                    return false;
                 }
             }
 
             LAST_SAVED.put(savedKey, digest);
+            DIRTY.remove(savedKey);
+
+            return true;
         }
         catch (Exception e)
         {
             System.err.println("[BBSTogether] Failed to save branch working copy " + filmId + " / " + actual + ": " + e);
+
+            return false;
         }
     }
 
-    /** Write every cached branch working copy (server shutdown). */
-    public static synchronized void saveAll()
+    /**
+     * Write every branch working copy changed since the last successful save (server shutdown).
+     * Unchanged copies are skipped so a shutdown does not rewrite the whole loaded film library.
+     *
+     * @return amount of branch working copies that were actually written
+     */
+    public static synchronized int saveAll()
     {
+        int written = 0;
+
         for (String filmId : new HashMap<String, Map<String, Film>>(WORKING).keySet())
         {
             Map<String, Film> branches = WORKING.get(filmId);
@@ -427,11 +485,31 @@ public final class FilmBranchStore
                 continue;
             }
 
+            long started = System.currentTimeMillis();
+            int before = written;
+
             for (String branch : new HashMap<String, Film>(branches).keySet())
             {
-                save(filmId, branch);
+                if (!DIRTY.contains(workspaceKey(filmId, branch)))
+                {
+                    continue;
+                }
+
+                if (save(filmId, branch))
+                {
+                    written += 1;
+                }
+            }
+
+            long took = System.currentTimeMillis() - started;
+
+            if (written != before && took >= 250L)
+            {
+                System.out.println("[BBSTogether] Slow film save " + filmId + ": " + took + " ms");
             }
         }
+
+        return written;
     }
 
     /** Drop every cache; called when the server stops. */
@@ -440,6 +518,7 @@ public final class FilmBranchStore
         WORKING.clear();
         PLAYER_BRANCHES.clear();
         LAST_SAVED.clear();
+        DIRTY.clear();
     }
 
     /** Remove one film's branch data cache (film deleted; the folder is removed by FilmCommitStore). */
@@ -451,6 +530,7 @@ public final class FilmBranchStore
         String prefix = filmId + '\t';
 
         LAST_SAVED.keySet().removeIf((key) -> key.startsWith(prefix));
+        DIRTY.removeIf((key) -> key.startsWith(prefix));
     }
 
     /** Move the caches when BBS renames a film; the folder itself is moved by FilmCommitStore. */
@@ -491,6 +571,21 @@ public final class FilmBranchStore
             return false;
         });
         LAST_SAVED.putAll(moved);
+
+        Set<String> movedDirty = new LinkedHashSet<>();
+
+        DIRTY.removeIf((key) ->
+        {
+            if (key.startsWith(oldPrefix))
+            {
+                movedDirty.add(newPrefix + key.substring(oldPrefix.length()));
+
+                return true;
+            }
+
+            return false;
+        });
+        DIRTY.addAll(movedDirty);
     }
 
     private static String workspaceKey(String filmId, String branch)

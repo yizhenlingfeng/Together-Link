@@ -8,6 +8,7 @@ import mchorse.bbs_together.BBSTogetherFix19;
 import mchorse.bbs_together.BBSTogetherFix28Client;
 import mchorse.bbs_together.BBSTogetherFix33Client;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.network.TogetherEditSyncQueue;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
@@ -58,7 +59,8 @@ public class UIFilmPanelSaveSyncMixin {
         if (BBSTogetherFix28Client.consumeCloseSaveBroadcastSuppressed(film.getId())) {
             return;
         }
-        TogetherClientNetwork.sendFilmSaveSync(film.getId(), film);
+        TogetherClientNetwork.sendFilmSaveSync(film.getId(), film, true);
+        TogetherEditSyncQueue.markCommitted();
     }
 }
 

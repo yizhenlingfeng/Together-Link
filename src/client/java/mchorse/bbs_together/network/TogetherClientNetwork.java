@@ -56,6 +56,7 @@ import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.film.UIClips;
 import mchorse.bbs_mod.ui.film.UIClipsPanel;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
+import mchorse.bbs_mod.ui.film.replays.UIReplaysEditor;
 import mchorse.bbs_mod.ui.framework.UIBaseMenu;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.UIScreen;
@@ -1082,7 +1083,7 @@ public class TogetherClientNetwork {
             Replay r = panel.replayEditor.getReplay();
             int idx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), r);
             if (idx < 0 && !((Film)panel.getData()).replays.getList().isEmpty()) {
-                panel.replayEditor.setReplay((Replay)((Film)panel.getData()).replays.getList().get(0));
+                together_bindReplayKeepingCamera(panel.replayEditor, (Replay)((Film)panel.getData()).replays.getList().get(0));
                 idx = 0;
             }
             sendReplaySelection(filmId, idx);
@@ -2475,12 +2476,18 @@ public class TogetherClientNetwork {
     }
 
     public static void sendFilmSaveSync(String filmId, Film film) {
+        sendFilmSaveSync(filmId, film, false);
+    }
+
+    /** Hand the whole film to the server; {@code commit} makes the save button also record a commit. */
+    public static void sendFilmSaveSync(String filmId, Film film, boolean commit) {
         if (!isBBSTogetherOnServer || film == null || filmId == null) {
             return;
         }
         sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_SAVE_SYNC, film.toData(), buf -> {
             buf.writeString(filmId);
             buf.writeString(filmBranch(filmId));
+            buf.writeBoolean(commit);
         });
     }
 
@@ -2551,13 +2558,11 @@ public class TogetherClientNetwork {
         public final List<String> path;
         public final BaseType data;
         public final BaseType expected;
-        public final boolean checkable;
 
-        public UndoChangePayload(List<String> path, BaseType data, BaseType expected, boolean checkable) {
+        public UndoChangePayload(List<String> path, BaseType data, BaseType expected) {
             this.path = path;
             this.data = data;
             this.expected = expected;
-            this.checkable = checkable;
         }
     }
 
@@ -2584,7 +2589,6 @@ public class TogetherClientNetwork {
                 byte[] expected = DataStorageUtils.writeToBytes(c.expected);
                 buf.writeInt(expected.length);
                 buf.writeBytes(expected);
-                buf.writeBoolean(c.checkable);
             }
             buf.writeString(filmBranch(filmId));
         });
@@ -3683,7 +3687,7 @@ public class TogetherClientNetwork {
         int currentIdx = together_getCurrentReplayIndex(panel, film);
         List<Replay> snapshot = new ArrayList<Replay>(film.replays.getList());
         boolean structureSync = together_isReplayStructurePath(path);
-        int offset = together_applyPathOffset(path);
+        int offset = together_applyPathOffset(film, path);
         boolean applied;
         BBSTogetherFix22.beginRemoteSyncApply();
         try {
@@ -3712,7 +3716,7 @@ public class TogetherClientNetwork {
             panel.replayEditor.updateChannelsList();
         }
         if (together_isReplayPath(path) && currentReplay != null) {
-            panel.replayEditor.setReplay(currentReplay);
+            together_bindReplayKeepingCamera(panel.replayEditor, currentReplay);
         }
         Replay openReplay = panel.replayEditor.getReplay();
         int newIdx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), openReplay);
@@ -3764,8 +3768,15 @@ public class TogetherClientNetwork {
         return idx >= 0 && path.size() <= idx + 2;
     }
 
-    private static int together_applyPathOffset(List<String> path) {
-        return path != null && !path.isEmpty() && "replays".equals(path.get(0)) ? 0 : 1;
+    /**
+     * Sync paths are rooted at the film, so the whole path has to be walked. Legacy packets
+     * without the leading section keep the old skip of the first segment.
+     */
+    private static int together_applyPathOffset(Film film, List<String> path) {
+        if (path == null || path.isEmpty()) {
+            return 0;
+        }
+        return film != null && film.get(path.get(0)) != null ? 0 : 1;
     }
 
     private static int together_replayPathIndex(List<String> path) {
@@ -3803,7 +3814,7 @@ public class TogetherClientNetwork {
             return;
         }
         Replay replay = (Replay)replays.get(remappedIdx);
-        panel.replayEditor.setReplay(replay);
+        together_bindReplayKeepingCamera(panel.replayEditor, replay);
         if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
             panel.replayEditor.replaysList.replays.scrollToReplay(replay);
         }
@@ -3847,7 +3858,7 @@ public class TogetherClientNetwork {
         try {
             film.fromData(incoming.toData());
             if (panel.replayEditor != null && remappedIdx >= 0 && remappedIdx < film.replays.getList().size()) {
-                panel.replayEditor.setReplay((Replay)film.replays.getList().get(remappedIdx));
+                together_bindReplayKeepingCamera(panel.replayEditor, (Replay)film.replays.getList().get(remappedIdx));
             }
             panel.getController().createEntities();
         }
@@ -3865,8 +3876,12 @@ public class TogetherClientNetwork {
     }
 
     private static boolean together_isKeyframeOnlySyncPath(List<String> path) {
-        if (path.size() <= 1) {
+        if (path == null || path.size() <= 1) {
             return false;
+        }
+        String head = path.get(0);
+        if ("camera".equals(head) || "action".equals(head) || "actions".equals(head)) {
+            return together_isClipKeyframeOnlyPath(path);
         }
         String section = path.get(1);
         if ("replays".equals(section)) {
@@ -3929,10 +3944,22 @@ public class TogetherClientNetwork {
         }
         int target = idx >= 0 && idx < replays.size() ? idx : 0;
         Replay replay = replays.get(target);
-        panel.replayEditor.setReplay(replay);
+        together_bindReplayKeepingCamera(panel.replayEditor, replay);
         if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
             panel.replayEditor.replaysList.replays.scrollToReplay(replay);
         }
+    }
+
+    /**
+     * Rebind the replay editor after a remote change without teleporting the orbit camera. The
+     * default SWITCH reaction snaps the pivot back onto the replay subject, which looked like the
+     * editor jumping back to an earlier shot after a save echo; KEEP is what BBS uses for undo.
+     */
+    public static void together_bindReplayKeepingCamera(UIReplaysEditor editor, Replay replay) {
+        if (editor == null) {
+            return;
+        }
+        editor.setReplay(replay, true, UIReplaysEditor.OrbitReaction.KEEP);
     }
 
     private static boolean together_wouldClearLocalCamera(Film film, MapType data) {
@@ -3944,7 +3971,11 @@ public class TogetherClientNetwork {
     }
 
     private static boolean together_wouldClearLocalCamera(Film film, List<String> path, BaseType data) {
-        if (path.size() != 2 || !"camera".equals(path.get(1))) {
+        if (path == null) {
+            return false;
+        }
+        boolean replacement = path.size() == 1 ? "camera".equals(path.get(0)) : path.size() == 2 && "camera".equals(path.get(1));
+        if (!replacement) {
             return false;
         }
         return together_wouldClearLocalCamera(film, data);
@@ -3971,10 +4002,11 @@ public class TogetherClientNetwork {
     }
 
     private static void together_refreshEmbeddedClipKeyframeEditor(UIFilmPanel panel, List<String> path) {
-        if (path.size() <= 1) {
+        int sectionIdx = together_syncSectionIndex(path);
+        if (sectionIdx < 0) {
             return;
         }
-        String section = path.get(1);
+        String section = path.get(sectionIdx);
         if (!("camera".equals(section) || "action".equals(section) || "actions".equals(section))) {
             return;
         }
@@ -3982,6 +4014,24 @@ public class TogetherClientNetwork {
         if (keyframeEditor != null && keyframeEditor.editor != null) {
             keyframeEditor.editor.update();
         }
+    }
+
+    /** Index of the section segment ({@code camera}, {@code action(s)}, {@code replays}), or -1. */
+    private static int together_syncSectionIndex(List<String> path) {
+        if (path == null || path.isEmpty()) {
+            return -1;
+        }
+        String head = path.get(0);
+        if ("camera".equals(head) || "action".equals(head) || "actions".equals(head) || "replays".equals(head)) {
+            return 0;
+        }
+        if (path.size() > 1) {
+            String second = path.get(1);
+            if ("camera".equals(second) || "action".equals(second) || "actions".equals(second) || "replays".equals(second)) {
+                return 1;
+            }
+        }
+        return -1;
     }
 
     private static void together_remapClientReplaySelections(String filmId, Film oldFilm, Film newFilm) {

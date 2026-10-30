@@ -45,7 +45,8 @@
         "UIPanelTopBarCommitsMixin",
         "UIDataDashboardPanelCommitsMixin",
         "UITabListCommitsMixin",
-        "FilmRepositoryMixin"
+        "FilmRepositoryMixin",
+        "ValueChangeUndoResolveMixin"
     ],
     "injectors": {
         "defaultRequire": 1
