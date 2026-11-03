@@ -1,0 +1,152 @@
+package mchorse.bbs_mod.ui.utils;
+
+import mchorse.bbs_mod.BBSMod;
+import mchorse.bbs_mod.BBSSettings;
+import mchorse.bbs_mod.BBSModClient;
+import mchorse.bbs_mod.ui.framework.elements.UIElement;
+import mchorse.bbs_mod.utils.OS;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.sound.SoundEvents;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+
+public class UIUtils
+{
+    /**
+     * Open web link (in default web browser)
+     */
+    public static boolean openWebLink(String address)
+    {
+        if (OS.CURRENT == OS.WINDOWS)
+        {
+            return runSysCommand("rundll32", "url.dll,FileProtocolHandler", address);
+        }
+        else if (OS.CURRENT == OS.MACOS)
+        {
+            return runSysCommand("open", address);
+        }
+
+        return runSysCommand("kde-open", address)
+            || runSysCommand("gnome-open", address)
+            || runSysCommand("xdg-open", address);
+    }
+
+    /**
+     * Open a folder (in default file browser)
+     */
+    public static boolean openFolder(File folder)
+    {
+        try
+        {
+            String path = folder.getAbsolutePath();
+
+            if (OS.CURRENT == OS.WINDOWS)
+            {
+                return runSysCommand("explorer", path);
+            }
+            else if (OS.CURRENT == OS.MACOS)
+            {
+                return runSysCommand("open", path);
+            }
+
+            return runSysCommand("kde-open", path)
+                || runSysCommand("gnome-open", path)
+                || runSysCommand("xdg-open", path);
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+
+        return false;
+    }
+
+    private static boolean runSysCommand(String... command)
+    {
+        try
+        {
+            Process p = Runtime.getRuntime().exec(command);
+
+            if (p == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return p.exitValue() == 0;
+            }
+            catch (IllegalThreadStateException e)
+            {
+                return true;
+            }
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+
+            return false;
+        }
+    }
+
+    /**
+     * Map a GUI area to a framebuffer-pixel viewport and apply it. GUI units map
+     * to pixels by the window's scale factor, which since ui_scale became a float
+     * can be fractional — so no rounding of the scale itself, only of the final
+     * pixel edges. The window getters are the overridden ones during video
+     * export, so the same mapping holds there.
+     *
+     * @return {x, y, w, h} of the applied viewport, for building a matching projection
+     */
+    public static int[] viewportArea(Area area)
+    {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        float scale = BBSModClient.getGUIScale();
+
+        int vx = Math.round(area.x * scale);
+        int vy = Math.round(mc.getWindow().getFramebufferHeight() - (area.y + area.h) * scale);
+        int vw = Math.round(area.w * scale);
+        int vh = Math.round(area.h * scale);
+
+        /* TODO(1.21.11 render): RenderSystem.viewport() was removed — a RenderPass now carries its own
+         * viewport. The rect is still computed and returned, because callers use it to size their
+         * off-screen targets; it just no longer sets global GL state. */
+
+        return new int[] {vx, vy, vw, vh};
+    }
+
+    /* 1.21.1's currentViewport()/restoreViewport() pair did not come across: it existed to save the
+     * UI's viewport around a pass that bound another framebuffer RAW, and there is no such pass on
+     * this branch any more — every off-screen pass here is a render pass that carries its own
+     * viewport. RenderSystem.viewport() is gone too, so the pair could not be expressed even if a
+     * caller wanted it. */
+
+    /** Enable or disable every control in a container — the container stands, only its fields go quiet. */
+    public static void setEnabledDeep(UIElement container, boolean enabled)
+    {
+        for (UIElement element : container.getChildren(UIElement.class, new ArrayList<>(), false))
+        {
+            element.setEnabled(enabled);
+        }
+    }
+
+    public static void playClick()
+    {
+        playClick(1F);
+    }
+
+    public static void playClick(float pitch)
+    {
+        if (BBSSettings.clickSound.get())
+        {
+            MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(BBSMod.CLICK, pitch));
+        }
+        else
+        {
+            MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.UI_BUTTON_CLICK, pitch));
+        }
+    }
+}

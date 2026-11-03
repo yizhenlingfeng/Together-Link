@@ -1,5 +1,9 @@
 package mchorse.bbs_together.bbsop;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
+import mchorse.bbs_together.network.TogetherServerNetworking;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -7,7 +11,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -122,7 +125,7 @@ public final class BbsOpManager
         dirty = true;
         save();
 
-        System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " joined as the world host and defaulted to BBS level 2");
+        System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " joined as the world host and defaulted to BBS level 2");
 
         return true;
     }
@@ -130,7 +133,7 @@ public final class BbsOpManager
     /** The integrated server's own player. Dedicated servers are bootstrapped explicitly. */
     private static boolean isHost(MinecraftServer server, ServerPlayerEntity player)
     {
-        return server.isHost(player.getGameProfile());
+        return PlayerCompat.isHost(server, player.getGameProfile());
     }
 
     /** Effective level for a player; never-set players default to read-only (0). */
@@ -314,7 +317,7 @@ public final class BbsOpManager
             }
         }
 
-        ServerPlayNetworking.send(player, TogetherServerNetwork.CLIENT_BBSOP_SYNC, out);
+        TogetherServerNetworking.send(player, TogetherServerNetwork.CLIENT_BBSOP_SYNC, out);
     }
 
     /** Re-push levels to every online player (broadcast after a change). */

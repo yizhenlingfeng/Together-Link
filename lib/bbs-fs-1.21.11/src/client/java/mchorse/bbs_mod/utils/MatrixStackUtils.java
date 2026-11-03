@@ -1,0 +1,192 @@
+package mchorse.bbs_mod.utils;
+
+import mchorse.bbs_mod.graphics.InverseView;
+import com.mojang.blaze3d.systems.RenderSystem;
+import mchorse.bbs_mod.utils.joml.Vectors;
+import mchorse.bbs_mod.utils.pose.Transform;
+import net.minecraft.client.util.math.MatrixStack;
+import org.joml.Matrix3f;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fStack;
+import org.joml.Vector3f;
+
+public class MatrixStackUtils
+{
+    private static Matrix3f normal = new Matrix3f();
+    private static Matrix3f billboardView = new Matrix3f();
+
+    private static Matrix3f oldInverse = new Matrix3f();
+
+    /**
+     * Unwind a render scope to the entry saved before its push, including pushes left
+     * behind by a failing nested renderer. The caller's own stack levels stay intact.
+     */
+    public static void restore(MatrixStack stack, MatrixStack.Entry entry)
+    {
+        while (stack.peek() != entry)
+        {
+            if (stack.isEmpty())
+            {
+                throw new IllegalStateException("Renderer popped the saved matrix stack entry");
+            }
+
+            stack.pop();
+        }
+    }
+
+    public static void scaleStack(MatrixStack stack, float x, float y, float z)
+    {
+        stack.peek().getPositionMatrix().scale(x, y, z);
+        stack.peek().getNormalMatrix().scale(x < 0F ? -1F : 1F, y < 0F ? -1F : 1F, z < 0F ? -1F : 1F);
+    }
+
+    /**
+     * Orient the matrix stack's top so that geometry drawn on the local XY plane always faces the
+     * camera (billboarding). The form's own scale and translation are preserved; its rotation is
+     * intentionally discarded — that's the point of a billboard.
+     *
+     * <p>Since 1.21.1 the camera view rotation is no longer baked into the form matrix stack (its
+     * base is identity); it lives in {@link RenderSystem#getModelViewMatrix()} and is re-applied by
+     * the shader at draw time. So we replace the model's orientation with the inverse of that view
+     * rotation: once the shader multiplies the view back in, the two cancel and the quad ends up
+     * screen-facing. The pre-1.21.1 trick of setting the orientation to identity only worked because
+     * the view used to live in this very matrix.
+     */
+    public static void billboard(MatrixStack stack)
+    {
+        Matrix4f position = stack.peek().getPositionMatrix();
+        Vector3f scale = Vectors.TEMP_3F;
+
+        position.getScale(scale);
+
+        RenderSystem.getModelViewMatrix().get3x3(billboardView);
+        billboardView.invert();
+
+        position.m00(billboardView.m00()).m01(billboardView.m01()).m02(billboardView.m02());
+        position.m10(billboardView.m10()).m11(billboardView.m11()).m12(billboardView.m12());
+        position.m20(billboardView.m20()).m21(billboardView.m21()).m22(billboardView.m22());
+
+        position.scale(scale);
+
+        stack.peek().getNormalMatrix().identity();
+    }
+
+    /**
+     * Put the render system on an identity model-view for a 3D pass drawn inside the UI, remembering
+     * the UI's matrices for {@link #restoreMatrices()}.
+     *
+     * <p>The identity is left ON the model-view stack until the restore, so the stack's top and the
+     * applied matrix agree throughout the pass. They used to diverge (the identity was popped right
+     * after being applied), and any vanilla render layer with a layering phase — armor's
+     * {@code VIEW_OFFSET_Z_LAYERING} — does {@code push / scale / applyModelViewMatrix / pop /
+     * applyModelViewMatrix}: it drew itself with the UI's matrix instead of the identity, and left
+     * that matrix applied, so everything vanilla drew after it in the pass (gizmo handles, the pick
+     * stencil, more armor) landed off screen. Every caller pairs the two calls, so the extra level
+     * is balanced.</p>
+     */
+    public static void cacheMatrices()
+    {
+        /* Cache the global stuff */
+        oldInverse.set(InverseView.get());
+
+        /* TODO(1.21.11 render): the projection matrix is now GPU-owned (RenderSystem.getProjectionMatrix()
+         * / setProjectionMatrix(Matrix4f, VertexSorter) were removed). Using the new GPU-side projection
+         * backup/restore pair instead of caching/re-applying a Matrix4f. RenderSystem.applyModelViewMatrix()
+         * was also removed (the model-view stack is auto-applied), so it is no longer called. Verify at
+         * runtime that the picking projection is correctly preserved across this push. */
+        RenderSystem.backupProjectionMatrix();
+
+        Matrix4fStack renderStack = RenderSystem.getModelViewStack();
+
+        renderStack.pushMatrix();
+        renderStack.identity();
+    }
+
+    public static void restoreMatrices()
+    {
+        /* Return back to orthographic projection */
+        RenderSystem.restoreProjectionMatrix();
+        InverseView.set(oldInverse);
+
+        Matrix4fStack renderStack = RenderSystem.getModelViewStack();
+
+        renderStack.popMatrix();
+    }
+
+    public static void applyTransform(MatrixStack stack, Transform transform)
+    {
+        stack.translate(transform.translate.x, transform.translate.y, transform.translate.z);
+        stack.multiply(transform.createRotation());
+        scaleStack(stack, transform.scale.x, transform.scale.y, transform.scale.z);
+    }
+
+    public static void multiply(MatrixStack stack, Matrix4f matrix)
+    {
+        normal.set(matrix);
+        normal.getScale(Vectors.TEMP_3F);
+
+        Vectors.TEMP_3F.x = Vectors.TEMP_3F.x == 0F ? 0F : 1F / Vectors.TEMP_3F.x;
+        Vectors.TEMP_3F.y = Vectors.TEMP_3F.y == 0F ? 0F : 1F / Vectors.TEMP_3F.y;
+        Vectors.TEMP_3F.z = Vectors.TEMP_3F.z == 0F ? 0F : 1F / Vectors.TEMP_3F.z;
+
+        normal.scale(Vectors.TEMP_3F);
+
+        stack.peek().getPositionMatrix().mul(matrix);
+        stack.peek().getNormalMatrix().mul(normal);
+    }
+
+    public static void scaleBack(MatrixStack matrices)
+    {
+        Matrix4f position = matrices.peek().getPositionMatrix();
+
+        float scaleX = (float) Math.sqrt(position.m00() * position.m00() + position.m10() * position.m10() + position.m20() * position.m20());
+        float scaleY = (float) Math.sqrt(position.m01() * position.m01() + position.m11() * position.m11() + position.m21() * position.m21());
+        float scaleZ = (float) Math.sqrt(position.m02() * position.m02() + position.m12() * position.m12() + position.m22() * position.m22());
+
+        float max = Math.max(scaleX, Math.max(scaleY, scaleZ));
+
+        position.m00(position.m00() / max);
+        position.m10(position.m10() / max);
+        position.m20(position.m20() / max);
+
+        position.m01(position.m01() / max);
+        position.m11(position.m11() / max);
+        position.m21(position.m21() / max);
+
+        position.m02(position.m02() / max);
+        position.m12(position.m12() / max);
+        position.m22(position.m22() / max);
+    }
+
+    public static Matrix4f stripScale(Matrix4f matrix)
+    {
+        Matrix4f m = new Matrix4f(matrix);
+
+        float sx = (float) Math.sqrt(m.m00() * m.m00() + m.m01() * m.m01() + m.m02() * m.m02());
+        float sy = (float) Math.sqrt(m.m10() * m.m10() + m.m11() * m.m11() + m.m12() * m.m12());
+        float sz = (float) Math.sqrt(m.m20() * m.m20() + m.m21() * m.m21() + m.m22() * m.m22());
+
+        if (sx != 0F)
+        {
+            m.m00(m.m00() / sx);
+            m.m01(m.m01() / sx);
+            m.m02(m.m02() / sx);
+        }
+
+        if (sy != 0F)
+        {
+            m.m10(m.m10() / sy);
+            m.m11(m.m11() / sy);
+            m.m12(m.m12() / sy);
+        }
+
+        if (sz != 0F)
+        {
+            m.m20(m.m20() / sz);
+            m.m21(m.m21() / sz);
+            m.m22(m.m22() / sz);
+        }
+
+        return m;
+    }
+}

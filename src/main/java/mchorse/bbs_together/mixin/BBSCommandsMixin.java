@@ -1,5 +1,7 @@
 package mchorse.bbs_together.mixin;
 
+import mchorse.bbs_together.compat.CommandCompat;
+
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -21,7 +23,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class BBSCommandsMixin {
     @Inject(method={"register"}, at={@At(value="TAIL")}, remap=false)
     private static void onRegister(CommandDispatcher<ServerCommandSource> commandDispatcher, CommandRegistryAccess class_71572, CommandManager.RegistrationEnvironment class_53642, CallbackInfo callbackInfo) {
-        commandDispatcher.register((LiteralArgumentBuilder)CommandManager.literal((String)"bbstogether").then(((LiteralArgumentBuilder)CommandManager.literal((String)"upload").requires(class_21682 -> class_21682.hasPermissionLevel(2))).executes(BBSCommandsMixin::together_updateAssets)));
+        commandDispatcher.register((LiteralArgumentBuilder)CommandManager.literal((String)"bbstogether").then(((LiteralArgumentBuilder)CommandManager.literal((String)"upload").requires(class_21682 -> CommandCompat.hasPermission(class_21682, 2))).executes(BBSCommandsMixin::together_updateAssets)));
     }
 
     private static int together_updateAssets(CommandContext<ServerCommandSource> commandContext) throws CommandSyntaxException {

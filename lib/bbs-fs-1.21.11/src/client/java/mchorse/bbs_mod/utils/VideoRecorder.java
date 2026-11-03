@@ -1,0 +1,536 @@
+package mchorse.bbs_mod.utils;
+
+import mchorse.bbs_mod.BBSMod;
+import mchorse.bbs_mod.BBSModClient;
+import mchorse.bbs_mod.BBSSettings;
+import mchorse.bbs_mod.client.BBSRendering;
+import mchorse.bbs_mod.graphics.PixelPackState;
+import mchorse.bbs_mod.resources.Link;
+import mchorse.bbs_mod.ui.utils.UIUtils;
+import com.mojang.blaze3d.opengl.GlStateManager;
+import com.mojang.logging.LogUtils;
+import net.minecraft.client.MinecraftClient;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
+import org.lwjgl.opengl.GL30;
+import org.lwjgl.system.MemoryUtil;
+import org.slf4j.Logger;
+import sun.misc.Unsafe;
+
+import java.io.File;
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.WritableByteChannel;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+public class VideoRecorder
+{
+    private static final Logger LOGGER = LogUtils.getLogger();
+
+    private static final Link RENDER_COMPLETE_SOUND = Link.assets("sounds/render_complete.ogg");
+
+    private Process process;
+    private WritableByteChannel channel;
+    private boolean recording;
+
+    private ByteBuffer buffer;
+    private int textureId = -1;
+    private int textureWidth;
+    private int textureHeight;
+    private int counter;
+
+    public int serverTicks;
+    public int lastServerTicks;
+
+    public boolean isRecording()
+    {
+        return this.recording;
+    }
+
+    public int getTextureId()
+    {
+        return this.textureId;
+    }
+
+    public int getCounter()
+    {
+        return this.counter;
+    }
+
+    private int[] pbos;
+    private int pboIndex;
+
+    /** One-shot report of a read-back that would not fit, so a broken export says why once. */
+    private boolean reportedOversizedFrame;
+
+    /**
+     * Start recording the video using ffmpeg
+     */
+    public void startRecording(String movieName, File audioFile, int textureId, int width, int height)
+    {
+        if (this.recording)
+        {
+            return;
+        }
+
+        this.counter = 0;
+        this.reportedOversizedFrame = false;
+        this.textureId = textureId;
+        this.textureWidth = width;
+        this.textureHeight = height;
+
+        int size = width * height * 3;
+
+        /* The read-back has no size argument (glGetTexImage downloads the whole level), so this buffer
+         * being exactly width * height * 3 is the ONLY thing standing between a resolution change and a
+         * write past its end. A recording that never reached stopRecording leaves the previous one here,
+         * so a stale size has to be dropped rather than reused. */
+        if (this.buffer != null && this.buffer.capacity() != size)
+        {
+            MemoryUtil.memFree(this.buffer);
+
+            this.buffer = null;
+        }
+
+        if (this.buffer == null)
+        {
+            this.buffer = MemoryUtil.memAlloc(size);
+        }
+
+        try
+        {
+            File movies = BBSRendering.getVideoFolder();
+
+            movies.mkdirs();
+
+            Path path = Paths.get(movies.toString());
+
+            if (movieName == null || movieName.isEmpty())
+            {
+                movieName = StringUtils.createTimestampFilename();
+            }
+
+            String params = audioFile == null
+                ? BBSSettings.videoArguments.get()
+                : BBSSettings.videoArgumentsAudio.get();
+            StringBuilder filters = new StringBuilder("vflip");
+            float frameRate = (float) BBSRendering.getVideoFrameRate();
+
+            int motionBlur = BBSRendering.getMotionBlur();
+
+            for (int i = 0; i < motionBlur; i++)
+            {
+                filters.append(",tblend=all_mode=average,framestep=2");
+            }
+
+            List<String> args = new ArrayList<>();
+            String encoder = FFMpegUtils.getFFMPEG();
+
+            args.add(encoder);
+
+            /* Tokens are substituted after splitting, so a movie name or an audio path
+             * with spaces stays a single argument. ProcessBuilder passes quote characters
+             * literally, so they must not be added around paths either. */
+            for (String arg : params.split(" "))
+            {
+                if (arg.isEmpty())
+                {
+                    continue;
+                }
+
+                arg = arg.replace("%WIDTH%", String.valueOf(width));
+                arg = arg.replace("%HEIGHT%", String.valueOf(height));
+                arg = arg.replace("%FPS%", String.valueOf(frameRate));
+                arg = arg.replace("%NAME%", movieName);
+                arg = arg.replace("%FILTERS%", filters.toString());
+
+                if (audioFile != null)
+                {
+                    arg = arg.replace("%AUDIO_TRACK%", audioFile.getAbsolutePath());
+                }
+
+                args.add(arg);
+            }
+
+            System.out.println("Recording video with following arguments: " + args);
+
+            /**
+             * macOS reads the frame synchronously straight into {@link #buffer} (see
+             * {@link #recordFrameDirect()}); the asynchronous PBO pipeline below misbehaves
+             * there and produces pitch-black footage, so we only set it up off macOS.
+             */
+            if (OS.CURRENT == OS.MACOS)
+            {
+                this.pbos = null;
+            }
+            else
+            {
+                this.pbos = new int[2];
+                this.pboIndex = 0;
+
+                for (int i = 0; i < 2; i++)
+                {
+                    this.pbos[i] = GL30.glGenBuffers();
+
+                    GL30.glBindBuffer(GL30.GL_PIXEL_PACK_BUFFER, this.pbos[i]);
+                    GL30.glBufferData(GL30.GL_PIXEL_PACK_BUFFER, size, GL30.GL_STREAM_READ);
+                }
+
+                GL30.glBindBuffer(GL30.GL_PIXEL_PACK_BUFFER, 0);
+            }
+
+            ProcessBuilder builder = new ProcessBuilder(args);
+            File log = path.resolve(movieName.concat(".log")).toFile();
+
+            if (!BBSSettings.videoEncoderLog.get())
+            {
+                log = BBSMod.getSettingsPath("video.log");
+            }
+
+            builder.directory(path.toFile());
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(log);
+
+            this.process = builder.start();
+
+            /**
+             * Java wraps the process output stream into a BufferedOutputStream,
+             *
+             * but its little buffer is just slowing everything down with the
+             * huge amount of data we're dealing here, so unwrap it with this little
+             * hack.
+             */
+            OutputStream os = this.process.getOutputStream();
+            Unsafe unsafe = UnsafeUtils.getUnsafe();
+
+            if (os instanceof FilterOutputStream)
+            {
+                try
+                {
+                    Field outField = FilterOutputStream.class.getDeclaredField("out");
+
+                    os = (OutputStream) unsafe.getObject(os, unsafe.objectFieldOffset(outField));
+                }
+                catch (Exception e)
+                {
+                    e.printStackTrace();
+                }
+            }
+
+            this.channel = Channels.newChannel(os);
+            this.recording = true;
+
+            UIUtils.playClick(2F);
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+
+        this.serverTicks = this.lastServerTicks = 0;
+    }
+
+    /**
+     * Stop recording
+     */
+    public void stopRecording()
+    {
+        this.stopRecording(true);
+    }
+
+    /**
+     * Stop recording. With {@code finishEffects} false the completion sound and the
+     * folder opening are skipped - the caller runs {@link #playFinishEffects()} itself
+     * once the file is actually final (audio post pass).
+     */
+    public void stopRecording(boolean finishEffects)
+    {
+        if (!this.recording)
+        {
+            return;
+        }
+
+        if (this.pbos != null)
+        {
+            for (int pbo : this.pbos)
+            {
+                GL30.glDeleteBuffers(pbo);
+            }
+        }
+
+        this.pbos = null;
+        this.textureId = -1;
+
+        if (this.buffer != null)
+        {
+            MemoryUtil.memFree(this.buffer);
+
+            this.buffer = null;
+        }
+
+        try
+        {
+            if (this.channel != null && this.channel.isOpen())
+            {
+                this.channel.close();
+            }
+
+            this.channel = null;
+        }
+        catch (IOException ex)
+        {
+            ex.printStackTrace();
+        }
+
+        try
+        {
+            if (this.process != null)
+            {
+                this.process.waitFor(1, TimeUnit.MINUTES);
+                this.process.destroy();
+            }
+
+            this.process = null;
+        }
+        catch (InterruptedException ex)
+        {
+            ex.printStackTrace();
+        }
+
+        this.recording = false;
+
+        if (finishEffects)
+        {
+            this.playFinishEffects();
+        }
+
+        this.serverTicks = this.lastServerTicks = 0;
+    }
+
+    /**
+     * The end-of-export feedback (completion sound, opening the movies folder).
+     */
+    public void playFinishEffects()
+    {
+        if (BBSSettings.videoPlaySoundAfterExport.get())
+        {
+            if (BBSModClient.getSounds().play(RENDER_COMPLETE_SOUND) == null)
+            {
+                UIUtils.playClick(0.5F);
+            }
+        }
+
+        if (BBSSettings.videoOpenFolderAfterExport.get())
+        {
+            File folder = BBSRendering.getVideoFolder();
+            MinecraftClient.getInstance().execute(() -> UIUtils.openFolder(folder));
+        }
+    }
+
+    /**
+     * Record a frame
+     */
+    public void recordFrame()
+    {
+        if (!this.recording)
+        {
+            return;
+        }
+
+        if (OS.CURRENT == OS.MACOS)
+        {
+            this.recordFrameDirect();
+        }
+        else
+        {
+            this.recordFramePBO();
+        }
+
+        this.counter += 1;
+    }
+
+    /**
+     * Bind the captured frame for a read-back, returning the binding to hand back to
+     * {@link #restoreAfterReadBack(int)}.
+     *
+     * <p>The read-back happens in the middle of the world render (the recorder is driven from
+     * {@code WorldRenderEvents.END_MAIN}), so it must leave the texture state exactly as it found it.
+     * A raw {@code glBindTexture} does not: since 1.21.5 {@code GlStateManager} caches the bound
+     * texture per unit and SKIPS the real bind when it believes the id is already bound, so binding
+     * behind its back makes vanilla skip a bind it needs and the draw samples this snapshot instead.
+     *
+     * <p>That is what made every recording flicker. The lightmap sampler was reading the captured
+     * frame, which darkened and tinted the whole image — for two frames out of every three. The third
+     * was the frame carrying the game tick, on which the lightmap is rebuilt and the binding resynced,
+     * so exactly one frame in three came out correct (the recording paces one tick per three frames at
+     * 60 fps, which is where the period came from). {@link mchorse.bbs_mod.graphics.texture.Texture}
+     * routes through GlStateManager for the same reason; this path was the one left on raw GL.
+     */
+    private int bindForReadBack()
+    {
+        int previousTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+
+        GlStateManager._bindTexture(this.textureId);
+
+        return previousTexture;
+    }
+
+    private void restoreAfterReadBack(int previousTexture)
+    {
+        GlStateManager._bindTexture(previousTexture);
+    }
+
+    /**
+     * Whether the frame the bound texture holds fits the destination this recorder sized.
+     *
+     * <p>{@code glGetTexImage} takes no destination size: it writes the whole of level 0, whatever that
+     * turns out to be, and a destination smaller than that is not an error the driver reports — it is a
+     * write past the end of our memory, and the process dies inside the driver. That is precisely how every
+     * HiDPI export used to crash, when the snapshot was sized from the physical framebuffer while this
+     * buffer was sized from the export resolution (fixed in {@code BBSRendering#blitIntoSnapshot}).</p>
+     *
+     * <p>The two sizes now agree by construction on all three export paths, so this is a backstop, not a
+     * branch we expect to take: if they ever disagree again, lose the frame and name the reason once
+     * instead of taking the game down with it. Must be called with the captured texture bound.</p>
+     */
+    private boolean frameFitsDestination()
+    {
+        int levelWidth = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_WIDTH);
+        int levelHeight = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
+
+        if (levelWidth == this.textureWidth && levelHeight == this.textureHeight)
+        {
+            return true;
+        }
+
+        if (!this.reportedOversizedFrame)
+        {
+            this.reportedOversizedFrame = true;
+
+            LOGGER.error("[BBS video] captured frame is {}x{} but the recording is {}x{} — dropping frames instead of overrunning the read-back buffer",
+                levelWidth, levelHeight, this.textureWidth, this.textureHeight);
+        }
+
+        return false;
+    }
+
+    /**
+     * Asynchronous read-back path (Windows/Linux): {@code glGetTexImage} into a ping-pong
+     * pair of pixel pack buffers, mapping the previously filled buffer to overlap GPU
+     * read-back with the CPU-side write to ffmpeg.
+     */
+    private void recordFramePBO()
+    {
+        try
+        {
+            int pbo = this.pboIndex;
+            int nextPbo = (this.pboIndex + 1) % this.pbos.length;
+
+            /* Pack state is ambient — a leftover GL_PACK_ROW_LENGTH strides the read-back rows
+             * past the end of the PBO (see PixelPackState). Our own pack buffer is bound after it. */
+            try (PixelPackState pack = PixelPackState.push(1))
+            {
+                GL30.glBindBuffer(GL30.GL_PIXEL_PACK_BUFFER, this.pbos[pbo]);
+
+                int previousTexture = this.bindForReadBack();
+                boolean fits = this.frameFitsDestination();
+
+                if (fits)
+                {
+                    GL30.glGetTexImage(GL30.GL_TEXTURE_2D, 0, GL30.GL_BGR, GL30.GL_UNSIGNED_BYTE, 0);
+                }
+
+                this.restoreAfterReadBack(previousTexture);
+
+                if (!fits)
+                {
+                    /* Nothing was read, so there is nothing to hand over: leave the ping-pong where it is
+                     * rather than shipping whatever the buffers still hold from an earlier frame. */
+                    GL30.glBindBuffer(GL30.GL_PIXEL_PACK_BUFFER, 0);
+
+                    return;
+                }
+
+                GL30.glBindBuffer(GL30.GL_PIXEL_PACK_BUFFER, this.pbos[nextPbo]);
+
+                ByteBuffer mappedBuffer = GL30.glMapBuffer(GL30.GL_PIXEL_PACK_BUFFER, GL30.GL_READ_ONLY);
+
+                if (mappedBuffer != null && this.counter != 0)
+                {
+                    this.channel.write(mappedBuffer);
+                }
+
+                GL30.glUnmapBuffer(GL30.GL_PIXEL_PACK_BUFFER);
+                GL30.glBindBuffer(GL30.GL_PIXEL_PACK_BUFFER, 0);
+            }
+
+            this.pboIndex = nextPbo;
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Synchronous read-back path (macOS): {@code glGetTexImage} straight into {@link #buffer}
+     * and write it to ffmpeg. Simpler and stalls the render thread, but avoids the
+     * pixel-pack-buffer path that renders black on macOS.
+     */
+    private void recordFrameDirect()
+    {
+        this.buffer.clear();
+
+        try (PixelPackState pack = PixelPackState.push(1))
+        {
+            int previousTexture = this.bindForReadBack();
+
+            if (!this.frameFitsDestination())
+            {
+                this.restoreAfterReadBack(previousTexture);
+
+                return;
+            }
+
+            GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL12.GL_BGR, GL11.GL_UNSIGNED_BYTE, this.buffer);
+
+            this.restoreAfterReadBack(previousTexture);
+        }
+
+        this.buffer.rewind();
+
+        try
+        {
+            this.channel.write(this.buffer);
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Toggle recording of the video
+     */
+    public void toggleRecording(int textureId, int textureWidth, int textureHeight)
+    {
+        if (this.recording)
+        {
+            this.stopRecording();
+        }
+        else
+        {
+            this.startRecording(StringUtils.createTimestampFilename(), null, textureId, textureWidth, textureHeight);
+        }
+
+        UIUtils.playClick();
+    }
+}

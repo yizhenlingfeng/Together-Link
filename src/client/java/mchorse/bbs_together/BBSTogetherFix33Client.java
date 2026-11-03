@@ -16,7 +16,6 @@ import mchorse.bbs_together.BBSTogetherFix22;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.render.BufferBuilder;
 
 public final class BBSTogetherFix33Client {
     private static final int BACKUP_SLOTS = 10;

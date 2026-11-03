@@ -2,21 +2,18 @@
 
 **简体中文** | [English](README_en.md)
 
-Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/mod/bbs-mod) 的多人协作扩展，适用于 Minecraft 1.20.1–1.20.4 的 Fabric 环境。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限与资产锁、资产同步及服务器审计。
+Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/mod/bbs-mod) 的多人协作扩展。主发布支持 Minecraft 1.20.1–1.20.4 的 Fabric 环境，并提供 Minecraft 1.21.11 的实验性兼容构建。它在保留 BBS 原有编辑体验的前提下，提供多人实时协作、影片版本历史、服务端权限与资产锁、资产同步及服务器审计。
 
-> 单一构建产物同时支持 Minecraft 1.20.1 与 1.20.4，无需按版本分别安装。
+> 1.20.1–1.20.4 使用同一个通用构建；1.21.11 使用独立构建，两者不可混用。
 
 ## 版本与前置
 
-| 项目 | 要求 |
-|---|---|
-| 当前版本 | 2.0.1 |
-| Minecraft | 1.20.1 – 1.20.4（单一构建产物） |
-| BBS FS | >= 2.6（推荐 2.7） |
-| Fabric Loader | >= 0.15.6 |
-| Fabric API | 必需 |
-| Java | 17+（编译目标 17） |
-| 许可 | MIT |
+| 构建 | Minecraft | Java | Fabric Loader | BBS FS | 状态 |
+|---|---|---|---|---|---|
+| 通用构建 | 1.20.1 – 1.20.4 | 17+ | >= 0.15.6 | >= 2.6（推荐 2.7） | 主发布 |
+| 1.21.11 兼容构建 | 1.21.11 | 21+ | >= 0.19.3 | 2.7-1.21.11 | 实验性 |
+
+当前版本：**2.0.3**。Fabric API 为必需前置；许可证为 MIT。
 
 ## 功能概览
 
@@ -110,12 +107,14 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/m
 | 步骤 | 操作 |
 |---|---|
 | 1 | 安装 Minecraft 1.20.1 或 1.20.4、Fabric Loader、Fabric API、对应版本的 BBS FS |
-| 2 | 将 `together-link-2.0.1-1.20.1-1.20.4.jar` 放入客户端和服务端的 `mods/` |
+| 2 | 将 `together-link-2.0.3-1.20.1-1.20.4.jar` 放入客户端和服务端的 `mods/` |
 | 3 | 启动服务器，使用控制台或 OP 执行 `/bbsop <玩家> 2` 初始化管理员 |
 | 4 | 所有客户端连接同一服务器；服务端与客户端必须使用同一版本 |
 | 5 | 进入 BBS 仪表盘即可开始协作 |
 
 > 仅更新客户端不会生效：资产路径、权限、CAS、tombstone、合作录制锁等服务端校验都在服务端执行。
+>
+> 1.21.11 兼容构建的安装方式相同，但需使用 `together-link-2.0.3-1.21.11.jar` 和 BBS `2.7-1.21.11`。1.20.x 与 1.21.11 属于不同构建，不能混用。
 
 ## 配置
 
@@ -131,8 +130,9 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/m
 | `cdn.progress_bar_always` | 关 | 空闲时显示小状态点 |
 | `server.auto_sync` | 关 | 自动监听资产变更 |
 | `server.asset_sync_max_mb` | 256 | 单文件大小上限，0 = 不限制 |
-| `server.asset_upload_kbps` | 1024 | 上传限速，0 = 不限速 |
-| `server.asset_egress_kbps` | 2048 | 服务端总出口限速，0 = 不限速 |
+| `server.asset_upload_kbps` | 0 | 客户端上传限速，0 = 不限速 |
+| `server.asset_egress_kbps` | 0 | 服务端总出口限速，0 = 不限速 |
+| `server.asset_ingress_kbps` | 0 | 服务端总入口限速，0 = 不限速 |
 | `behaviors.behavior_log_limit` | 1000 | 行为日志条数上限 |
 | `coop.coop_invite_seconds` | 60 | 合作录制邀请有效期（秒） |
 
@@ -153,11 +153,25 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/m
 | 命令 | 说明 |
 |---|---|
 | `.\gradlew.bat build` | 构建通用产物（1.20.1 / 1.20.4） |
-| `build/libs/together-link-2.0.1-1.20.1-1.20.4.jar` | 构建产物（唯一发布产物） |
+| `build/libs/together-link-2.0.3-1.20.1-1.20.4.jar` | 主发布产物 |
 | `.\gradlew.bat build "-Pmcver=1.20.4"` | 仅编译/运行验证 1.20.4，产物带 `-verify`，不发布 |
+| `.\gradlew.bat build12111` | 构建 1.21.11 兼容产物（实验性，单独发布） |
+| `.\gradlew.bat runClient12111` | 启动 1.21.11 开发客户端（`run-1.21.11-client/`） |
+| `.\gradlew.bat runClient12111B` | 启动第二个 1.21.11 开发客户端（`run-1.21.11-client-b/`） |
+| `.\gradlew.bat runServer12111` | 启动 1.21.11 开发服务器（`run-1.21.11-server/`） |
 | `dist/` | 发布副本 |
 
 构建工具 Loom 固定为 `1.15.5`，避免快照版本导致构建差异。
+
+`runClient12111` 和 `runClient12111B` 支持用 `-PjoinServer=127.0.0.1:25565` 在启动后直接加入服务器：
+
+```powershell
+.\gradlew.bat runServer12111 --console=plain
+.\gradlew.bat runClient12111  '-PjoinServer=127.0.0.1:25565'
+.\gradlew.bat runClient12111B '-PjoinServer=127.0.0.1:25565'
+```
+
+> **1.21.11 兼容构建（实验性）：** 这是独立于 1.20.x 主发布的兼容产物。它复用 1.20 的公共源码，并通过 `src/main/java-1.21.11`、`src/client/java-1.21.11` 薄覆盖层适配 1.21.11 的网络、渲染与 Mixin API。已完成编译、专用服务器加入、双客户端加入、9 MB 大资产传输与出入口限速验证；尚未完成 30 分钟长连接、持续同步和锁竞争压测，也不承诺与 1.20.x 世界存档互通。构建前需先将 BBS `2.7-1.21.11` 从 `lib/bbs-fs-1.21.11` 发布到 mavenLocal。测试记录见 [1.21.11 测试记录](docs/12111-p5-checkpoint.md)。
 
 ## 代码结构
 
@@ -174,6 +188,38 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/m
 | `src/client/resources/bbs-together.client.mixins.json` | 客户端 mixin 配置 |
 
 ## 更新日志
+
+### v2.0.3
+
+#### 新增
+
+- 新增 Minecraft 1.21.11 实验性兼容构建：独立产物、Java 21、Fabric Loader >= 0.19.3、BBS 2.7-1.21.11；1.20.x 通用构建保持不变。
+- 1.21.11 增加专用服务器与第二开发客户端入口（`runClient12111B` / `run-1.21.11-client-b/`），两个客户端均支持 `-PjoinServer` 启动后自动加入服务器。
+- 1.21.11 完成 CustomPayload 网络、`Identifier.of`、渲染状态与 Mixin 覆盖层适配；恢复模型方块锁定徽章、玩家隐藏、关键帧高亮与玩家头像渲染。
+- 新增启动期 payload 预注册和 64 MB 分块传输总上限，降低首个数据包丢失或分块累积过大的风险。
+- 新增结构化传输日志与指标：出口/入口字节、完成/失败计数、平均吞吐、限速等待时间；新增 `server.asset_ingress_kbps` 服务端入口总限速。
+
+#### 修复
+
+- 修复 1.21.11 `fabric.mod.json` 缺少 `mixins` 声明，导致全部 1.21.11 Mixin 未加载、锁定面板等界面功能缺失的问题。
+- 修复模型方块面板打开后权限或资产锁变化时“锁定编辑”区域不刷新的问题。
+- 修复 1.21.11 的网络、渲染、玩家隐藏、关键帧高亮与皮肤头像兼容性问题。
+- 修正 README 中的版本号、构建命令与 1.21.11 支持范围。
+
+#### 验证
+
+- 1.20.1、1.20.4、1.21.11 三个目标均构建通过。
+- 1.21.11 完成专用服务器加入、双客户端同时在线、9 MB 大资产传输、1024 KiB/s 入口限速和 1.20.4 加入/重连回归测试。
+
+#### 兼容性
+
+- 1.20.1–1.20.4 继续使用同一个通用构建；1.21.11 使用独立构建，客户端与服务端必须使用相同的 Minecraft 版本和 Together 构建。
+- 网络协议版本保持 3；1.20.x 与 1.21.11 世界存档不承诺互通。
+
+#### 已知限制
+
+- 1.21.11 仍需完成 30 分钟长连接、持续资产同步与锁竞争压测，部分视觉项需复验。
+- 1.21.11 构建依赖 BBS 2.7-1.21.11，构建前需从 `lib/bbs-fs-1.21.11` 发布到 mavenLocal。
 
 ### v2.0.2
 
@@ -211,11 +257,6 @@ Together Link（模组 ID：`bbs_together`）是 [BBS FS](https://modrinth.com/m
 - 修复影片列表、回放列表绘制协作者头像时可能导致的客户端崩溃（皮肤为空时不再向纹理管理器请求空纹理）。
 - 修复合作录制开始后，被邀请者提示“本地缺少该影片”、无法录制回放的问题：开始前先同步一次会话所用分支的影片。
 - 移除历史 refmap 文件；Loom 在 `remapJar` 阶段直接重映射 Mixin 注解。
-
-#### 兼容性
-
-- Minecraft 1.20.4 需要 BBS `2.7-1.20.4`；公开版 `2.3.3` 不满足 `>=2.6` 依赖。
-- 客户端与服务端必须使用相同的 Minecraft 版本。
 
 ### v2.0
 

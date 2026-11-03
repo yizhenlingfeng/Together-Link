@@ -1,5 +1,7 @@
 package mchorse.bbs_together;
 
+import mchorse.bbs_together.network.TogetherServerNetworking;
+
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -22,9 +24,6 @@ import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.network.CompressedServerPacketCrusher;
 import mchorse.bbs_together.BBSTogetherFix28;
 import mchorse.bbs_together.network.TogetherServerNetwork;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.MinecraftServer;
@@ -45,11 +44,11 @@ public final class BBSTogetherFix28Server {
             return;
         }
         serverReceiversRegistered = true;
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_REQUEST, (minecraftServer, class_32222, class_32442, class_25402, packetSender) -> {
+        TogetherServerNetworking.register((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_REQUEST, (minecraftServer, class_32222, class_32442, class_25402, packetSender) -> {
             String string = class_25402.readString();
             minecraftServer.execute(() -> BBSTogetherFix28Server.handleJoinRequest(minecraftServer, class_32222, string));
         });
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
+        TogetherServerNetworking.register((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 UUID uUID = class_25402.readUuid();
@@ -57,7 +56,7 @@ public final class BBSTogetherFix28Server {
                 minecraftServer.execute(() -> BBSTogetherFix28Server.handleJoinSnapshot(minecraftServer, class_32222, uUID, string, byArray));
             });
         });
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_LEAVE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
+        TogetherServerNetworking.register((Identifier)BBSTogetherFix28.SERVER_FILM_LEAVE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
@@ -65,7 +64,7 @@ public final class BBSTogetherFix28Server {
                 minecraftServer.execute(() -> BBSTogetherFix28Server.handleLeaveSnapshot(minecraftServer, class_32222, string, branch, byArray));
             });
         });
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
+        TogetherServerNetworking.register((Identifier)BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
@@ -73,7 +72,7 @@ public final class BBSTogetherFix28Server {
                 minecraftServer.execute(() -> BBSTogetherFix28Server.handleStructureSnapshot(minecraftServer, class_32222, string, branch, byArray));
             });
         });
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
+        TogetherServerNetworking.register((Identifier)BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             CompressedServerPacketCrusher serverPacketCrusher = SNAPSHOT_CRUSHERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 String string = class_25402.readString();
@@ -232,8 +231,8 @@ public final class BBSTogetherFix28Server {
             return false;
         }
         if (!AssetLockManager.canEdit(player.getUuid(), AssetLockType.FILM, filmId)) {
-            if (player.getServer() != null) {
-                AssetLockManager.notifyLocked(player.getServer(), player, AssetLockType.FILM);
+            if (player.getEntityWorld().getServer() != null) {
+                AssetLockManager.notifyLocked(player.getEntityWorld().getServer(), player, AssetLockType.FILM);
             }
 
             return false;

@@ -1,5 +1,7 @@
 package mchorse.bbs_together.locks;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -164,7 +166,7 @@ public final class AssetLockManager
 
     public static String modelBlockId(ServerPlayerEntity player, BlockPos pos)
     {
-        return modelBlockId(player == null ? null : player.getWorld(), pos);
+        return modelBlockId(player == null ? null : player.getEntityWorld(), pos);
     }
 
     /** Whether {@code folder} contains at least one film the player may not edit. */
@@ -236,7 +238,7 @@ public final class AssetLockManager
         {
             lock = new AssetLock(type, id);
             lock.owner = actor.getUuid();
-            lock.ownerName = actor.getGameProfile().getName();
+            lock.ownerName = PlayerCompat.name(actor.getGameProfile());
         }
 
         lock.mode = mode;

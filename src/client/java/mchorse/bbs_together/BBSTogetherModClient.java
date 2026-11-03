@@ -1,5 +1,7 @@
 package mchorse.bbs_together;
 
+import mchorse.bbs_together.compat.ClientCompat;
+
 import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.ui.framework.UIScreen;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
@@ -24,7 +26,7 @@ implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             TogetherClientNetwork.tickCommitColors();
             if (client.world != null) {
-                TogetherClientNetwork.interpolateCursors(client.getLastFrameDuration());
+                TogetherClientNetwork.interpolateCursors(ClientCompat.frameDelta(client));
             }
         });
         ClientPlayConnectionEvents.JOIN.register((handler, packetSender, client) -> TogetherClientNetwork.onJoin());

@@ -1,6 +1,5 @@
 package mchorse.bbs_together.ui;
 
-import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.framework.UIBaseMenu;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
 

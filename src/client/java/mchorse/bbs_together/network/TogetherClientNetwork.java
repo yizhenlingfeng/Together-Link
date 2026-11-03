@@ -1,5 +1,7 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -91,7 +93,6 @@ import mchorse.bbs_together.ui.commits.CommitUi;
 import mchorse.bbs_together.ui.commits.FilmCommitClient;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.player.PlayerEntity;
@@ -431,20 +432,21 @@ public class TogetherClientNetwork {
     });
 
     public static void setup() {
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COLORS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerColorsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_CURSOR_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCursorPositionsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSelectionsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplaySelectionsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_REPLAY_FORM_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplayFormLocksPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SWAP, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplaySwapPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_TOGGLE_RECORDING, (client, handler, buf, resp) -> TogetherClientNetwork.handleToggleRecordingPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_MANIFEST, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetManifestPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSETS_CHANGED, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetsChangedPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_FILE, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetFilePacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_HINT, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetHintPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH_STATE, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmBranchStatePacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH, (client, handler, buf, resp) ->
+        TogetherClientNetworking.preRegister();
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COLORS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerColorsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_CURSOR_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCursorPositionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSelectionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplaySelectionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_FORM_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplayFormLocksPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SWAP, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplaySwapPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_TOGGLE_RECORDING, (client, handler, buf, resp) -> TogetherClientNetwork.handleToggleRecordingPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_MANIFEST, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetManifestPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSETS_CHANGED, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetsChangedPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_FILE, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetFilePacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_HINT, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetHintPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH_STATE, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmBranchStatePacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH, (client, handler, buf, resp) ->
         {
             String filmId = buf.readString();
             String branch = buf.readString(FilmCommit.MAX_BRANCH * 2);
@@ -455,36 +457,36 @@ public class TogetherClientNetwork {
                 TogetherClientNetwork.updateCachedFilmBranch(filmId, branch);
             });
         });
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_SAVED_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSavedSyncPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DATA_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleFilmDataSyncPacket(client, (byte[])bytes, packetByteBuf)));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_UNDO_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleUndoRejectedPacket(client, (byte[])bytes)));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_LIST_CHANGED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmListChangedPacket(client));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmDeletedPacket(client, buf.readString()));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_FILM_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmRenamedPacket(client, buf.readString(), buf.readString()));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MERGE_REPLAYS, (client, handler, buf, resp) -> TogetherClientNetwork.handleMergeReplaysPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BEHAVIOR_LIST, (client, handler, buf, resp) -> TogetherClientNetwork.handleBehaviorListPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_MODEL_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleModelDeletedPacket(client, buf.readString()));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_ASSET_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetLocksPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST, (client, handler, buf, resp) -> CoopClient.handleRequest(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST_CLOSED, (client, handler, buf, resp) -> CoopClient.handleRequestClosed(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_ROOM, (client, handler, buf, resp) -> CoopClient.handleRoom(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_END, (client, handler, buf, resp) -> CoopClient.handleEnd(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_MOUSE, (client, handler, buf, resp) -> CoopClient.handleMouse(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COOP_BEGIN, (client, handler, buf, resp) -> CoopClient.handleBegin(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_INDEX, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitIndexPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_ADDED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitAddedPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_DIFF, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitDiffPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_HEAD, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitHeadPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRenamedPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitSelectionsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COMMIT_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerCommitPositionsPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_COLOR, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitColorPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_HELLO, (client, handler, buf, resp) -> TogetherClientNetwork.handleHelloPacket(client, buf));
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)TogetherServerNetwork.CLIENT_SERVER_LIMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleServerLimitsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SAVED_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSavedSyncPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_DATA_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleFilmDataSyncPacket(client, (byte[])bytes, packetByteBuf)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_UNDO_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleUndoRejectedPacket(client, (byte[])bytes)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_LIST_CHANGED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmListChangedPacket(client));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmDeletedPacket(client, buf.readString()));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmRenamedPacket(client, buf.readString(), buf.readString()));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_MERGE_REPLAYS, (client, handler, buf, resp) -> TogetherClientNetwork.handleMergeReplaysPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_BEHAVIOR_LIST, (client, handler, buf, resp) -> TogetherClientNetwork.handleBehaviorListPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_MODEL_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleModelDeletedPacket(client, buf.readString()));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetLocksPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST, (client, handler, buf, resp) -> CoopClient.handleRequest(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST_CLOSED, (client, handler, buf, resp) -> CoopClient.handleRequestClosed(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_ROOM, (client, handler, buf, resp) -> CoopClient.handleRoom(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_END, (client, handler, buf, resp) -> CoopClient.handleEnd(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_MOUSE, (client, handler, buf, resp) -> CoopClient.handleMouse(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_BEGIN, (client, handler, buf, resp) -> CoopClient.handleBegin(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_INDEX, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitIndexPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_ADDED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitAddedPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_DIFF, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitDiffPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_HEAD, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitHeadPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRenamedPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitSelectionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COMMIT_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerCommitPositionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_COLOR, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitColorPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_HELLO, (client, handler, buf, resp) -> TogetherClientNetwork.handleHelloPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_SERVER_LIMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleServerLimitsPacket(client, buf));
         BBSTogetherFix28Client.registerReceivers();
         BBSTogetherFixReplayStructure.registerClientReceiver();
     }
@@ -575,7 +577,7 @@ public class TogetherClientNetwork {
 
         PacketByteBuf hello = PacketByteBufs.create();
         hello.writeInt(TogetherServerNetwork.PROTOCOL_VERSION);
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_HELLO, hello);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_HELLO, hello);
     }
 
     private static void handleHelloPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -1201,7 +1203,7 @@ public class TogetherClientNetwork {
                     /* Per-model size aggregation is only used to *label* big models for the
                      * "models too large" list. It must never gate the download: skipping a
                      * whole model's files but keeping its config.json left folders with a model
-                     * entry and no texture/geometry at all (the "只同步了模型没有材质" report).
+                     * entry and no texture/geometry at all (the "model synced, no textures" report).
                      * Over-size protection happens per file, below. */
                     HashMap<String, Long> modelTotalSize = new HashMap<String, Long>();
                     for (Map.Entry<String, Long> e : serverSizeMap.entrySet()) {
@@ -1226,8 +1228,8 @@ public class TogetherClientNetwork {
                                  * Models are the exception: a model folder is discovered through
                                  * its config.json, so a stub for any *other* model file would
                                  * resurrect a half-model (mesh without textures) —the exact
-                                 * bug behind "模型同步了但没有材质". For models only config.json
-                                 * is stubbed, and the rest is left to the "模型过大" cell. */
+                                 * bug behind "model synced but has no textures". For models only config.json
+                                 * is stubbed, and the rest is left to the "model too large" cell. */
                                 if (relPath.startsWith("models/") && !relPath.endsWith("/config.json")) {
                                     continue;
                                 }
@@ -1613,7 +1615,7 @@ public class TogetherClientNetwork {
      * The queue is BOUNDED on purpose. The link can hand us slices faster than the disk can
      * absorb them; with an unbounded queue that difference turns into gigabytes of pending
      * byte[] and a VM that spends its life in GC —the client stops answering keepalives and
-     * the server times it out ("连接超时"). CallerRunsPolicy instead lets the network thread
+     * the server times it out ("connection timed out"). CallerRunsPolicy instead lets the network thread
      * perform the write, which slows down reads and pushes back on the peer via TCP.
      */
     private static final int ASSET_WRITER_QUEUE = 32;
@@ -1878,7 +1880,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeInt(color);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_PLAYER_COLOR, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_PLAYER_COLOR, (PacketByteBuf)buf);
     }
 
     public static void sendCursorPosition(String filmId, int editorType, float tick, float row, List<Integer> selectedIndices, int playheadTick) {
@@ -1908,7 +1910,7 @@ public class TogetherClientNetwork {
             buf.writeInt(selectedIndices.get(i).intValue());
         }
         buf.writeInt(playheadTick);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_CURSOR_POSITION, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_CURSOR_POSITION, (PacketByteBuf)buf);
     }
 
     /** Send the latest throttled cursor state, called once per render tick so the final
@@ -1943,7 +1945,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId == null ? "" : filmId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_SELECTION, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_SELECTION, (PacketByteBuf)buf);
     }
 
     public static void sendFilmScreen(String filmId) {
@@ -1952,7 +1954,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId == null ? "" : filmId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_SCREEN, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_SCREEN, (PacketByteBuf)buf);
     }
 
     public static void sendReplaySelection(String filmId, int replayIndex) {
@@ -1966,7 +1968,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeInt(replayIndex);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_SELECTION, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_SELECTION, (PacketByteBuf)buf);
     }
 
     public static void sendReplayFormLock(String filmId, int replayIndex, boolean locked) {
@@ -1981,7 +1983,7 @@ public class TogetherClientNetwork {
         buf.writeString(filmId);
         buf.writeInt(replayIndex);
         buf.writeBoolean(locked);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_FORM_LOCK, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_FORM_LOCK, (PacketByteBuf)buf);
     }
 
     public static void sendReplaySwap(String filmId, int from, int to) {
@@ -1992,7 +1994,7 @@ public class TogetherClientNetwork {
         buf.writeString(filmId);
         buf.writeInt(from);
         buf.writeInt(to);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_SWAP, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_REPLAY_SWAP, (PacketByteBuf)buf);
     }
 
     /** The one asset size ceiling shared by both directions: a file above it is neither
@@ -2020,7 +2022,7 @@ public class TogetherClientNetwork {
      * file is also missing from every picker: the user just sees a hole and cannot tell "not
      * synced yet" from "too big to sync at all". A stub with the right name and extension lets
      * BBS list the entry, while {@code OversizedAssets} makes the UI paint it dimmed with
-     * {@code 文件尺寸过大 · 700 MB}. An existing real file is never touched.</p>
+     * {@code File too large · 700 MB}. An existing real file is never touched.</p>
      */
     public static void ensureOversizedPlaceholder(Path assetsRoot, String relativePath) {
         if (assetsRoot == null || relativePath == null || relativePath.isEmpty()) {
@@ -2217,7 +2219,7 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer) return;
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeLong(lastManifestVersion);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_RESYNC, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_RESYNC, (PacketByteBuf)buf);
     }
 
     /** B1: tell the server whether we want pushed assets at all (assetSyncReceive). */
@@ -2227,7 +2229,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeBoolean(((Boolean)TogetherSettings.assetSyncReceive.get()).booleanValue());
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_SYNC_PREF, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_SYNC_PREF, (PacketByteBuf)buf);
     }
 
     /** B2: publish {relativePath: sha1} of our local assets so the server can skip us for
@@ -2298,7 +2300,7 @@ public class TogetherClientNetwork {
         if (assetsFolder == null || !assetsFolder.exists()) {
             return;
         }
-        final boolean deltaSupported = ClientPlayNetworking.canSend(TogetherServerNetwork.SERVER_ASSET_REPORT_DELTA);
+        final boolean deltaSupported = TogetherClientNetworking.canSend(TogetherServerNetwork.SERVER_ASSET_REPORT_DELTA);
         if (!inventoryInFlight.compareAndSet(false, true)) {
             /* A walk is already running; its loop picks this request up on the next round. */
             inventoryDirty.set(true);
@@ -2834,7 +2836,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_DELETED, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_DELETED, (PacketByteBuf)buf);
     }
 
     public static void sendFilmRenamed(String oldId, String newId) {
@@ -2844,7 +2846,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(oldId);
         buf.writeString(newId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_RENAMED, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_RENAMED, (PacketByteBuf)buf);
     }
 
     private static void handleFilmListChangedPacket(MinecraftClient client) {
@@ -2868,7 +2870,7 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer) {
             return;
         }
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
     }
 
     /* Server behavior log */
@@ -2882,7 +2884,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeLong(afterId);
         buf.writeLong(behaviorVersion);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BEHAVIOR_QUERY, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_BEHAVIOR_QUERY, (PacketByteBuf)buf);
     }
 
     /** Report a client-side action (model editor save) to the server log. */
@@ -2899,7 +2901,7 @@ public class TogetherClientNetwork {
                 buf.writeString(items.get(i));
             }
         }
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BEHAVIOR_REPORT, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_BEHAVIOR_REPORT, (PacketByteBuf)buf);
     }
 
     /** Ask the server to (un)op a player; the server double checks the requester. */
@@ -2910,7 +2912,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeUuid(targetId);
         buf.writeBoolean(op);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_SET_OPERATOR, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_SET_OPERATOR, (PacketByteBuf)buf);
     }
 
     /** Ask the server to wipe every log entry of a player (OP only, server re-checks). */
@@ -2920,7 +2922,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeUuid(targetId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_REMOVE_PLAYER_LOGS, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_REMOVE_PLAYER_LOGS, (PacketByteBuf)buf);
     }
 
     /** Ask the server to set a player's BBS permission level (manager only, server re-checks). */
@@ -2931,7 +2933,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeUuid(targetId);
         buf.writeInt(level);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_SET, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_SET, (PacketByteBuf)buf);
     }
 
     /** Allow or deny one editable domain for a (level-1) player (manager only, server re-checks). */
@@ -2943,7 +2945,7 @@ public class TogetherClientNetwork {
         buf.writeUuid(targetId);
         buf.writeString(domainId);
         buf.writeBoolean(allowed);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_GRANT, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_BBSOP_GRANT, (PacketByteBuf)buf);
     }
 
     /** Set / clear an asset lock (level-2 managers only, server re-checks). */
@@ -2967,7 +2969,7 @@ public class TogetherClientNetwork {
                 buf.writeString(entry.getValue() == null ? "" : entry.getValue());
             }
         }
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_LOCK, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_LOCK, (PacketByteBuf)buf);
     }
 
     /** Ask the server (as a logged request behavior) to delete a model; managers approve/deny it. */
@@ -2977,7 +2979,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(modelId == null ? "" : modelId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_MODEL_DELETE_REQUEST, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_MODEL_DELETE_REQUEST, (PacketByteBuf)buf);
     }
 
     /** Approve or deny a pending model-delete request (manager only, server re-checks). */
@@ -2988,7 +2990,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeLong(entryId);
         buf.writeBoolean(approve);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_MODEL_DELETE_DECISION, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_MODEL_DELETE_DECISION, (PacketByteBuf)buf);
     }
 
     /** An approved server-side deletion: drop this client's local copy of the model. */
@@ -3166,7 +3168,7 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
             return;
         }
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_INDEX, PacketByteBufs.create());
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_INDEX, PacketByteBufs.create());
     }
 
     public static void sendCommitsQuery(String filmId) {
@@ -3175,7 +3177,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMITS_QUERY, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMITS_QUERY, (PacketByteBuf)buf);
     }
 
     public static void sendCommitDiff(String filmId, String commitId) {
@@ -3185,7 +3187,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeString(commitId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_DIFF, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_DIFF, (PacketByteBuf)buf);
     }
 
     public static void sendCommitHead(String filmId) {
@@ -3194,7 +3196,7 @@ public class TogetherClientNetwork {
         }
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_HEAD, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_HEAD, (PacketByteBuf)buf);
     }
 
     public static void sendCommitRename(String filmId, String commitId, String message) {
@@ -3205,7 +3207,7 @@ public class TogetherClientNetwork {
         buf.writeString(filmId);
         buf.writeString(commitId);
         buf.writeString(message == null ? "" : message);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_RENAME, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_RENAME, (PacketByteBuf)buf);
     }
 
     /** Tell the server which commit this player is looking at (empty commit clears it). */
@@ -3216,7 +3218,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeString(commitId == null ? "" : commitId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_SELECTION, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_SELECTION, (PacketByteBuf)buf);
     }
 
     /** Players (other than the local one, filtered by the caller) looking at a commit. */
@@ -3268,7 +3270,7 @@ public class TogetherClientNetwork {
 
             net.minecraft.client.network.PlayerListEntry entry = mc.getNetworkHandler().getPlayerListEntry(uuid);
 
-            return entry == null ? "" : entry.getProfile().getName();
+            return entry == null ? "" : PlayerCompat.name(entry.getProfile());
         } catch (Exception e) {
             return "";
         }
@@ -3310,7 +3312,7 @@ public class TogetherClientNetwork {
         buf.writeString(filmId);
         buf.writeString(commitId);
         buf.writeInt(color);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_COLOR, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_COLOR, (PacketByteBuf)buf);
     }
 
     /** One colour waiting for the debounce in {@link #tickCommitColors()}. */
@@ -3334,7 +3336,7 @@ public class TogetherClientNetwork {
         buf.writeString(filmId);
         buf.writeString(commitId);
         buf.writeByte(mode);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_REVERT, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_REVERT, (PacketByteBuf)buf);
     }
 
     public static void sendCommitSquash(String filmId, String commitId) {
@@ -3344,7 +3346,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeString(commitId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_SQUASH, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_COMMIT_SQUASH, (PacketByteBuf)buf);
     }
 
     public static void sendCommitCreate(String filmId, String message, String branch, Film film) {
@@ -3371,7 +3373,7 @@ public class TogetherClientNetwork {
         buf.writeString(filmId);
         buf.writeString(name);
         buf.writeString(commitId == null ? "" : commitId);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BRANCH_CREATE, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_BRANCH_CREATE, (PacketByteBuf)buf);
     }
 
     public static void sendBranchCheckout(String filmId, String branch) {
@@ -3382,7 +3384,7 @@ public class TogetherClientNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeString(branch);
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_BRANCH_CHECKOUT, (PacketByteBuf)buf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_BRANCH_CHECKOUT, (PacketByteBuf)buf);
     }
 
     private static void handleCommitIndexPacket(MinecraftClient client, PacketByteBuf buf) {
@@ -3636,8 +3638,10 @@ public class TogetherClientNetwork {
                     return true;
                 }
             } else if (current instanceof Clips clips) {
-                /* Clips.fromData 只接受 ListType；本地还没有对应 clip 时，仅当 data 是带
-                 * type 的完整 clip MapType 才用工厂造一个，否则丢弃补丁，避免 MapType 回灌 CCE。*/
+                /* Clips.fromData only accepts a ListType; when the local side has no matching
+                 * clip yet, only a complete clip MapType that carries a type is built through
+                 * the factory, and the patch is dropped otherwise so feeding a MapType back
+                 * in cannot raise a CCE. */
                 if (data.isMap()) {
                     MapType map = data.asMap();
                     if (!map.getString("type").isEmpty()) {
@@ -4222,7 +4226,7 @@ public class TogetherClientNetwork {
         for (String string : list) {
             requestBuf.writeString(string);
         }
-        ClientPlayNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_REQUEST, (PacketByteBuf)requestBuf);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_ASSET_REQUEST, (PacketByteBuf)requestBuf);
     }
 
     private static int stringPacketBytes(String string) {

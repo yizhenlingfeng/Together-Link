@@ -106,9 +106,9 @@ implements ModInitializer {
             return true;
         }
 
-        if (player instanceof ServerPlayerEntity serverPlayer && serverPlayer.getServer() != null)
+        if (player instanceof ServerPlayerEntity serverPlayer && serverPlayer.getEntityWorld().getServer() != null)
         {
-            AssetLockManager.notifyLocked(serverPlayer.getServer(), serverPlayer, AssetLockType.MODEL_BLOCK);
+            AssetLockManager.notifyLocked(serverPlayer.getEntityWorld().getServer(), serverPlayer, AssetLockType.MODEL_BLOCK);
         }
 
         return false;
@@ -187,9 +187,9 @@ implements ModInitializer {
             return ActionResult.PASS;
         }
 
-        if (player instanceof ServerPlayerEntity serverPlayer && serverPlayer.getServer() != null)
+        if (player instanceof ServerPlayerEntity serverPlayer && serverPlayer.getEntityWorld().getServer() != null)
         {
-            AssetLockManager.notifyLocked(serverPlayer.getServer(), serverPlayer, AssetLockType.MODEL_BLOCK);
+            AssetLockManager.notifyLocked(serverPlayer.getEntityWorld().getServer(), serverPlayer, AssetLockType.MODEL_BLOCK);
         }
 
         return ActionResult.FAIL;

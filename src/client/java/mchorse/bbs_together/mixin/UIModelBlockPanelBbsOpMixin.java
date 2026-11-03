@@ -42,6 +42,12 @@ public class UIModelBlockPanelBbsOpMixin
     @Unique
     private UIModelBlockLockSection together$lockSection;
 
+    /** Last permission/lock snapshot the lock section refreshed against. */
+    @Unique
+    private int together$lastLevel = -1;
+    @Unique
+    private int together$lastLockCount = -1;
+
     @Shadow(remap = false)
     private ModelBlockEntity modelBlock;
 
@@ -112,6 +118,20 @@ public class UIModelBlockPanelBbsOpMixin
     private void together$veilEditingSide(UIContext context, CallbackInfo ci)
     {
         UIModelBlockPanel self = (UIModelBlockPanel) (Object) this;
+
+        /* Permission sync and lock sync can arrive while this panel is already open. Refreshing
+         * only from fill() would leave the lock section hidden until the user re-selects a
+         * block, which looks exactly like a missing button. This only runs on a snapshot
+         * change, so it does not relayout the panel every frame. */
+        int level = BbsOpClientState.getLevel();
+        int lockCount = AssetLockClient.all().size();
+
+        if (this.together$lockSection != null && (level != this.together$lastLevel || lockCount != this.together$lastLockCount))
+        {
+            this.together$lastLevel = level;
+            this.together$lastLockCount = lockCount;
+            this.together$lockSection.refresh();
+        }
 
         /* The pick button's callback dereferences this.modelBlock unconditionally; with fill
          * cancelled it is null, so the button must be dead or clicking it NPEs. This is a

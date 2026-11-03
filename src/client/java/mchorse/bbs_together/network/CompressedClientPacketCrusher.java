@@ -16,6 +16,12 @@ import java.util.function.Consumer;
 public class CompressedClientPacketCrusher extends ClientPacketCrusher
 {
     @Override
+    protected void sendBuffer(PlayerEntity entity, Identifier identifier, PacketByteBuf buf)
+    {
+        TogetherClientNetworking.send(identifier, buf);
+    }
+
+    @Override
     public void send(Collection<PlayerEntity> entities, Identifier identifier, byte[] bytes, Consumer<PacketByteBuf> consumer)
     {
         super.send(entities, identifier, PacketCompression.encode(bytes), consumer);

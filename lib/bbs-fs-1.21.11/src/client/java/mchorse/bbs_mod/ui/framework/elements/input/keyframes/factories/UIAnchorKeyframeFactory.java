@@ -1,0 +1,293 @@
+package mchorse.bbs_mod.ui.framework.elements.input.keyframes.factories;
+
+import mchorse.bbs_mod.BBSSettings;
+import mchorse.bbs_mod.film.AnchorRebase;
+import mchorse.bbs_mod.film.replays.Replay;
+import mchorse.bbs_mod.forms.FormUtilsClient;
+import mchorse.bbs_mod.forms.FormUtils;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
+import mchorse.bbs_mod.ui.utils.UI;
+import mchorse.bbs_mod.utils.StringUtils;
+import mchorse.bbs_mod.utils.Direction;
+import mchorse.bbs_mod.forms.entities.IEntity;
+import mchorse.bbs_mod.forms.forms.Form;
+import mchorse.bbs_mod.forms.forms.utils.Anchor;
+import mchorse.bbs_mod.l10n.keys.IKey;
+import mchorse.bbs_mod.settings.values.base.BaseValue;
+import mchorse.bbs_mod.ui.UIKeys;
+import mchorse.bbs_mod.ui.film.UIFilmPanel;
+import mchorse.bbs_mod.ui.film.controller.ReplayContextAction;
+import mchorse.bbs_mod.ui.film.replays.UIReplaysEditorUtils;
+import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIIconToggles;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIToggle;
+import mchorse.bbs_mod.ui.framework.elements.context.UISimpleContextMenu;
+import mchorse.bbs_mod.ui.framework.elements.input.UIPropTransform;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
+import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframes;
+import mchorse.bbs_mod.ui.utils.bones.UIBonePickerContextMenu;
+import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_mod.utils.colors.Colors;
+import mchorse.bbs_mod.utils.keyframes.Keyframe;
+import mchorse.bbs_mod.utils.pose.Transform;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+
+public class UIAnchorKeyframeFactory extends UIKeyframeFactory<Anchor>
+{
+    private UIButton actor;
+    private UIButton attachment;
+    private UIToggle keepTransform;
+    private UIIconToggles inherit;
+    public UIPropTransform transform;
+
+    /**
+     * Pick a replay by its stable id. The rows still show the replay's list position — that is
+     * how the animator counts actors — but what the choice hands back (and what the data stores)
+     * is the id, so the reference survives reordering.
+     */
+    public static void displayActors(UIContext context, Map<String, IEntity> entities, String value, Consumer<String> callback)
+    {
+        List<UIFilmPanel> children = context.menu.main.getChildren(UIFilmPanel.class);
+        UIFilmPanel panel = children.isEmpty() ? null : children.get(0);
+        List<Replay> replays = panel != null ? panel.getData().replays.getList() : List.of();
+
+        UISimpleContextMenu replayMenu = new UISimpleContextMenu();
+
+        replayMenu.actions.scroll.scrollItemSize = 30;
+
+        context.replaceContextMenu((menu) ->
+        {
+            menu.custom(replayMenu);
+            menu.autoKeys();
+            menu.action(Icons.CLOSE, UIKeys.GENERAL_NONE, Colors.NEGATIVE, () -> callback.accept(Anchor.NO_ATTACHMENT));
+
+            for (Replay replay : replays)
+            {
+                String actor = replay.getId();
+                IEntity entity = entities.get(actor);
+
+                if (entity == null)
+                {
+                    continue;
+                }
+
+                int color = actor.equals(value) ? BBSSettings.primaryColor(0) : 0;
+
+                menu.action(new ReplayContextAction(replay, IKey.raw(replay.getName()), () -> callback.accept(actor), color));
+            }
+        });
+    }
+
+    public static void displayAttachments(UIFilmPanel panel, String replayId, String value, Consumer<String> consumer)
+    {
+        IEntity entity = panel.getController().getEntities().get(replayId);
+
+        if (entity == null || entity.getForm() == null)
+        {
+            return;
+        }
+
+        Form form = entity.getForm();
+        Set<String> attachments = FormUtilsClient.getRenderer(form).collectMatrices(entity, 0F).keySet();
+
+        if (attachments.isEmpty())
+        {
+            return;
+        }
+
+        /* The picker groups attachments by their form (body part tree) instead of the
+         * old alphabetical strip that shuffled every part's bones together. */
+        UIBonePickerContextMenu picker = new UIBonePickerContextMenu(consumer);
+
+        picker.attachments(form, attachments).set(value);
+        panel.getContext().replaceContextMenu(picker);
+    }
+
+    public UIAnchorKeyframeFactory(Keyframe<Anchor> keyframe, UIKeyframes editor)
+    {
+        super(keyframe, editor);
+
+        this.actor = new UIButton(UIKeys.GENERIC_KEYFRAMES_ANCHOR_PICK_ACTOR, (b) -> this.displayActors());
+        this.attachment = new UIButton(UIKeys.GENERIC_KEYFRAMES_ANCHOR_PICK_ATTACHMENT, (b) ->
+        {
+            this.getPanel().getController().picker.cancelTargetPick();
+            displayAttachments(this.getPanel(), this.keyframe.getValue().replay, this.keyframe.getValue().attachment, this::setAttachment);
+        });
+        /* Which components of the target's frame the form rides, as one strip: the same three icons
+         * the gizmo and the body part editor use for the same three ideas. The anchor's flags are
+         * plain fields rather than values, so the cells are bound by getter and setter. */
+        this.keepTransform = new UIToggle(UIKeys.GENERIC_KEYFRAMES_ANCHOR_KEEP_TRANSFORM, BBSSettings.anchorKeepTransform.get(), (b) -> BBSSettings.anchorKeepTransform.set(b.getValue()));
+        this.keepTransform.tooltip(UIKeys.GENERIC_KEYFRAMES_ANCHOR_KEEP_TRANSFORM_TOOLTIP);
+        this.inherit = new UIIconToggles(null)
+            .add(Icons.ALL_DIRECTIONS, UIKeys.INHERIT_POSITION, () -> this.keyframe.getValue().inheritPosition, (v) -> this.retarget((anchor) -> anchor.inheritPosition = v))
+            .add(Icons.ORBIT, UIKeys.INHERIT_ROTATION, () -> this.keyframe.getValue().inheritRotation, (v) -> this.retarget((anchor) -> anchor.inheritRotation = v))
+            .add(Icons.SCALE, UIKeys.INHERIT_SCALE, () -> this.keyframe.getValue().inheritScale, (v) -> this.retarget((anchor) -> anchor.inheritScale = v));
+        this.transform = new UIAnchorTransforms(this);
+        this.transform.enableHotkeys();
+        this.transform.setTransform(keyframe.getValue().transform);
+
+        UIIcon pickActor = new UIIcon(Icons.EYEDROPPER, (b) -> this.pickTarget(b, false));
+        UIIcon pickAttachment = new UIIcon(Icons.EYEDROPPER, (b) -> this.pickTarget(b, true));
+
+        pickActor.wh(16, 16);
+        pickAttachment.wh(16, 16);
+        pickActor.highlight(() -> this.getPanel() != null && this.getPanel().getController().picker.isPickingTarget(pickActor), Direction.BOTTOM);
+        pickAttachment.highlight(() -> this.getPanel() != null && this.getPanel().getController().picker.isPickingTarget(pickAttachment), Direction.BOTTOM);
+        pickActor.tooltip(UIKeys.GENERIC_KEYFRAMES_ANCHOR_PICK_ACTOR);
+        pickAttachment.tooltip(UIKeys.GENERIC_KEYFRAMES_ANCHOR_PICK_ATTACHMENT);
+        this.scroll.add(UI.row(this.actor, pickActor), UI.row(this.attachment, pickAttachment), this.keepTransform, this.inherit.labelRow(UIKeys.INHERIT_TITLE), this.transform);
+    }
+
+    private void pickTarget(UIIcon owner, boolean bone)
+    {
+        UIFilmPanel panel = this.getPanel();
+        Replay replay = panel == null ? null : panel.replayEditor.getReplay();
+
+        if (replay == null)
+        {
+            return;
+        }
+
+        panel.getController().picker.toggleTargetPick(owner, replay.getId(), (actor, pair) ->
+        {
+            String attachment = bone ? StringUtils.combinePaths(FormUtils.getPath(pair.a), pair.b) : Anchor.NO_ATTACHMENT;
+
+            this.retarget((anchor) ->
+            {
+                anchor.replay = actor;
+                anchor.attachment = attachment;
+            });
+        });
+    }
+
+    private void displayActors()
+    {
+        UIFilmPanel panel = this.getPanel();
+
+        panel.getController().picker.cancelTargetPick();
+        displayActors(this.getContext(), panel.getController().getEntities(), this.keyframe.getValue().replay, this::setActor);
+    }
+
+    private void setActor(String actor)
+    {
+        this.retarget((anchor) -> anchor.replay = actor);
+    }
+
+    private void setAttachment(String attachment)
+    {
+        this.retarget((anchor) -> anchor.attachment = attachment);
+    }
+
+    /**
+     * Change what this anchor hangs off. Every such change goes through here so
+     * {@link BBSSettings#anchorKeepTransform} can compensate for it: the anchor's transform is
+     * rebased onto the new target ({@link AnchorRebase}) so the form stays where it is instead of
+     * being thrown into whichever frame the new target happens to sit in.
+     *
+     * <p>The rebase is measured on copies before the edit and written inside it, so the retarget
+     * and its compensation are one undo step — an undo that put back the target but kept the
+     * compensating transform would leave the form somewhere neither value ever meant.</p>
+     */
+    private void retarget(Consumer<Anchor> change)
+    {
+        Anchor from = this.keyframe.getValue().copy();
+        Anchor to = from.copy();
+
+        change.accept(to);
+
+        boolean rebased = BBSSettings.anchorKeepTransform.get() && this.rebase(from, to);
+
+        BaseValue.edit(this.keyframe, (keyframe) ->
+        {
+            Anchor anchor = keyframe.getValue();
+
+            change.accept(anchor);
+
+            if (rebased)
+            {
+                anchor.transform.copy(to.transform);
+            }
+        });
+
+        if (rebased)
+        {
+            /* The fields hold the same transform object the rebase wrote through, but they were
+             * filled from its old numbers. */
+            this.transform.setTransform(this.keyframe.getValue().transform);
+        }
+    }
+
+    /**
+     * Rebase against the replay this anchor belongs to. Only a root form's anchor is animatable
+     * (see {@code TrackCatalog}), so the edited keyframe is always the selected replay's own —
+     * and the entity is what carries the live pose everything is measured from, which is why
+     * there is nothing to compensate against when the replay isn't in the scene right now.
+     */
+    private boolean rebase(Anchor from, Anchor to)
+    {
+        UIFilmPanel panel = this.getPanel();
+        Replay replay = panel == null ? null : panel.replayEditor.getReplay();
+
+        if (replay == null)
+        {
+            return false;
+        }
+
+        Map<String, IEntity> entities = panel.getController().getEntities();
+
+        return AnchorRebase.keepWorldTransform(entities, entities.get(replay.getId()), replay, 0F, from, to);
+    }
+
+    private UIFilmPanel getPanel()
+    {
+        return this.getParent(UIFilmPanel.class);
+    }
+
+    public static class UIAnchorTransforms extends UIKeyframePropTransform
+    {
+        private final UIAnchorKeyframeFactory editor;
+
+        public UIAnchorTransforms(UIAnchorKeyframeFactory editor)
+        {
+            this.editor = editor;
+        }
+
+        @Override
+        protected UIKeyframes getKeyframes()
+        {
+            return this.editor.editor;
+        }
+
+        @Override
+        protected void applyToSelection(Consumer<Transform> consumer)
+        {
+            apply(this.editor.editor, this.editor.keyframe, consumer);
+        }
+
+        @Override
+        protected Transform getAutoKeyTransform(float tick)
+        {
+            UIKeyframeSheet sheet = this.editor.editor.getGraph().getSheet(this.editor.keyframe);
+            Keyframe<?> target = sheet == null ? null : sheet.ensureKeyframe(tick);
+
+            return target == null ? null : ((Anchor) target.getValue()).transform;
+        }
+
+        public static void apply(UIKeyframes editor, Keyframe<?> keyframe, Consumer<Transform> consumer)
+        {
+            UIReplaysEditorUtils.forEachSelectedKeyframe(editor, keyframe, (selected) ->
+            {
+                Anchor anchor = (Anchor) selected.getValue();
+
+                selected.preNotify();
+                consumer.accept(anchor.transform);
+                selected.postNotify();
+            });
+        }
+    }
+}

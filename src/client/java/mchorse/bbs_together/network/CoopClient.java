@@ -13,7 +13,6 @@ import mchorse.bbs_together.ui.UICoopRoomMenu;
 import mchorse.bbs_together.ui.commits.CommitUi;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
@@ -177,7 +176,7 @@ public final class CoopClient {
             buf.writeUuid(target);
         }
 
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_INVITE, buf);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_COOP_INVITE, buf);
     }
 
     public static void sendRespond(long sessionId, boolean accept) {
@@ -202,7 +201,7 @@ public final class CoopClient {
         buf.writeLong(sessionId);
         buf.writeInt(index);
 
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_PICK, buf);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_COOP_PICK, buf);
     }
 
     public static void sendLeave(long sessionId) {
@@ -214,7 +213,7 @@ public final class CoopClient {
 
         buf.writeLong(sessionId);
 
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_LEAVE, buf);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_COOP_LEAVE, buf);
     }
 
     public static void sendStart(long sessionId) {
@@ -226,7 +225,7 @@ public final class CoopClient {
 
         buf.writeLong(sessionId);
 
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_START, buf);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_COOP_START, buf);
     }
 
     public static void sendCancel(long sessionId) {
@@ -238,7 +237,7 @@ public final class CoopClient {
 
         buf.writeLong(sessionId);
 
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_CANCEL, buf);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_COOP_CANCEL, buf);
     }
 
     public static void sendMouseThrottled(long sessionId, float nx, float ny) {
@@ -256,7 +255,7 @@ public final class CoopClient {
         buf.writeFloat(nx);
         buf.writeFloat(ny);
 
-        ClientPlayNetworking.send(TogetherServerNetwork.SERVER_COOP_MOUSE, buf);
+        TogetherClientNetworking.send(TogetherServerNetwork.SERVER_COOP_MOUSE, buf);
     }
 
     /* =====================================================================================
@@ -647,7 +646,8 @@ public final class CoopClient {
         MinecraftClient mc = MinecraftClient.getInstance();
 
         if (mc.player != null) {
-            mc.player.sendMessage(Text.translatable(key), false);
+            /* Resolve through BBS L10n so this notice follows BBS' language switch. */
+            mc.player.sendMessage(Text.literal(mchorse.bbs_together.ui.CoopL10n.key(key).get()), false);
         }
     }
 }

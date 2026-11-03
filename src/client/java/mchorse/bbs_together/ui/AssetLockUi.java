@@ -125,8 +125,8 @@ public final class AssetLockUi
         }
 
         Map<UUID, String> initial = lock == null ? Collections.emptyMap() : lock.listFor(mode);
-        /* Picker labels live in the vanilla language table (assets/bbs_together/lang),
-         * not in BBS' strings table, so they must use CoopL10n. */
+        /* Picker labels live in BBS' strings table together with the rest of the
+         * addon, so they follow BBS' built-in language switch. */
         IKey title = CoopL10n.key(mode == AssetLockMode.WHITELIST
             ? "bbs_together.locks.picker.whitelist.title"
             : "bbs_together.locks.picker.blacklist.title");

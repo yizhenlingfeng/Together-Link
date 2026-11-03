@@ -1,5 +1,9 @@
 package mchorse.bbs_together;
 
+import mchorse.bbs_together.compat.CommandCompat;
+
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -49,12 +53,12 @@ public class TogetherCommands {
             }
             return players.size();
         });
-        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("record").then(target)));
+        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> CommandCompat.hasPermission(src, 2))).then(CommandManager.literal("record").then(target)));
 
         /* /bbstogether restore <model> — clear a persistent delete tombstone so a model
          * may be uploaded again. The deleted files themselves are not recreated. */
         dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether")
-            .requires(src -> src.hasPermissionLevel(2) || (src.getPlayer() != null && BbsOpManager.canManage(src.getPlayer()))))
+            .requires(src -> CommandCompat.hasPermission(src, 2) || (src.getPlayer() != null && BbsOpManager.canManage(src.getPlayer()))))
             .then(CommandManager.literal("restore").then(CommandManager.argument("model", StringArgumentType.greedyString()).executes(ctx -> {
                 String modelId = StringArgumentType.getString(ctx, "model");
                 ServerCommandSource source = ctx.getSource();
@@ -70,7 +74,7 @@ public class TogetherCommands {
             }))));
 
         /* E1: /bbstogether diag — where the asset bytes are going right now. */
-        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> src.hasPermissionLevel(2))).then(CommandManager.literal("diag").executes(ctx -> {
+        dispatcher.register(((LiteralArgumentBuilder<ServerCommandSource>)CommandManager.literal("bbstogether").requires(src -> CommandCompat.hasPermission(src, 2))).then(CommandManager.literal("diag").executes(ctx -> {
             for (Text line : TogetherServerNetwork.diagLines(ctx.getSource().getServer())) {
                 ctx.getSource().sendFeedback(() -> line, false);
             }
@@ -85,7 +89,7 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             for (ServerPlayerEntity player : players) {
                 int level = BbsOpManager.get(player.getUuid());
-                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.query", player.getGameProfile().getName(), level), false);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.query", PlayerCompat.name(player.getGameProfile()), level), false);
             }
             return players.size();
         });
@@ -96,8 +100,8 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             for (ServerPlayerEntity player : players) {
                 BbsOpManager.set(player.getUuid(), level);
-                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.set", player.getGameProfile().getName(), level), false);
-                System.out.println("[BBSTogether] " + source.getName() + " set " + player.getGameProfile().getName() + " BBS op level to " + level);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.set", PlayerCompat.name(player.getGameProfile()), level), false);
+                System.out.println("[BBSTogether] " + source.getName() + " set " + PlayerCompat.name(player.getGameProfile()) + " BBS op level to " + level);
             }
             /* Push immediately so every online client refreshes its UI lock state. */
             BbsOpManager.syncToAll(source.getServer());
@@ -126,7 +130,7 @@ public class TogetherCommands {
             }
             for (ServerPlayerEntity player : players) {
                 BbsOpManager.setGrant(player.getUuid(), domain, allowed);
-                source.sendFeedback(() -> Text.translatable(allowed ? "bbs_together.command.bbsop.granted" : "bbs_together.command.bbsop.denied", domain.id, player.getGameProfile().getName()), false);
+                source.sendFeedback(() -> Text.translatable(allowed ? "bbs_together.command.bbsop.granted" : "bbs_together.command.bbsop.denied", domain.id, PlayerCompat.name(player.getGameProfile())), false);
             }
             BbsOpManager.syncToAll(source.getServer());
             return players.size();
@@ -135,7 +139,7 @@ public class TogetherCommands {
             ServerCommandSource source = ctx.getSource();
             for (ServerPlayerEntity player : players) {
                 BbsOpManager.resetGrants(player.getUuid());
-                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.reset", player.getGameProfile().getName()), false);
+                source.sendFeedback(() -> Text.translatable("bbs_together.command.bbsop.reset", PlayerCompat.name(player.getGameProfile())), false);
             }
             BbsOpManager.syncToAll(source.getServer());
             return players.size();
@@ -152,7 +156,7 @@ public class TogetherCommands {
         if (!source.isExecutedByPlayer()) {
             return true;
         }
-        if (source.hasPermissionLevel(2)) {
+        if (CommandCompat.hasPermission(source, 2)) {
             return true;
         }
         ServerPlayerEntity player = source.getPlayer();

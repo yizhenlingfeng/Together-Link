@@ -13,10 +13,12 @@ import mchorse.bbs_together.values.ValueKeyframeInterpolation;
 import mchorse.bbs_together.values.ValueKeyframeShape;
 
 public class TogetherSettings {
-    /** B1: default shared server egress budget, KiB/s (2 MiB/s ~= 16 Mbps). */
+    /** B1: shared server egress budget, KiB/s; 0 = unlimited (2048 ~= 2 MiB/s). */
     public static final int DEFAULT_ASSET_EGRESS_KBPS = 0;
-    /** B1: default per-client upload budget, KiB/s (1 MiB/s ~= 8 Mbps). */
+    /** B1: per-client upload budget, KiB/s; 0 = unlimited (1024 ~= 1 MiB/s). */
     public static final int DEFAULT_ASSET_UPLOAD_KBPS = 0;
+    /** P5: shared server ingress budget, KiB/s; 0 = unlimited. */
+    public static final int DEFAULT_ASSET_INGRESS_KBPS = 0;
     public static ValueString cdnUrl;
     public static ValueString cdnToken;
     public static ValueBoolean assetSyncDownload;
@@ -34,6 +36,8 @@ public class TogetherSettings {
     public static ValueInt assetEgressKbps;
     /** B1: this client's upload bandwidth budget in KiB/s (0 = unlimited, old behaviour). */
     public static ValueInt assetUploadKbps;
+    /** P5: total server-side asset ingress budget in KiB/s (0 = unlimited). */
+    public static ValueInt assetIngressKbps;
     /** Files above this size are hidden from the asset manifest (0 = advertise everything). */
     public static ValueInt assetSyncMaxMb;
     public static ValueKeyframeShape defaultKeyframeShape;
@@ -74,7 +78,10 @@ public class TogetherSettings {
          * makes the game time out, and a fixed sleep between batches never actually capped the
          * rate. 4 MiB/s is a fast home uplink; 0 disables the cap. */
         assetUploadKbps = settingsBuilder.getInt("asset_upload_kbps", DEFAULT_ASSET_UPLOAD_KBPS, 0, 1048576);
-        /* The single asset size ceiling, replacing the old download-only "下载资产大小上限".
+        /* P5: server-side backstop for uploads. Client-side asset_upload_kbps is cooperative only;
+         * this shared budget is enforced in the server's asset write worker. 0 = unlimited. */
+        assetIngressKbps = settingsBuilder.getInt("asset_ingress_kbps", DEFAULT_ASSET_INGRESS_KBPS, 0, 1048576);
+        /* The single asset size ceiling, replacing the old download-only "download asset size limit".
          * Server side it keeps oversized files out of the manifest, so nobody downloads them in
          * the background and the initial sync stays small (one 700 MB screen recording used to
          * be pushed to every player on join and got them dropped by the read timeout). Client
@@ -115,6 +122,12 @@ public class TogetherSettings {
     public static int getAssetUploadKbps()
     {
         return assetUploadKbps == null ? DEFAULT_ASSET_UPLOAD_KBPS : Math.max(0, (Integer) assetUploadKbps.get());
+    }
+
+    /** P5: server-side asset ingress budget in KiB/s; 0 means unlimited. */
+    public static int getAssetIngressKbps()
+    {
+        return assetIngressKbps == null ? DEFAULT_ASSET_INGRESS_KBPS : Math.max(0, (Integer) assetIngressKbps.get());
     }
 
     /** Server-side sync size ceiling in MiB; files above it are never advertised. 0 = no ceiling. */

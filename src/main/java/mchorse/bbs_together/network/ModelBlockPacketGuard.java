@@ -1,5 +1,7 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_together.compat.NbtCompat;
+
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.nbt.NbtCompound;
 
@@ -23,7 +25,7 @@ public final class ModelBlockPacketGuard {
 
     public static int nbtSize(BlockEntity entity) {
         try {
-            NbtCompound nbt = entity.toInitialChunkDataNbt();
+            NbtCompound nbt = NbtCompat.toInitialChunkDataNbt(entity);
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
 

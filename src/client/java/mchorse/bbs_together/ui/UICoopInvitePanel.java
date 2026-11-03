@@ -1,5 +1,7 @@
 package mchorse.bbs_together.ui;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.l10n.L10n;
@@ -143,8 +145,8 @@ public class UICoopInvitePanel extends UIOverlayPanel
             {
                 for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList())
                 {
-                    UUID id = entry.getProfile() == null ? null : entry.getProfile().getId();
-                    String name = entry.getProfile() == null ? null : entry.getProfile().getName();
+                    UUID id = entry.getProfile() == null ? null : PlayerCompat.id(entry.getProfile());
+                    String name = entry.getProfile() == null ? null : PlayerCompat.name(entry.getProfile());
 
                     if (id == null || name == null || name.isEmpty() || id.equals(self))
                     {

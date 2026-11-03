@@ -1,5 +1,7 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
@@ -11,7 +13,6 @@ import mchorse.bbs_together.behaviors.BehaviorLogManager;
 import mchorse.bbs_together.behaviors.BehaviorType;
 import mchorse.bbs_together.commits.FilmBranchStore;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -313,11 +314,11 @@ public final class CoopSessionManager {
 
         session.replayCount = replayCount;
         session.branch = branch;
-        session.members.put(hostId, new Member(hostId, host.getGameProfile().getName()));
+        session.members.put(hostId, new Member(hostId, PlayerCompat.name(host.getGameProfile())));
         session.deadline = System.currentTimeMillis() + inviteDurationMs();
 
         for (ServerPlayerEntity player : targetPlayers) {
-            session.invited.put(player.getUuid(), new Member(player.getUuid(), player.getGameProfile().getName()));
+            session.invited.put(player.getUuid(), new Member(player.getUuid(), PlayerCompat.name(player.getGameProfile())));
         }
 
         sessions.put(session.id, session);
@@ -328,7 +329,7 @@ public final class CoopSessionManager {
             membership.put(target, session.id);
         }
 
-        System.out.println("[BBSTogether] Coop session " + session.id + " created by " + host.getGameProfile().getName()
+        System.out.println("[BBSTogether] Coop session " + session.id + " created by " + PlayerCompat.name(host.getGameProfile())
             + " for film " + filmId + " with " + targets.size() + " invitee(s)");
 
         for (ServerPlayerEntity player : targetPlayers) {
@@ -336,14 +337,14 @@ public final class CoopSessionManager {
 
             out.writeLong(session.id);
             out.writeUuid(hostId);
-            out.writeString(host.getGameProfile().getName(), 256);
+            out.writeString(PlayerCompat.name(host.getGameProfile()), 256);
             out.writeString(filmId, 256);
             out.writeLong(session.deadline - System.currentTimeMillis());
             /* The host's branch travels along so the invitee can upload its full film before
              * accepting when the two are on different branches (see CoopClient). */
             out.writeString(session.branch == null ? "" : session.branch, 256);
 
-            ServerPlayNetworking.send(player, TogetherServerNetwork.CLIENT_COOP_REQUEST, out);
+            TogetherServerNetworking.send(player, TogetherServerNetwork.CLIENT_COOP_REQUEST, out);
         }
     }
 
@@ -378,7 +379,7 @@ public final class CoopSessionManager {
                 ServerPlayerEntity hostPlayer = server.getPlayerManager().getPlayer(session.host);
 
                 if (hostPlayer != null) {
-                    hostPlayer.sendMessage(Text.translatable("bbs_together.coop.notify.host_branch_failed", player.getGameProfile().getName()).formatted(Formatting.YELLOW), false);
+                    hostPlayer.sendMessage(Text.translatable("bbs_together.coop.notify.host_branch_failed", PlayerCompat.name(player.getGameProfile())).formatted(Formatting.YELLOW), false);
                 }
 
                 if (session.invited.isEmpty() && session.members.size() <= 1) {
@@ -512,7 +513,7 @@ public final class CoopSessionManager {
                 out.writeString(session.filmId, 256);
                 out.writeInt(member.pick);
 
-                ServerPlayNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_BEGIN, out);
+                TogetherServerNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_BEGIN, out);
             }
         }
 
@@ -557,7 +558,7 @@ public final class CoopSessionManager {
                 out.writeFloat(nx);
                 out.writeFloat(ny);
 
-                ServerPlayNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_MOUSE, out);
+                TogetherServerNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_MOUSE, out);
             }
         }
     }
@@ -763,7 +764,7 @@ public final class CoopSessionManager {
                 out.writeLong(session.id);
                 out.writeByte((byte) reason);
 
-                ServerPlayNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_END, out);
+                TogetherServerNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_END, out);
             }
         }
 
@@ -810,14 +811,14 @@ public final class CoopSessionManager {
                 out.writeInt(member.pick);
             }
 
-            ServerPlayNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_ROOM, out);
+            TogetherServerNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_ROOM, out);
         }
     }
 
     private static String nameOf(MinecraftServer server, UUID uuid) {
         ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
 
-        return player != null ? player.getGameProfile().getName() : uuid.toString();
+        return player != null ? PlayerCompat.name(player.getGameProfile()) : uuid.toString();
     }
 
     private static void sendChat(ServerPlayerEntity player, String langKey) {

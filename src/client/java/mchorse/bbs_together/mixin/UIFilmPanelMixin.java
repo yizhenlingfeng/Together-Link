@@ -1,5 +1,7 @@
 package mchorse.bbs_together.mixin;
 
+import mchorse.bbs_together.compat.ClientCompat;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -163,7 +165,7 @@ public class UIFilmPanelMixin {
         if (self.getData() == null) {
             return;
         }
-        float frameDelta = MinecraftClient.getInstance().getLastFrameDuration();
+        float frameDelta = ClientCompat.frameDelta(MinecraftClient.getInstance());
         for (TogetherClientNetwork.CursorPosition pos : TogetherClientNetwork.playerCursors.values()) {
             pos.interpolate(frameDelta);
         }

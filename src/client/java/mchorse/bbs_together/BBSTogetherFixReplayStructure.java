@@ -1,5 +1,9 @@
 package mchorse.bbs_together;
 
+import mchorse.bbs_together.network.TogetherClientNetworking;
+
+import mchorse.bbs_together.network.TogetherServerNetworking;
+
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -17,7 +21,6 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.network.ClientPacketCrusher;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
-import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.ui.ContentType;
 import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
@@ -26,8 +29,6 @@ import mchorse.bbs_together.BBSTogetherFix22;
 import mchorse.bbs_together.BBSTogetherFix45;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.network.TogetherServerNetwork;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
@@ -36,8 +37,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.MinecraftServer;
 
 public final class BBSTogetherFixReplayStructure {
-    private static final Identifier SERVER_REPLAY_STRUCTURE = new Identifier("bbs_together", "s_replay_structure_fix1615");
-    private static final Identifier CLIENT_REPLAY_STRUCTURE = new Identifier("bbs_together", "c_replay_structure_fix1615");
+    private static final Identifier SERVER_REPLAY_STRUCTURE = Identifier.of("bbs_together", "s_replay_structure_fix1615");
+    private static final Identifier CLIENT_REPLAY_STRUCTURE = Identifier.of("bbs_together", "c_replay_structure_fix1615");
     private static final ClientPacketCrusher CLIENT_CRUSHER = new ClientPacketCrusher();
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> SERVER_SENDERS = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> SERVER_RECEIVERS = new ConcurrentHashMap();
@@ -81,7 +82,7 @@ public final class BBSTogetherFixReplayStructure {
             return;
         }
         clientRegistered = true;
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)CLIENT_REPLAY_STRUCTURE, (class_3102, class_6342, class_25403, packetSender) -> CLIENT_RECEIVER.receive(class_25403, (byArray, class_25402) -> {
+        TogetherClientNetworking.register((Identifier)CLIENT_REPLAY_STRUCTURE, (class_3102, class_6342, class_25403, packetSender) -> CLIENT_RECEIVER.receive(class_25403, (byArray, class_25402) -> {
             UUID uUID = class_25402.readUuid();
             Metadata metadata = BBSTogetherFixReplayStructure.readMetadata(class_25402);
             BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
@@ -94,7 +95,7 @@ public final class BBSTogetherFixReplayStructure {
             return;
         }
         serverRegistered = true;
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REPLAY_STRUCTURE, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
+        TogetherServerNetworking.register((Identifier)SERVER_REPLAY_STRUCTURE, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             ServerPacketCrusher serverPacketCrusher = SERVER_RECEIVERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 Metadata metadata = BBSTogetherFixReplayStructure.readMetadata(class_25402);

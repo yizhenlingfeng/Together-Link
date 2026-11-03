@@ -19,12 +19,14 @@ import java.util.Map;
  */
 public class SafeServerPacketCrusher extends ServerPacketCrusher {
     public static final int MAX_CHUNKS = 8192;
-    public static final int MAX_OPEN_TRANSFERS = 64;
+    public static final int MAX_OPEN_TRANSFERS = 32;
+    public static final long MAX_TOTAL_BYTES = 64L * 1024L * 1024L;
     public static final long TRANSFER_TIMEOUT_MS = 60_000L;
-    private static final int INITIAL_BUFFER_CAP = 4 * 1024 * 1024;
+    private static final int INITIAL_BUFFER_CAP = 1024 * 1024;
 
     private final Map<Integer, ByteArrayOutputStream> safeChunks = new LinkedHashMap<>();
     private final Map<Integer, Long> safeTouched = new LinkedHashMap<>();
+    private final Map<Integer, Long> safeBytes = new LinkedHashMap<>();
 
     @Override
     public synchronized void receive(PacketByteBuf buf, IBufferReceiver receiver) {
@@ -50,24 +52,33 @@ public class SafeServerPacketCrusher extends ServerPacketCrusher {
         if (chunks == null) {
             if (this.safeChunks.size() >= MAX_OPEN_TRANSFERS) {
                 Integer oldest = this.safeTouched.keySet().iterator().next();
-                this.safeChunks.remove(oldest);
-                this.safeTouched.remove(oldest);
+                this.discard(oldest);
             }
 
             int initial = (int) Math.min((long) total * PacketCrusher.BUFFER_SIZE, INITIAL_BUFFER_CAP);
             chunks = new ByteArrayOutputStream(initial);
             this.safeChunks.put(id, chunks);
+            this.safeBytes.put(id, 0L);
+        }
+
+        long received = this.safeBytes.getOrDefault(id, 0L);
+
+        if (received + size > MAX_TOTAL_BYTES) {
+            this.discard(id);
+            return;
         }
 
         byte[] bytes = new byte[size];
         buf.readBytes(bytes);
         chunks.writeBytes(bytes);
         this.safeTouched.put(id, now);
+        this.safeBytes.put(id, received + size);
 
         if (index == total - 1) {
             byte[] finalBytes = chunks.toByteArray();
             this.safeChunks.remove(id);
             this.safeTouched.remove(id);
+            this.safeBytes.remove(id);
 
             if (finalBytes.length == 1 && finalBytes[0] == 69) {
                 finalBytes = null;
@@ -75,6 +86,12 @@ public class SafeServerPacketCrusher extends ServerPacketCrusher {
 
             receiver.receiveBuffer(finalBytes, buf);
         }
+    }
+
+    private void discard(int id) {
+        this.safeChunks.remove(id);
+        this.safeTouched.remove(id);
+        this.safeBytes.remove(id);
     }
 
     private void expire(long now) {
@@ -85,6 +102,7 @@ public class SafeServerPacketCrusher extends ServerPacketCrusher {
 
             if (now - entry.getValue() > TRANSFER_TIMEOUT_MS) {
                 this.safeChunks.remove(entry.getKey());
+                this.safeBytes.remove(entry.getKey());
                 iterator.remove();
             }
         }
@@ -95,5 +113,6 @@ public class SafeServerPacketCrusher extends ServerPacketCrusher {
         super.reset();
         this.safeChunks.clear();
         this.safeTouched.clear();
+        this.safeBytes.clear();
     }
 }

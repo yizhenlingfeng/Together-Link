@@ -2,21 +2,18 @@
 
 **English** | [简体中文](README.md)
 
-Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension for [BBS FS](https://modrinth.com/mod/bbs-mod), available for Minecraft 1.20.1–1.20.4 on Fabric. While retaining BBS's original editing experience, it adds real-time multiplayer collaboration, film version history, server-side permissions and asset locks, asset synchronization, and server auditing.
+Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension for [BBS FS](https://modrinth.com/mod/bbs-mod). The primary release supports Minecraft 1.20.1–1.20.4 on Fabric, with an experimental Minecraft 1.21.11 compatibility build. While retaining BBS's original editing experience, it adds real-time multiplayer collaboration, film version history, server-side permissions and asset locks, asset synchronization, and server auditing.
 
-> A single build supports both Minecraft 1.20.1 and 1.20.4; no per-version installation is required.
+> Minecraft 1.20.1–1.20.4 share one universal build; Minecraft 1.21.11 uses a separate build. Do not mix them.
 
 ## Version and requirements
 
-| Item | Requirement |
-|---|---|
-| Current version | 2.0.1 |
-| Minecraft | 1.20.1 – 1.20.4 (single build) |
-| BBS FS | >= 2.6 (2.7 recommended) |
-| Fabric Loader | >= 0.15.6 |
-| Fabric API | Required |
-| Java | 17+ (compiled for 17) |
-| License | MIT |
+| Build | Minecraft | Java | Fabric Loader | BBS FS | Status |
+|---|---|---|---|---|---|
+| Universal | 1.20.1 – 1.20.4 | 17+ | >= 0.15.6 | >= 2.6 (2.7 recommended) | Primary |
+| 1.21.11 compatibility | 1.21.11 | 21+ | >= 0.19.3 | 2.7-1.21.11 | Experimental |
+
+Current version: **2.0.3**. Fabric API is required; licensed under MIT.
 
 ## Feature overview
 
@@ -110,12 +107,14 @@ Feature domains: `morph`, `film`, `record`, `model_blocks`, `particles`, `model_
 | Step | Action |
 |---|---|
 | 1 | Install Minecraft 1.20.1 or 1.20.4, Fabric Loader, Fabric API, and the matching BBS FS version |
-| 2 | Put `together-link-2.0.1-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
+| 2 | Put `together-link-2.0.3-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
 | 3 | Start the server, then run `/bbsop <player> 2` from the console or as OP to set up an admin |
 | 4 | Connect all clients to the same server; client and server must run the same version |
 | 5 | Open the BBS dashboard to start collaborating |
 
 > Updating only the client has no effect: asset paths, permissions, CAS, tombstones, co-op recording locks, and other server-side checks all run on the server.
+>
+> The 1.21.11 compatibility build is installed the same way, but requires `together-link-2.0.3-1.21.11.jar` and BBS `2.7-1.21.11`. The 1.20.x and 1.21.11 builds are not interchangeable.
 
 ## Configuration
 
@@ -131,8 +130,9 @@ Config file: `config/bbs/settings/bbs_together.json`.
 | `cdn.progress_bar_always` | off | Show a small status dot while idle |
 | `server.auto_sync` | off | Watch for asset changes automatically |
 | `server.asset_sync_max_mb` | 256 | Per-file size ceiling; 0 = unlimited |
-| `server.asset_upload_kbps` | 1024 | Upload rate limit; 0 = unlimited |
-| `server.asset_egress_kbps` | 2048 | Server total egress limit; 0 = unlimited |
+| `server.asset_upload_kbps` | 0 | Client upload rate limit; 0 = unlimited |
+| `server.asset_egress_kbps` | 0 | Server total egress limit; 0 = unlimited |
+| `server.asset_ingress_kbps` | 0 | Server total ingress limit; 0 = unlimited |
 | `behaviors.behavior_log_limit` | 1000 | Maximum number of behavior log entries |
 | `coop.coop_invite_seconds` | 60 | Co-op recording invite lifetime (seconds) |
 
@@ -153,11 +153,25 @@ Config file: `config/bbs/settings/bbs_together.json`.
 | Command | Description |
 |---|---|
 | `.\gradlew.bat build` | Build the universal artifact (1.20.1 / 1.20.4) |
-| `build/libs/together-link-2.0.1-1.20.1-1.20.4.jar` | Build artifact (the only release artifact) |
+| `build/libs/together-link-2.0.3-1.20.1-1.20.4.jar` | Primary release artifact |
 | `.\gradlew.bat build "-Pmcver=1.20.4"` | Compile/run verification for 1.20.4 only; the artifact has a `-verify` suffix and is not released |
+| `.\gradlew.bat build12111` | Build the experimental 1.21.11 compatibility artifact (separate release) |
+| `.\gradlew.bat runClient12111` | Start the 1.21.11 dev client (`run-1.21.11-client/`) |
+| `.\gradlew.bat runClient12111B` | Start a second 1.21.11 dev client (`run-1.21.11-client-b/`) |
+| `.\gradlew.bat runServer12111` | Start the 1.21.11 dev server (`run-1.21.11-server/`) |
 | `dist/` | Release copies |
 
 Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapshot versions.
+
+`runClient12111` and `runClient12111B` can join a server on launch with `-PjoinServer=127.0.0.1:25565`:
+
+```powershell
+.\gradlew.bat runServer12111 --console=plain
+.\gradlew.bat runClient12111  '-PjoinServer=127.0.0.1:25565'
+.\gradlew.bat runClient12111B '-PjoinServer=127.0.0.1:25565'
+```
+
+> **1.21.11 compatibility build (experimental):** This is a separate artifact from the 1.20.x primary release. It reuses the common 1.20 sources and adapts networking, rendering, and Mixin APIs through the thin `src/main/java-1.21.11` and `src/client/java-1.21.11` overlays. Compilation, dedicated-server join, two-client join, a 9 MB asset transfer, and ingress/egress limiting have been verified; 30-minute sessions, sustained synchronization, and lock contention have not been stress-tested, and world saves are not guaranteed to interoperate with 1.20.x. Before building, publish BBS `2.7-1.21.11` from `lib/bbs-fs-1.21.11` to mavenLocal. Test record: [1.21.11 test record](docs/12111-p5-checkpoint.md).
 
 ## Project structure
 
@@ -174,6 +188,38 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 | `src/client/resources/bbs-together.client.mixins.json` | Client mixin config |
 
 ## Changelog
+
+### v2.0.3
+
+#### Added
+
+- Added an experimental Minecraft 1.21.11 compatibility build: separate artifact, Java 21, Fabric Loader >= 0.19.3, and BBS 2.7-1.21.11. The 1.20.x universal build is unchanged.
+- Added a dedicated server and a second 1.21.11 dev client entry (`runClient12111B` / `run-1.21.11-client-b/`); both clients support auto-join with `-PjoinServer`.
+- Adapted 1.21.11 CustomPayload networking, `Identifier.of`, render states, and Mixin overlays; restored the model-block lock badge, player hiding, keyframe highlighting, and player face rendering.
+- Added startup payload pre-registration and a 64 MB total chunked-transfer cap to reduce first-packet loss and excessive chunk accumulation.
+- Added structured transfer logs and metrics (egress/ingress bytes, completed/failed counts, average throughput, rate-limit waits) and a `server.asset_ingress_kbps` server-wide ingress limit.
+
+#### Fixed
+
+- Fixed the missing `mixins` declaration in the 1.21.11 `fabric.mod.json`, which prevented every 1.21.11 Mixin from loading and left UI features such as the lock panel unavailable.
+- Fixed the model-block lock section not refreshing when permissions or asset locks changed while the panel was already open.
+- Fixed 1.21.11 compatibility issues in networking, rendering, player hiding, keyframe highlighting, and skin faces.
+- Corrected version numbers, build commands, and the 1.21.11 support scope in the README.
+
+#### Verification
+
+- All three targets build successfully: 1.20.1, 1.20.4, and 1.21.11.
+- 1.21.11 was verified with a dedicated-server join, two simultaneous clients, a 9 MB asset transfer, a 1024 KiB/s ingress limit, and the 1.20.4 join/reconnect regression.
+
+#### Compatibility
+
+- Minecraft 1.20.1–1.20.4 continue to use one universal build; 1.21.11 uses a separate build, and client/server must run the same Minecraft version and Together build.
+- The network protocol remains version 3; 1.20.x and 1.21.11 world saves are not guaranteed to interoperate.
+
+#### Known limitations
+
+- The 1.21.11 build still needs 30-minute sessions, sustained asset synchronization, and lock-contention stress tests; some visual items need re-validation.
+- The 1.21.11 build requires BBS 2.7-1.21.11, which must be published from `lib/bbs-fs-1.21.11` to mavenLocal before building.
 
 ### v2.0.2
 
@@ -211,11 +257,6 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Fixed a client crash while the film and replay lists drew collaborator faces (a missing skin is no longer requested from the texture manager as a null texture).
 - Fixed invited players being told the film was missing locally, which stopped them from recording replays; the session's branch film is now sent before recording starts.
 - Removed the legacy refmap file; Loom now remaps Mixin annotations directly during `remapJar`.
-
-#### Compatibility
-
-- Minecraft 1.20.4 requires BBS `2.7-1.20.4`; the public `2.3.3` release does not satisfy the `>=2.6` dependency.
-- Client and server must run the same Minecraft version.
 
 ### v2.0
 

@@ -1,0 +1,521 @@
+package mchorse.bbs_mod.ui.dashboard.textures.data;
+
+import mchorse.bbs_mod.data.IMapSerializable;
+import mchorse.bbs_mod.data.storage.DataFileStorage;
+import mchorse.bbs_mod.data.storage.DataGzipStorage;
+import mchorse.bbs_mod.data.types.BaseType;
+import mchorse.bbs_mod.data.types.IntArrayType;
+import mchorse.bbs_mod.data.types.ListType;
+import mchorse.bbs_mod.data.types.MapType;
+import mchorse.bbs_mod.resources.Link;
+import mchorse.bbs_mod.ui.UIKeys;
+import mchorse.bbs_mod.ui.dashboard.textures.UITextureEditor;
+import mchorse.bbs_mod.utils.MathUtils;
+import mchorse.bbs_mod.utils.colors.Color;
+import mchorse.bbs_mod.utils.resources.Pixels;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Editable texture document: the model the texture painter edits and persists.
+ *
+ * <p>It owns the layer stack (CPU {@link Pixels} plus their GPU {@link mchorse.bbs_mod.graphics.texture.Texture}
+ * via {@link TextureLayer}), the active layer index and the canvas size. {@link UITextureEditor}
+ * operates on a {@code Document} instead of holding the layers itself.</p>
+ *
+ * <p>A document is persisted next to its texture as {@code NAME_INCLUDING_EXTENSION.dat} (e.g.
+ * {@code skin.png.dat}) through the BBS {@link mchorse.bbs_mod.data data library}: layer pixels are
+ * stored as ARGB {@link IntArrayType} arrays, the rest as plain map entries. When a texture is
+ * opened and no {@code .dat} exists, a single-layer document is built from the texture's pixels.</p>
+ */
+public class Document implements IMapSerializable
+{
+    /** Runtime association with the texture file; not serialized (it is implied by the .dat location). */
+    public Link link;
+
+    public final List<TextureLayer> layers = new ArrayList<>();
+    public int activeLayerIndex = -1;
+    public int width;
+    public int height;
+
+    /**
+     * The animation the game reads from the {@code .mcmeta} sidecar; {@code null} when the texture
+     * isn't animated. Runtime only — it is never written into the {@code .dat} project: the
+     * {@code .mcmeta} is the one place it lives (see {@link TextureAnimation}).
+     */
+    public TextureAnimation animation;
+
+    /** The user turned the animation off, so saving removes the {@code .mcmeta} that is on disk. */
+    public boolean removeAnimationOnSave;
+
+    /** Grows with every change the canvas reports, so caches (the model preview's frames) know when to rebuild. */
+    public int revision;
+
+    /** Extension of the project sidecar, appended to the texture's full name ({@code skin.png} -> {@code skin.png.dat}). */
+    public static final String EXTENSION = ".dat";
+
+    /** The {@code .dat} sidecar file for a given texture file (e.g. {@code skin.png} -> {@code skin.png.dat}). */
+    public static File datFile(File textureFile)
+    {
+        return new File(textureFile.getParentFile(), textureFile.getName() + EXTENSION);
+    }
+
+    /** Deserialize a document from its {@code .dat} sidecar, or {@code null} when it can't be read. */
+    public static Document read(Link link, File file)
+    {
+        try
+        {
+            BaseType data = new DataGzipStorage(new DataFileStorage(file)).read();
+
+            if (data instanceof MapType map)
+            {
+                Document document = new Document(link);
+
+                document.fromData(map);
+
+                return document.layers.isEmpty() ? null : document;
+            }
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    /** Build a fresh single-layer document from a texture's pixels (used when no {@code .dat} exists). */
+    public static Document fromPixels(Link link, Pixels pixels)
+    {
+        Document document = new Document(link);
+
+        document.width = pixels.width;
+        document.height = pixels.height;
+        document.layers.add(new TextureLayer(UIKeys.TEXTURES_LAYERS_DEFAULT_NAME.format("1").get(), pixels));
+        document.activeLayerIndex = 0;
+
+        return document;
+    }
+
+    public Document()
+    {}
+
+    public Document(Link link)
+    {
+        this.link = link;
+    }
+
+    public TextureLayer getActiveLayer()
+    {
+        return this.activeLayerIndex >= 0 && this.activeLayerIndex < this.layers.size()
+            ? this.layers.get(this.activeLayerIndex)
+            : null;
+    }
+
+    /* The strip: an animated document is a stack of same-sized images the frames point at */
+
+    /** Width of one image — the whole document when it isn't animated. */
+    public int frameWidth()
+    {
+        return this.animation == null ? this.width : this.animation.frameWidth(this.width, this.height);
+    }
+
+    /** Height of one image — the whole document when it isn't animated. */
+    public int frameHeight()
+    {
+        return this.animation == null ? this.height : this.animation.frameHeight(this.width, this.height);
+    }
+
+    /** How many images the strip holds, top to bottom. */
+    public int imageCount()
+    {
+        return this.animation == null ? 1 : this.animation.imageCount(this.width, this.height);
+    }
+
+    /*
+     * The images of the strip: an image is the same band of rows in every layer, so a frame is a
+     * stack of layer slices. Rows are counted in the buffers, which is why the offsets are baked
+     * first (see bakeOffsets).
+     */
+
+    /**
+     * Bake every layer's move offset into its pixels, so the rows of the strip are the rows of the
+     * buffers. Done before any operation on images: a shifted layer would otherwise keep its image
+     * at other rows than the strip's.
+     */
+    public void bakeOffsets()
+    {
+        for (TextureLayer layer : this.layers)
+        {
+            if (layer.pixels == null || (layer.offsetX == 0 && layer.offsetY == 0))
+            {
+                continue;
+            }
+
+            Pixels baked = Pixels.fromSize(this.width, this.height);
+
+            copyRect(layer.pixels, 0, 0, baked, layer.offsetX, layer.offsetY, layer.pixels.width, layer.pixels.height);
+
+            layer.pixels.delete();
+            layer.pixels = baked;
+            layer.offsetX = 0;
+            layer.offsetY = 0;
+            layer.updateTexture();
+        }
+    }
+
+    /** A new blank image at the end of the strip, in every layer; its number. */
+    public int appendImage()
+    {
+        int index = this.imageCount();
+
+        this.resize(this.width, (index + 1) * this.frameHeight());
+
+        return index;
+    }
+
+    /** A copy of an image at the end of the strip, in every layer; the copy's number. */
+    public int duplicateImage(int image)
+    {
+        int h = this.frameHeight();
+        int copy = this.appendImage();
+
+        for (TextureLayer layer : this.layers)
+        {
+            copyRect(layer.pixels, 0, image * h, layer.pixels, 0, copy * h, this.width, h);
+            layer.updateTexture();
+        }
+
+        return copy;
+    }
+
+    /**
+     * Cut an image out of the strip in every layer: the images below move up, and the frames
+     * pointing past it are renumbered. The last image stays, and a number past the strip is ignored.
+     */
+    public void removeImage(int image)
+    {
+        int h = this.frameHeight();
+        int count = this.imageCount();
+
+        if (image < 0 || image >= count || count <= 1)
+        {
+            return;
+        }
+
+        int newHeight = this.height - h;
+
+        for (TextureLayer layer : this.layers)
+        {
+            Pixels cut = Pixels.fromSize(this.width, newHeight);
+
+            copyRect(layer.pixels, 0, 0, cut, 0, 0, this.width, image * h);
+            copyRect(layer.pixels, 0, (image + 1) * h, cut, 0, image * h, this.width, this.height - (image + 1) * h);
+
+            layer.pixels.delete();
+            layer.pixels = cut;
+            layer.updateTexture();
+        }
+
+        this.height = newHeight;
+
+        if (this.animation != null)
+        {
+            for (TextureAnimation.Frame frame : this.animation.frames)
+            {
+                if (frame.index > image)
+                {
+                    frame.index--;
+                }
+            }
+        }
+    }
+
+    /** A plain copy of a rectangle of pixels between buffers — no blending — clipped to both. */
+    private static void copyRect(Pixels from, int sx, int sy, Pixels to, int dx, int dy, int w, int h)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                int fx = sx + x;
+                int fy = sy + y;
+                int tx = dx + x;
+                int ty = dy + y;
+
+                if (fx < 0 || fy < 0 || fx >= from.width || fy >= from.height || tx < 0 || ty < 0 || tx >= to.width || ty >= to.height)
+                {
+                    continue;
+                }
+
+                to.setColor(tx, ty, from.getColor(fx, fy));
+            }
+        }
+    }
+
+    /* Undo snapshots: the project plus the animation, which the .dat format leaves out on purpose */
+
+    /** Everything an undo step has to bring back — see {@link #restore(MapType)}. */
+    public MapType snapshot()
+    {
+        MapType data = this.toData();
+
+        if (this.animation != null)
+        {
+            data.put("animation", this.animation.toData());
+        }
+
+        return data;
+    }
+
+    /** Put the document back to a {@link #snapshot()}. */
+    public void restore(MapType data)
+    {
+        this.fromData(data);
+
+        if (data.has("animation"))
+        {
+            /* Keep the object: it remembers the .mcmeta as it was read, which the snapshot doesn't carry */
+            if (this.animation == null)
+            {
+                this.animation = new TextureAnimation();
+            }
+
+            this.animation.fromData(data.getMap("animation"));
+        }
+        else
+        {
+            this.animation = null;
+        }
+    }
+
+    /** Resize every layer to {@code w}x{@code h}, preserving the existing content in the top-left. */
+    public void resize(int w, int h)
+    {
+        this.width = w;
+        this.height = h;
+
+        for (TextureLayer layer : this.layers)
+        {
+            if (layer.pixels != null && (layer.pixels.width != w || layer.pixels.height != h))
+            {
+                Pixels newPixels = Pixels.fromSize(w, h);
+
+                newPixels.draw(layer.pixels, 0, 0);
+                layer.pixels.delete();
+                layer.pixels = newPixels;
+                layer.updateTexture();
+            }
+        }
+    }
+
+    /**
+     * Composite the colour at a single document pixel by blending every visible
+     * layer (respecting its offset and opacity), without allocating a whole
+     * flattened canvas. Mirrors {@link Pixels#draw}'s source-over blend, layer by
+     * layer from the bottom (index 0) to the top. Returns {@code null} when there
+     * are no layers; a pixel no layer covers yields transparent black.
+     */
+    public Color getColorAt(int x, int y)
+    {
+        if (this.layers.isEmpty())
+        {
+            return null;
+        }
+
+        float r = 0F;
+        float g = 0F;
+        float b = 0F;
+        float a = 0F;
+
+        for (TextureLayer layer : this.layers)
+        {
+            if (!layer.visible || layer.pixels == null || layer.opacity <= 0F)
+            {
+                continue;
+            }
+
+            int lx = x - layer.offsetX;
+            int ly = y - layer.offsetY;
+
+            if (lx < 0 || ly < 0 || lx >= layer.pixels.width || ly >= layer.pixels.height)
+            {
+                continue;
+            }
+
+            Color source = layer.pixels.getColor(lx, ly);
+
+            if (source == null)
+            {
+                continue;
+            }
+
+            /* This layer draws over what's accumulated below (source-over): the
+             * layer is the foreground, the accumulated colour is the background. */
+            float sr = source.r;
+            float sg = source.g;
+            float sb = source.b;
+            float sa = source.a * layer.opacity;
+
+            float outA = 1F - (1F - sa) * (1F - a);
+
+            if (outA > 0F)
+            {
+                r = (sr * sa + r * a * (1F - sa)) / outA;
+                g = (sg * sa + g * a * (1F - sa)) / outA;
+                b = (sb * sa + b * a * (1F - sa)) / outA;
+            }
+
+            a = outA;
+        }
+
+        return new Color(r, g, b, a);
+    }
+
+    /** Flatten the visible layers (respecting opacity) into a freshly allocated {@link Pixels}. */
+    public Pixels flatten()
+    {
+        if (this.layers.isEmpty())
+        {
+            return null;
+        }
+
+        Pixels output = Pixels.fromSize(this.width, this.height);
+
+        for (TextureLayer layer : this.layers)
+        {
+            if (layer.visible && layer.pixels != null && layer.opacity > 0F)
+            {
+                /* Draw at the layer's offset; Pixels.draw clips to the output bounds, so any part
+                 * of the layer pushed outside the canvas by the move tool is correctly cropped. */
+                output.draw(layer.pixels, layer.offsetX, layer.offsetY, layer.opacity);
+            }
+        }
+
+        output.rewindBuffer();
+
+        return output;
+    }
+
+    /** Free all GPU/CPU resources held by the layers and reset the stack. */
+    public void delete()
+    {
+        for (TextureLayer layer : this.layers)
+        {
+            layer.delete();
+        }
+
+        this.layers.clear();
+        this.activeLayerIndex = -1;
+    }
+
+    /** Write this document to its {@code .dat} sidecar through the data library. */
+    public void write(File file)
+    {
+        try
+        {
+            if (file.getParentFile() != null)
+            {
+                file.getParentFile().mkdirs();
+            }
+
+            new DataGzipStorage(new DataFileStorage(file)).write(this.toData());
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void toData(MapType data)
+    {
+        data.putInt("width", this.width);
+        data.putInt("height", this.height);
+        data.putInt("active", this.activeLayerIndex);
+
+        ListType layersData = new ListType();
+
+        for (TextureLayer layer : this.layers)
+        {
+            MapType layerData = new MapType();
+
+            layerData.putString("name", layer.name);
+            layerData.putFloat("opacity", layer.opacity);
+            layerData.putBool("visible", layer.visible);
+            layerData.putInt("offsetX", layer.offsetX);
+            layerData.putInt("offsetY", layer.offsetY);
+            layerData.put("pixels", new IntArrayType(toARGB(layer.pixels)));
+
+            layersData.add(layerData);
+        }
+
+        data.put("layers", layersData);
+    }
+
+    @Override
+    public void fromData(MapType data)
+    {
+        this.delete();
+
+        this.width = data.getInt("width");
+        this.height = data.getInt("height");
+
+        int count = this.width * this.height;
+        ListType layersData = data.getList("layers");
+
+        if (layersData != null)
+        {
+            for (int i = 0; i < layersData.size(); i++)
+            {
+                MapType layerData = layersData.getMap(i);
+
+                if (layerData == null)
+                {
+                    continue;
+                }
+
+                Pixels pixels = Pixels.fromIntArray(this.width, this.height, readARGB(layerData.get("pixels"), count));
+                TextureLayer layer = new TextureLayer(layerData.getString("name", UIKeys.TEXTURES_LAYERS_DEFAULT_NAME.format("1").get()), pixels);
+
+                layer.opacity = layerData.getFloat("opacity", 1F);
+                layer.visible = layerData.getBool("visible", true);
+                layer.offsetX = layerData.getInt("offsetX", 0);
+                layer.offsetY = layerData.getInt("offsetY", 0);
+
+                this.layers.add(layer);
+            }
+        }
+
+        this.activeLayerIndex = this.layers.isEmpty()
+            ? -1
+            : MathUtils.clamp(data.getInt("active", 0), 0, this.layers.size() - 1);
+    }
+
+    private static int[] toARGB(Pixels pixels)
+    {
+        int count = pixels.getCount();
+        int[] argb = new int[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            Color color = pixels.getColor(i);
+
+            argb[i] = color == null ? 0 : color.getARGBColor();
+        }
+
+        return argb;
+    }
+
+    private static int[] readARGB(BaseType type, int count)
+    {
+        if (type instanceof IntArrayType array && array.value.length >= count)
+        {
+            return array.value;
+        }
+
+        return new int[count];
+    }
+}

@@ -1,0 +1,23 @@
+{
+    "required": true,
+    "package": "mchorse.bbs_together.mixin",
+    "compatibilityLevel": "${mixin_compatibility}",
+    "mixins": [
+        "BBSCommandsMixin",
+        "ServerNetworkBbsOpMixin",
+        "FilmStorageLockMixin",
+        "FilmLoadQuietMixin",
+        "ActionManagerBbsOpMixin",
+        "PermissionUtilsBbsOpMixin",
+        "ModelBlockEntityMixin",
+        "ModelBlockEntityPacketMixin",
+        "PacketCrusherBoundsMixin",
+        "FormStableIdsEmptyKeyMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 1
+    },
+    "overwrites": {
+        "requireAnnotations": true
+    }
+}

@@ -1,0 +1,43 @@
+{
+    "schemaVersion": 1,
+    "id": "bbs_together",
+    "version": "${version}",
+    "name": "Together Link",
+    "description": "A BBS addon that adds multiplayer collaboration features. This 1.21.11 build is an experimental compatibility target; the gameplay port is in progress.",
+    "authors": [
+        "McHorse",
+        "ChillinWithDylan"
+    ],
+    "license": "MIT",
+    "icon": "assets/bbs_together/icon.png",
+    "environment": "*",
+    "entrypoints": {
+        "bbs-addon": [
+            "mchorse.bbs_together.BBSTogether"
+        ],
+        "bbs-client-addon": [
+            "mchorse.bbs_together.BBSTogetherClient"
+        ],
+        "main": [
+            "mchorse.bbs_together.BBSTogetherMod"
+        ],
+        "client": [
+            "mchorse.bbs_together.BBSTogetherModClient",
+            "mchorse.bbs_together.Together12111Client"
+        ]
+    },
+    "mixins": [
+        "bbs-together.mixins.json",
+        {
+            "config": "bbs-together.client.mixins.json",
+            "environment": "client"
+        }
+    ],
+    "depends": {
+        "fabricloader": "${loader_range}",
+        "minecraft": "${minecraft_range}",
+        "java": "${java_range}",
+        "fabric-api": "*",
+        "bbs": "${bbs_range}"
+    }
+}

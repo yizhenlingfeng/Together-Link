@@ -1,5 +1,7 @@
 package mchorse.bbs_together.locks;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
@@ -35,6 +37,12 @@ public final class AssetLockClient
         }
 
         return locks.get(AssetLockManager.key(type, assetId));
+    }
+
+    /** Live view for renderers that only read; values are added/removed from the client thread. */
+    public static Collection<AssetLock> all()
+    {
+        return locks.values();
     }
 
     /** Replace the whole mirror with a server push. Called on the client thread. */
@@ -154,7 +162,7 @@ public final class AssetLockClient
         UUID self = self();
 
         lock.owner = self;
-        lock.ownerName = self == null ? "" : MinecraftClient.getInstance().player.getGameProfile().getName();
+        lock.ownerName = self == null ? "" : PlayerCompat.name(MinecraftClient.getInstance().player.getGameProfile());
         lock.mode = mode;
 
         if (previous != null)

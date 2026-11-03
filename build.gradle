@@ -3,12 +3,14 @@ plugins {
 }
 
 /* ---------------------------------------------------------------------------
- * 目标 Minecraft 版本
+ * Target Minecraft version
  *
- *   gradlew build                 -> 通用 jar（1.20.1 - 1.20.4）
- *   gradlew build -Pmcver=1.20.4  -> 1.20.4 编译/运行验证（不作为发布物）
+ *   gradlew build                 -> universal jar (1.20.1 - 1.20.4)
+ *   gradlew build -Pmcver=1.20.4  -> compile/run verification for 1.20.4 (not a release)
+ *   gradlew build -Pmcver=1.21.11 -> 1.21.11 compatibility build (separate artifact)
  *
- * 依赖与 fabric.mod.json 兼容范围放在 gradle/versions/<mcver>.properties。
+ * Dependencies and the fabric.mod.json compatibility range live in
+ * gradle/versions/<mcver>.properties.
  * ------------------------------------------------------------------------- */
 def mcver = providers.gradleProperty('mcver').orElse('1.20.1').get()
 def versionFile = file("gradle/versions/${mcver}.properties")
@@ -35,6 +37,10 @@ def minecraftRange = vprop('minecraft_range')
 def bbsVersion = vprop('bbs_version')
 def bbsRange = vprop('bbs_range')
 def artifactSuffix = versionProps.getProperty('artifact_suffix', minecraftVersion)
+def javaRelease = versionProps.getProperty('java_release', '17') as int
+def loaderRange = versionProps.getProperty('loader_range', '>=0.15.6')
+def javaRange = versionProps.getProperty('java_range', '>=17')
+def mixinCompatibility = versionProps.getProperty('mixin_compatibility', 'JAVA_17')
 
 version = project.mod_version + "-" + artifactSuffix
 group = project.maven_group
@@ -43,13 +49,13 @@ base {
 	archivesName = project.archives_base_name
 }
 
-/* 1.20.1 兼容构建使用 build/；1.20.4 验证构建使用独立目录，避免产物互相覆盖。 */
+/* 1.20.1 compatible builds use build/; 1.20.4 verification builds use a separate dir. */
 if (mcver != '1.20.1') {
 	layout.buildDirectory.set(file("build-${mcver}"))
 }
 
 repositories {
-	/* 国内镜像优先：阿里云公共 Maven 仓库，加速依赖下载 */
+	/* Prefer a regional mirror: Aliyun's public Maven repository speeds up downloads. */
 	maven {
 		name = 'AliyunPublic'
 		url = 'https://maven.aliyun.com/repository/public'
@@ -80,18 +86,18 @@ loom {
 		}
 	}
 
-	/* 开发运行配置：1.20.1 使用 run/；1.20.4 的客户端与服务端使用独立目录，
-	 * 避免同时联调时 world、logs、config 互相覆盖。 */
+	/* Dev run directories: 1.20.1 uses run/; the 1.20.4 client and server each get
+	 * their own directory so worlds, logs and configs never overwrite each other. */
 	runs {
 		client {
 			client()
 			ideConfigGenerated true
 			runDir = clientRunDir
-			/* 给 Minecraft 开发环境分配足够堆内存 */
+			/* Give the Minecraft dev environment enough heap. */
 			vmArg '-Xmx3G'
 			vmArg '-Xms1G'
 
-			/* 可选：-PjoinServer=127.0.0.1:25565 时启动后直接进服，便于双端冒烟。 */
+			/* Optional: -PjoinServer=127.0.0.1:25565 makes the client join on launch for smoke tests. */
 			if (providers.gradleProperty('joinServer').isPresent()) {
 				programArgs '--quickPlayMultiplayer', providers.gradleProperty('joinServer').get()
 			}
@@ -103,7 +109,42 @@ loom {
 			vmArg '-Xmx2G'
 			vmArg '-Xms512M'
 		}
+
+		/* Optional second 1.21.11 client for two-player stress tests. It must use
+		 * its own run directory: sharing run-1.21.11-client would lock the same
+		 * processed-mod jars. */
+		if (mcver == '1.21.11') {
+			client2 {
+				client()
+				ideConfigGenerated true
+				runDir = 'run-1.21.11-client-b'
+				vmArg '-Xmx3G'
+				vmArg '-Xms1G'
+
+				if (providers.gradleProperty('joinServer').isPresent()) {
+					programArgs '--quickPlayMultiplayer', providers.gradleProperty('joinServer').get()
+				}
+			}
+		}
 	}
+}
+
+/* 1.20.x keeps its version-specific adapters in java-1.20. 1.21.11 replaces
+ * them with the payload/authlib/render overlays in java-1.21.11. */
+if (mcver == '1.21.11') {
+	sourceSets.main.java.setSrcDirs(['src/main/java', 'src/main/java-1.21.11'])
+	sourceSets.main.resources.setSrcDirs(['src/main/resources-1.21.11', 'src/main/resources'])
+	sourceSets.client.java.setSrcDirs(['src/client/java', 'src/client/java-1.21.11'])
+	sourceSets.client.resources.setSrcDirs(['src/client/resources-1.21.11', 'src/client/resources'])
+
+	/* The 1.21.11 build draws the lock badge from a WorldRenderEvents hook instead
+	 * of this render-state mixin; the 1.20 build keeps the mixin in java/. */
+	sourceSets.client.java.exclude(
+		'mchorse/bbs_together/mixin/ModelBlockEntityRendererBbsOpMixin.java'
+	)
+} else {
+	sourceSets.main.java.srcDir('src/main/java-1.20')
+	sourceSets.client.java.srcDir('src/client/java-1.20')
 }
 
 dependencies {
@@ -121,56 +162,94 @@ dependencies {
 	modImplementation("mchorse:bbs:${bbsVersion}") { transitive = false }
 }
 
-/* 强制 LWJGL 3.3.1 以兼容 Sodium（Loom 默认使用 3.3.2-snapshot，Sodium 要求 3.3.1） */
-configurations.all {
-	resolutionStrategy {
-		force "org.lwjgl:lwjgl:3.3.1"
-		force "org.lwjgl:lwjgl-glfw:3.3.1"
-		force "org.lwjgl:lwjgl-openal:3.3.1"
-		force "org.lwjgl:lwjgl-opengl:3.3.1"
-		force "org.lwjgl:lwjgl-stb:3.3.1"
-		force "org.lwjgl:lwjgl-tinyfd:3.3.1"
+/* Force LWJGL 3.3.1 for Sodium compatibility on 1.20.x (Loom defaults to
+ * 3.3.2-snapshot). 1.21.11 uses a newer LWJGL/Sodium generation, so leave it alone. */
+if (javaRelease < 21) {
+	configurations.all {
+		resolutionStrategy {
+			force "org.lwjgl:lwjgl:3.3.1"
+			force "org.lwjgl:lwjgl-glfw:3.3.1"
+			force "org.lwjgl:lwjgl-openal:3.3.1"
+			force "org.lwjgl:lwjgl-opengl:3.3.1"
+			force "org.lwjgl:lwjgl-stb:3.3.1"
+			force "org.lwjgl:lwjgl-tinyfd:3.3.1"
+		}
 	}
 }
 
 /* Loom caches the remapped BBS by its Maven coordinates, and BBS's version does not change while
- * it is being worked on — so a rebuilt BBS is silently ignored. This notices on its own: if the
+ * it is being worked on 鈥?so a rebuilt BBS is silently ignored. This notices on its own: if the
  * published jar is newer than the cached remap, the cache goes. */
 def bbsJar = new File(new File(System.getProperty("user.home")), ".m2/repository/mchorse/bbs/${bbsVersion}/bbs-${bbsVersion}.jar")
 def remapCache = file(".gradle/loom-cache/remapped_mods/remapped/mchorse")
 
 if (bbsJar.exists() && remapCache.exists() && bbsJar.lastModified() > remapCache.lastModified()) {
-	logger.lifecycle("BBS was rebuilt since it was last remapped — clearing ${remapCache}")
+	logger.lifecycle("BBS was rebuilt since it was last remapped 鈥?clearing ${remapCache}")
 	delete(remapCache)
 }
 
 processResources {
+	/* 1.21.11 has both a common and an overlay resource dir. The overlay comes
+	 * first in the source-set order, so EXCLUDE keeps its fabric.mod.json and
+	 * mixin config and drops the common duplicates. */
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 	inputs.property "version", project.version
 	inputs.property "minecraft_range", minecraftRange
 	inputs.property "bbs_range", bbsRange
+	inputs.property "loader_range", loaderRange
+	inputs.property "java_range", javaRange
+	inputs.property "mixin_compatibility", mixinCompatibility
 
 	filesMatching("fabric.mod.json") {
 		expand(
 			"version": project.version,
 			"minecraft_range": minecraftRange,
-			"bbs_range": bbsRange
+			"bbs_range": bbsRange,
+			"loader_range": loaderRange,
+			"java_range": javaRange
 		)
+	}
+
+	filesMatching("*.mixins.json") {
+		filter { line -> line.replace('${mixin_compatibility}', mixinCompatibility) }
+	}
+}
+
+/* The client mixin config is processed by the split-source-set task, not by
+ * processResources. Keep its compatibility level in sync with the target. */
+tasks.named('processClientResources') {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	inputs.property "mixin_compatibility", mixinCompatibility
+
+	filesMatching("*.mixins.json") {
+		filter { line -> line.replace('${mixin_compatibility}', mixinCompatibility) }
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 17
+	it.options.release = javaRelease
 	it.options.encoding = 'UTF-8'
 }
 
 java {
-	sourceCompatibility = JavaVersion.VERSION_17
-	targetCompatibility = JavaVersion.VERSION_17
+	sourceCompatibility = JavaVersion.toVersion(javaRelease)
+	targetCompatibility = JavaVersion.toVersion(javaRelease)
+}
+
+/* 1.21.11 is compiled by a Java 21 toolchain; 1.20.x keeps the existing
+ * "any Java 17+ JDK with --release 17" behaviour. */
+if (javaRelease >= 21) {
+	java {
+		toolchain {
+			languageVersion = JavaLanguageVersion.of(javaRelease)
+		}
+	}
 }
 
 /* ---------------------------------------------------------------------------
- * 便捷任务：用嵌套 Gradle 构建切换 mcver，避免 PowerShell 下 -P 参数被截断。
- * 默认 build/runClient 面向 1.20.1；1.20.4 仅用于编译与运行验证。
+ * Convenience tasks: a nested Gradle build switches mcver, which avoids -P
+ * arguments being truncated under PowerShell. build/runClient default to 1.20.1;
+ * 1.20.4 is only used for compile and run verification.
  * ------------------------------------------------------------------------- */
 def registerVersionTask = { String name, String target, List<String> taskList, String description ->
 	tasks.register(name, GradleBuild) {
@@ -178,10 +257,20 @@ def registerVersionTask = { String name, String target, List<String> taskList, S
 		description = description
 		dir = rootDir
 		tasks = taskList
-		startParameter.projectProperties = [mcver: target]
+		def props = [mcver: target]
+		/* Forward the optional auto-join address so nested run tasks can smoke-test a server. */
+		if (providers.gradleProperty('joinServer').isPresent()) {
+			props.joinServer = providers.gradleProperty('joinServer').get()
+		}
+		startParameter.projectProperties = props
 	}
 }
 
-registerVersionTask('build1204', '1.20.4', ['build'], '1.20.4 编译/运行验证，产物仅用于测试。')
-registerVersionTask('runClient1204', '1.20.4', ['runClient'], '以 1.20.4 启动开发客户端（run-1.20.4-client/）。')
-registerVersionTask('runServer1204', '1.20.4', ['runServer'], '以 1.20.4 启动开发服务端（run-1.20.4-server/）。')
+registerVersionTask('build1204', '1.20.4', ['build'], 'Compile/run verification for 1.20.4; the artifact is for testing only.')
+registerVersionTask('runClient1204', '1.20.4', ['runClient'], 'Start the dev client on 1.20.4 (run-1.20.4-client/).')
+registerVersionTask('runServer1204', '1.20.4', ['runServer'], 'Start the dev server on 1.20.4 (run-1.20.4-server/).')
+
+registerVersionTask('build12111', '1.21.11', ['build'], 'Build the 1.21.11 compatibility target.')
+registerVersionTask('runClient12111', '1.21.11', ['runClient'], 'Start the dev client on 1.21.11 (run-1.21.11-client/).')
+registerVersionTask('runClient12111B', '1.21.11', ['runClient2'], 'Start a second dev client on 1.21.11 (run-1.21.11-client-b/) for two-player tests.')
+registerVersionTask('runServer12111', '1.21.11', ['runServer'], 'Start the dev server on 1.21.11 (run-1.21.11-server/).')

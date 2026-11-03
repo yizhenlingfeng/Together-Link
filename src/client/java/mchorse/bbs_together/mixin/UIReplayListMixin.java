@@ -197,11 +197,12 @@ public class UIReplayListMixin {
         TogetherClientNetwork.sendReplayFormLock(string, n, true);
     }
 
-    // BBS More Windows 的 UIReplayListFormEditorMixin 也对 openFormEditor 里的
-    // UIFormPalette.open 做 @Redirect，两个 Redirect 不能共存（后应用的一方会
-    // "Scanned 0 target(s)" 直接崩游戏）。这里改成 TAIL 注入：不碰那条指令，
-    // 而是在方法结束后从 target 的直接子元素里找出刚打开的 UIFormPalette，
-    // 无论哪一方抢先 Redirect 都能正常拿到面板。
+    // BBS More Windows' UIReplayListFormEditorMixin also @Redirects UIFormPalette.open
+    // inside openFormEditor. Two Redirects cannot coexist (the one applied later fails
+    // with "Scanned 0 target(s)" and crashes the game). This uses a TAIL injection
+    // instead: it never touches that instruction, but finds the UIFormPalette the
+    // method just opened among the target's direct children, so the panel is reached
+    // no matter which side wins the Redirect.
     @Inject(method={"openFormEditor"}, at={@At(value="TAIL")}, remap=false)
     private void onOpenFormEditorTail(ValueForm valueForm, boolean bl, Consumer<?> consumer, CallbackInfo callbackInfo) {
         if (!TogetherClientNetwork.isConnected()) {

@@ -1,5 +1,7 @@
 package mchorse.bbs_together.behaviors;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.data.types.ListType;
@@ -8,13 +10,11 @@ import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.UserCache;
 import net.minecraft.util.WorldSavePath;
 
 import com.mojang.authlib.GameProfile;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -103,7 +103,7 @@ public class BehaviorLogManager
     public static void onPlayerJoin(ServerPlayerEntity player)
     {
         UUID id = player.getUuid();
-        String name = player.getGameProfile().getName();
+        String name = PlayerCompat.name(player.getGameProfile());
         long time = System.currentTimeMillis();
 
         synchronized (BehaviorLogManager.class)
@@ -139,7 +139,7 @@ public class BehaviorLogManager
         }
 
         UUID id = player.getUuid();
-        String name = player.getGameProfile().getName();
+        String name = PlayerCompat.name(player.getGameProfile());
         long time = System.currentTimeMillis();
 
         synchronized (BehaviorLogManager.class)
@@ -182,7 +182,7 @@ public class BehaviorLogManager
         }
 
         UUID id = player.getUuid();
-        String name = player.getGameProfile().getName();
+        String name = PlayerCompat.name(player.getGameProfile());
         long time = System.currentTimeMillis();
 
         synchronized (BehaviorLogManager.class)
@@ -470,7 +470,7 @@ public class BehaviorLogManager
 
     public static boolean isOperator(MinecraftServer server, ServerPlayerEntity player)
     {
-        return server.getPlayerManager().isOperator(player.getGameProfile());
+        return PlayerCompat.isOperator(server, player.getGameProfile());
     }
 
     public static boolean isOperator(MinecraftServer server, UUID playerId)
@@ -479,21 +479,21 @@ public class BehaviorLogManager
 
         if (player != null)
         {
-            return server.getPlayerManager().isOperator(player.getGameProfile());
+            return PlayerCompat.isOperator(server, player.getGameProfile());
         }
 
         synchronized (BehaviorLogManager.class)
         {
             PlayerRecord record = players.get(playerId);
 
-            if (record == null || server.getUserCache() == null)
+            if (record == null)
             {
                 return false;
             }
 
             GameProfile profile = findProfile(server, record.name);
 
-            return profile != null && server.getPlayerManager().isOperator(profile);
+            return profile != null && PlayerCompat.isOperator(server, profile);
         }
     }
 
@@ -528,7 +528,7 @@ public class BehaviorLogManager
             return false;
         }
 
-        boolean isOp = server.getPlayerManager().isOperator(profile);
+        boolean isOp = PlayerCompat.isOperator(server, profile);
 
         if (op == isOp)
         {
@@ -537,36 +537,29 @@ public class BehaviorLogManager
 
         if (op)
         {
-            server.getPlayerManager().addToOperators(profile);
+            PlayerCompat.addOperator(server, profile);
         }
         else
         {
-            server.getPlayerManager().removeFromOperators(profile);
+            PlayerCompat.removeOperator(server, profile);
         }
 
         /* Push the new command tree right away, so the change bites immediately */
-        ServerPlayerEntity target = server.getPlayerManager().getPlayer(profile.getId());
+        ServerPlayerEntity target = server.getPlayerManager().getPlayer(PlayerCompat.id(profile));
 
         if (target != null)
         {
             server.getCommandManager().sendCommandTree(target);
         }
 
-        System.out.println("[BBSTogether] " + profile.getName() + (op ? " is now an operator" : " is no longer an operator"));
+        System.out.println("[BBSTogether] " + PlayerCompat.name(profile) + (op ? " is now an operator" : " is no longer an operator"));
 
         return true;
     }
 
     private static GameProfile findProfile(MinecraftServer server, String name)
     {
-        UserCache cache = server.getUserCache();
-
-        if (cache == null || name == null || name.isEmpty())
-        {
-            return null;
-        }
-
-        return cache.findByName(name).orElse(null);
+        return PlayerCompat.findProfile(server, name);
     }
 
     /* Persistence */

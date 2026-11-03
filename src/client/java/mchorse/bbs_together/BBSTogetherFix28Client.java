@@ -1,5 +1,7 @@
 package mchorse.bbs_together;
 
+import mchorse.bbs_together.network.TogetherClientNetworking;
+
 import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.Map;
@@ -15,7 +17,6 @@ import mchorse.bbs_mod.ui.framework.UIScreen;
 import mchorse.bbs_together.BBSTogetherFix28;
 import mchorse.bbs_together.BBSTogetherFix45;
 import mchorse.bbs_together.network.TogetherClientNetwork;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
@@ -41,7 +42,7 @@ public final class BBSTogetherFix28Client {
             return;
         }
         clientReceiversRegistered = true;
-        ClientPlayNetworking.registerGlobalReceiver((Identifier)BBSTogetherFix28.CLIENT_FILM_JOIN_SOURCE_REQUEST, (class_3102, class_6342, class_25402, packetSender) -> {
+        TogetherClientNetworking.register((Identifier)BBSTogetherFix28.CLIENT_FILM_JOIN_SOURCE_REQUEST, (class_3102, class_6342, class_25402, packetSender) -> {
             UUID uUID = class_25402.readUuid();
             String string = class_25402.readString();
             class_3102.execute(() -> BBSTogetherFix28Client.sendOpenFilmSnapshotTo(uUID, string));
@@ -64,7 +65,7 @@ public final class BBSTogetherFix28Client {
         String string2 = string == null ? "" : string;
         PacketByteBuf class_25402 = PacketByteBufs.create();
         class_25402.writeString(string2);
-        ClientPlayNetworking.send((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_REQUEST, (PacketByteBuf)class_25402);
+        TogetherClientNetworking.send((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_REQUEST, (PacketByteBuf)class_25402);
     }
 
     public static void sendFilmLeaveSnapshot(String string, Film film) {

@@ -1,5 +1,7 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_together.compat.PlayerCompat;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -78,7 +80,6 @@ import mchorse.bbs_together.utils.AssetPaths;
 import mchorse.bbs_together.utils.ModelPathUtils;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.MinecraftServer;
@@ -88,104 +89,104 @@ import net.minecraft.util.Formatting;
 import net.minecraft.util.Identifier;
 
 public class TogetherServerNetwork {
-    public static final Identifier SERVER_SYNC_PREF = new Identifier("bbs_together", "s_sync_pref");
-    public static final Identifier SERVER_ASSET_REPORT = new Identifier("bbs_together", "s_asset_report");
-    public static final Identifier SERVER_ASSET_REPORT_DELTA = new Identifier("bbs_together", "s_asset_report_delta");
-    public static final Identifier SERVER_FILM_INVENTORY = new Identifier("bbs_together", "s_film_inventory");
-    public static final Identifier CLIENT_PLAYER_COLORS = new Identifier("bbs_together", "c_player_colors");
-    public static final Identifier CLIENT_CURSOR_POSITIONS = new Identifier("bbs_together", "c_cursor_positions");
-    public static final Identifier CLIENT_FILM_SELECTIONS = new Identifier("bbs_together", "c_film_selections");
-    public static final Identifier CLIENT_REPLAY_SELECTIONS = new Identifier("bbs_together", "c_replay_selections");
-    public static final Identifier CLIENT_REPLAY_FORM_LOCKS = new Identifier("bbs_together", "c_replay_form_locks");
-    public static final Identifier CLIENT_REPLAY_SWAP = new Identifier("bbs_together", "c_replay_swap");
-    public static final Identifier CLIENT_TOGGLE_RECORDING = new Identifier("bbs_together", "c_toggle_recording");
-    public static final Identifier CLIENT_ASSET_MANIFEST = new Identifier("bbs_together", "c_asset_manifest");
-    public static final Identifier CLIENT_ASSET_HINT = new Identifier("bbs_together", "c_asset_hint");
-    public static final Identifier CLIENT_ASSET_FILE = new Identifier("bbs_together", "c_asset_file");
-    public static final Identifier CLIENT_FILM_SCREENS = new Identifier("bbs_together", "c_film_screens");
-    public static final Identifier CLIENT_MERGE_REPLAYS = new Identifier("bbs_together", "c_merge_replays");
-    public static final Identifier CLIENT_FILM_BRANCH_STATE = new Identifier("bbs_together", "c_film_branch_state");
+    public static final Identifier SERVER_SYNC_PREF = Identifier.of("bbs_together", "s_sync_pref");
+    public static final Identifier SERVER_ASSET_REPORT = Identifier.of("bbs_together", "s_asset_report");
+    public static final Identifier SERVER_ASSET_REPORT_DELTA = Identifier.of("bbs_together", "s_asset_report_delta");
+    public static final Identifier SERVER_FILM_INVENTORY = Identifier.of("bbs_together", "s_film_inventory");
+    public static final Identifier CLIENT_PLAYER_COLORS = Identifier.of("bbs_together", "c_player_colors");
+    public static final Identifier CLIENT_CURSOR_POSITIONS = Identifier.of("bbs_together", "c_cursor_positions");
+    public static final Identifier CLIENT_FILM_SELECTIONS = Identifier.of("bbs_together", "c_film_selections");
+    public static final Identifier CLIENT_REPLAY_SELECTIONS = Identifier.of("bbs_together", "c_replay_selections");
+    public static final Identifier CLIENT_REPLAY_FORM_LOCKS = Identifier.of("bbs_together", "c_replay_form_locks");
+    public static final Identifier CLIENT_REPLAY_SWAP = Identifier.of("bbs_together", "c_replay_swap");
+    public static final Identifier CLIENT_TOGGLE_RECORDING = Identifier.of("bbs_together", "c_toggle_recording");
+    public static final Identifier CLIENT_ASSET_MANIFEST = Identifier.of("bbs_together", "c_asset_manifest");
+    public static final Identifier CLIENT_ASSET_HINT = Identifier.of("bbs_together", "c_asset_hint");
+    public static final Identifier CLIENT_ASSET_FILE = Identifier.of("bbs_together", "c_asset_file");
+    public static final Identifier CLIENT_FILM_SCREENS = Identifier.of("bbs_together", "c_film_screens");
+    public static final Identifier CLIENT_MERGE_REPLAYS = Identifier.of("bbs_together", "c_merge_replays");
+    public static final Identifier CLIENT_FILM_BRANCH_STATE = Identifier.of("bbs_together", "c_film_branch_state");
     /** Tiny packet that only names the branch, used when the full branch data was already sent. */
-    public static final Identifier CLIENT_FILM_BRANCH = new Identifier("bbs_together", "c_film_branch");
-    public static final Identifier CLIENT_FILM_SAVED_SYNC = new Identifier("bbs_together", "c_film_saved_sync");
-    public static final Identifier SERVER_UNDO_SYNC = new Identifier("bbs_together", "s_undo_sync");
-    public static final Identifier CLIENT_UNDO_REJECTED = new Identifier("bbs_together", "c_undo_rejected");
-    public static final Identifier CLIENT_FILM_DATA_SYNC = new Identifier("bbs_together", "c_film_data_sync");
-    public static final Identifier CLIENT_FILM_LIST_CHANGED = new Identifier("bbs_together", "c_film_list_changed");
-    public static final Identifier CLIENT_ASSETS_CHANGED = new Identifier("bbs_together", "c_assets_changed");
-    public static final Identifier SERVER_FILM_LIST_CHANGED = new Identifier("bbs_together", "s_film_list_changed");
-    public static final Identifier CLIENT_FILM_DELETED = new Identifier("bbs_together", "c_film_deleted");
-    public static final Identifier SERVER_FILM_DELETED = new Identifier("bbs_together", "s_film_deleted");
-    public static final Identifier CLIENT_FILM_RENAMED = new Identifier("bbs_together", "c_film_renamed");
-    public static final Identifier SERVER_FILM_RENAMED = new Identifier("bbs_together", "s_film_renamed");
-    public static final Identifier SERVER_PLAYER_COLOR = new Identifier("bbs_together", "s_player_color");
-    public static final Identifier SERVER_CURSOR_POSITION = new Identifier("bbs_together", "s_cursor_position");
-    public static final Identifier SERVER_FILM_SELECTION = new Identifier("bbs_together", "s_film_selection");
-    public static final Identifier SERVER_REPLAY_SELECTION = new Identifier("bbs_together", "s_replay_selection");
-    public static final Identifier SERVER_REPLAY_FORM_LOCK = new Identifier("bbs_together", "s_replay_form_lock");
-    public static final Identifier SERVER_REPLAY_SWAP = new Identifier("bbs_together", "s_replay_swap");
-    public static final Identifier SERVER_ASSET_REQUEST = new Identifier("bbs_together", "s_asset_request");
-    public static final Identifier SERVER_ASSET_UPLOAD = new Identifier("bbs_together", "s_asset_upload");
-    public static final Identifier SERVER_HELLO = new Identifier("bbs_together", "s_hello");
-    public static final Identifier CLIENT_HELLO = new Identifier("bbs_together", "c_hello");
-    public static final Identifier CLIENT_SERVER_LIMITS = new Identifier("bbs_together", "c_server_limits");
+    public static final Identifier CLIENT_FILM_BRANCH = Identifier.of("bbs_together", "c_film_branch");
+    public static final Identifier CLIENT_FILM_SAVED_SYNC = Identifier.of("bbs_together", "c_film_saved_sync");
+    public static final Identifier SERVER_UNDO_SYNC = Identifier.of("bbs_together", "s_undo_sync");
+    public static final Identifier CLIENT_UNDO_REJECTED = Identifier.of("bbs_together", "c_undo_rejected");
+    public static final Identifier CLIENT_FILM_DATA_SYNC = Identifier.of("bbs_together", "c_film_data_sync");
+    public static final Identifier CLIENT_FILM_LIST_CHANGED = Identifier.of("bbs_together", "c_film_list_changed");
+    public static final Identifier CLIENT_ASSETS_CHANGED = Identifier.of("bbs_together", "c_assets_changed");
+    public static final Identifier SERVER_FILM_LIST_CHANGED = Identifier.of("bbs_together", "s_film_list_changed");
+    public static final Identifier CLIENT_FILM_DELETED = Identifier.of("bbs_together", "c_film_deleted");
+    public static final Identifier SERVER_FILM_DELETED = Identifier.of("bbs_together", "s_film_deleted");
+    public static final Identifier CLIENT_FILM_RENAMED = Identifier.of("bbs_together", "c_film_renamed");
+    public static final Identifier SERVER_FILM_RENAMED = Identifier.of("bbs_together", "s_film_renamed");
+    public static final Identifier SERVER_PLAYER_COLOR = Identifier.of("bbs_together", "s_player_color");
+    public static final Identifier SERVER_CURSOR_POSITION = Identifier.of("bbs_together", "s_cursor_position");
+    public static final Identifier SERVER_FILM_SELECTION = Identifier.of("bbs_together", "s_film_selection");
+    public static final Identifier SERVER_REPLAY_SELECTION = Identifier.of("bbs_together", "s_replay_selection");
+    public static final Identifier SERVER_REPLAY_FORM_LOCK = Identifier.of("bbs_together", "s_replay_form_lock");
+    public static final Identifier SERVER_REPLAY_SWAP = Identifier.of("bbs_together", "s_replay_swap");
+    public static final Identifier SERVER_ASSET_REQUEST = Identifier.of("bbs_together", "s_asset_request");
+    public static final Identifier SERVER_ASSET_UPLOAD = Identifier.of("bbs_together", "s_asset_upload");
+    public static final Identifier SERVER_HELLO = Identifier.of("bbs_together", "s_hello");
+    public static final Identifier CLIENT_HELLO = Identifier.of("bbs_together", "c_hello");
+    public static final Identifier CLIENT_SERVER_LIMITS = Identifier.of("bbs_together", "c_server_limits");
     public static final int PROTOCOL_VERSION = 3;
 
-    public static final Identifier SERVER_ASSET_RESYNC = new Identifier("bbs_together", "s_asset_resync");
-    public static final Identifier SERVER_FILM_SCREEN = new Identifier("bbs_together", "s_film_screen");
-    public static final Identifier SERVER_RECORDING_FINISHED = new Identifier("bbs_together", "s_recording_finished");
-    public static final Identifier SERVER_MASTER_DONE = new Identifier("bbs_together", "s_master_done");
-    public static final Identifier SERVER_FILM_DATA_SYNC = new Identifier("bbs_together", "s_film_data_sync");
-    public static final Identifier SERVER_FILM_SAVE_SYNC = new Identifier("bbs_together", "s_film_save_sync");
-    public static final Identifier SERVER_BEHAVIOR_REPORT = new Identifier("bbs_together", "s_behavior_report");
-    public static final Identifier SERVER_BEHAVIOR_QUERY = new Identifier("bbs_together", "s_behavior_query");
-    public static final Identifier SERVER_SET_OPERATOR = new Identifier("bbs_together", "s_set_operator");
-    public static final Identifier SERVER_REMOVE_PLAYER_LOGS = new Identifier("bbs_together", "s_remove_player_logs");
-    public static final Identifier SERVER_MODEL_DELETE_REQUEST = new Identifier("bbs_together", "s_model_delete_request");
-    public static final Identifier SERVER_MODEL_DELETE_DECISION = new Identifier("bbs_together", "s_model_delete_decision");
-    public static final Identifier CLIENT_MODEL_DELETED = new Identifier("bbs_together", "c_model_deleted");
-    public static final Identifier CLIENT_BEHAVIOR_LIST = new Identifier("bbs_together", "c_behavior_list");
-    public static final Identifier CLIENT_PERMISSIONS = new Identifier("bbs_together", "c_permissions");
-    public static final Identifier CLIENT_BBSOP_SYNC = new Identifier("bbs_together", "c_bbsop_sync");
-    public static final Identifier SERVER_BBSOP_SET = new Identifier("bbs_together", "s_bbsop_set");
-    public static final Identifier SERVER_BBSOP_GRANT = new Identifier("bbs_together", "s_bbsop_grant");
-    public static final Identifier CLIENT_ASSET_LOCKS = new Identifier("bbs_together", "c_asset_locks");
-    public static final Identifier SERVER_ASSET_LOCK = new Identifier("bbs_together", "s_asset_lock");
-    public static final Identifier SERVER_COOP_INVITE = new Identifier("bbs_together", "s_coop_invite");
-    public static final Identifier SERVER_COOP_RESPOND = new Identifier("bbs_together", "s_coop_respond");
-    public static final Identifier SERVER_COOP_PICK = new Identifier("bbs_together", "s_coop_pick");
-    public static final Identifier SERVER_COOP_LEAVE = new Identifier("bbs_together", "s_coop_leave");
-    public static final Identifier SERVER_COOP_START = new Identifier("bbs_together", "s_coop_start");
-    public static final Identifier SERVER_COOP_CANCEL = new Identifier("bbs_together", "s_coop_cancel");
-    public static final Identifier SERVER_COOP_MOUSE = new Identifier("bbs_together", "s_coop_mouse");
-    public static final Identifier CLIENT_COOP_REQUEST = new Identifier("bbs_together", "c_coop_request");
-    public static final Identifier CLIENT_COOP_REQUEST_CLOSED = new Identifier("bbs_together", "c_coop_request_closed");
-    public static final Identifier CLIENT_COOP_ROOM = new Identifier("bbs_together", "c_coop_room");
-    public static final Identifier CLIENT_COOP_END = new Identifier("bbs_together", "c_coop_end");
-    public static final Identifier CLIENT_COOP_BEGIN = new Identifier("bbs_together", "c_coop_begin");
-    public static final Identifier CLIENT_COOP_MOUSE = new Identifier("bbs_together", "c_coop_mouse");
-    public static final Identifier SERVER_COMMITS_QUERY = new Identifier("bbs_together", "s_commits_query");
-    public static final Identifier SERVER_COMMIT_INDEX = new Identifier("bbs_together", "s_commit_index");
-    public static final Identifier SERVER_COMMIT_DIFF = new Identifier("bbs_together", "s_commit_diff");
-    public static final Identifier SERVER_COMMIT_RENAME = new Identifier("bbs_together", "s_commit_rename");
-    public static final Identifier SERVER_COMMIT_SELECTION = new Identifier("bbs_together", "s_commit_selection");
-    public static final Identifier SERVER_COMMIT_COLOR = new Identifier("bbs_together", "s_commit_color");
-    public static final Identifier SERVER_COMMIT_REVERT = new Identifier("bbs_together", "s_commit_revert");
-    public static final Identifier SERVER_COMMIT_SQUASH = new Identifier("bbs_together", "s_commit_squash");
-    public static final Identifier SERVER_COMMIT_CREATE = new Identifier("bbs_together", "s_commit_create");
-    public static final Identifier SERVER_COMMIT_HEAD = new Identifier("bbs_together", "s_commit_head");
-    public static final Identifier SERVER_BRANCH_CREATE = new Identifier("bbs_together", "s_branch_create");
-    public static final Identifier SERVER_BRANCH_CHECKOUT = new Identifier("bbs_together", "s_branch_checkout");
-    public static final Identifier CLIENT_COMMITS = new Identifier("bbs_together", "c_commits");
-    public static final Identifier CLIENT_COMMIT_INDEX = new Identifier("bbs_together", "c_commit_index");
-    public static final Identifier CLIENT_COMMIT_ADDED = new Identifier("bbs_together", "c_commit_added");
-    public static final Identifier CLIENT_COMMIT_DIFF = new Identifier("bbs_together", "c_commit_diff");
-    public static final Identifier CLIENT_COMMIT_RENAMED = new Identifier("bbs_together", "c_commit_renamed");
-    public static final Identifier CLIENT_COMMIT_COLOR = new Identifier("bbs_together", "c_commit_color");
-    public static final Identifier CLIENT_COMMIT_SELECTIONS = new Identifier("bbs_together", "c_commit_selections");
-    public static final Identifier CLIENT_PLAYER_COMMIT_POSITIONS = new Identifier("bbs_together", "c_player_commit_positions");
-    public static final Identifier CLIENT_COMMIT_REJECTED = new Identifier("bbs_together", "c_commit_rejected");
-    public static final Identifier CLIENT_COMMIT_HEAD = new Identifier("bbs_together", "c_commit_head");
+    public static final Identifier SERVER_ASSET_RESYNC = Identifier.of("bbs_together", "s_asset_resync");
+    public static final Identifier SERVER_FILM_SCREEN = Identifier.of("bbs_together", "s_film_screen");
+    public static final Identifier SERVER_RECORDING_FINISHED = Identifier.of("bbs_together", "s_recording_finished");
+    public static final Identifier SERVER_MASTER_DONE = Identifier.of("bbs_together", "s_master_done");
+    public static final Identifier SERVER_FILM_DATA_SYNC = Identifier.of("bbs_together", "s_film_data_sync");
+    public static final Identifier SERVER_FILM_SAVE_SYNC = Identifier.of("bbs_together", "s_film_save_sync");
+    public static final Identifier SERVER_BEHAVIOR_REPORT = Identifier.of("bbs_together", "s_behavior_report");
+    public static final Identifier SERVER_BEHAVIOR_QUERY = Identifier.of("bbs_together", "s_behavior_query");
+    public static final Identifier SERVER_SET_OPERATOR = Identifier.of("bbs_together", "s_set_operator");
+    public static final Identifier SERVER_REMOVE_PLAYER_LOGS = Identifier.of("bbs_together", "s_remove_player_logs");
+    public static final Identifier SERVER_MODEL_DELETE_REQUEST = Identifier.of("bbs_together", "s_model_delete_request");
+    public static final Identifier SERVER_MODEL_DELETE_DECISION = Identifier.of("bbs_together", "s_model_delete_decision");
+    public static final Identifier CLIENT_MODEL_DELETED = Identifier.of("bbs_together", "c_model_deleted");
+    public static final Identifier CLIENT_BEHAVIOR_LIST = Identifier.of("bbs_together", "c_behavior_list");
+    public static final Identifier CLIENT_PERMISSIONS = Identifier.of("bbs_together", "c_permissions");
+    public static final Identifier CLIENT_BBSOP_SYNC = Identifier.of("bbs_together", "c_bbsop_sync");
+    public static final Identifier SERVER_BBSOP_SET = Identifier.of("bbs_together", "s_bbsop_set");
+    public static final Identifier SERVER_BBSOP_GRANT = Identifier.of("bbs_together", "s_bbsop_grant");
+    public static final Identifier CLIENT_ASSET_LOCKS = Identifier.of("bbs_together", "c_asset_locks");
+    public static final Identifier SERVER_ASSET_LOCK = Identifier.of("bbs_together", "s_asset_lock");
+    public static final Identifier SERVER_COOP_INVITE = Identifier.of("bbs_together", "s_coop_invite");
+    public static final Identifier SERVER_COOP_RESPOND = Identifier.of("bbs_together", "s_coop_respond");
+    public static final Identifier SERVER_COOP_PICK = Identifier.of("bbs_together", "s_coop_pick");
+    public static final Identifier SERVER_COOP_LEAVE = Identifier.of("bbs_together", "s_coop_leave");
+    public static final Identifier SERVER_COOP_START = Identifier.of("bbs_together", "s_coop_start");
+    public static final Identifier SERVER_COOP_CANCEL = Identifier.of("bbs_together", "s_coop_cancel");
+    public static final Identifier SERVER_COOP_MOUSE = Identifier.of("bbs_together", "s_coop_mouse");
+    public static final Identifier CLIENT_COOP_REQUEST = Identifier.of("bbs_together", "c_coop_request");
+    public static final Identifier CLIENT_COOP_REQUEST_CLOSED = Identifier.of("bbs_together", "c_coop_request_closed");
+    public static final Identifier CLIENT_COOP_ROOM = Identifier.of("bbs_together", "c_coop_room");
+    public static final Identifier CLIENT_COOP_END = Identifier.of("bbs_together", "c_coop_end");
+    public static final Identifier CLIENT_COOP_BEGIN = Identifier.of("bbs_together", "c_coop_begin");
+    public static final Identifier CLIENT_COOP_MOUSE = Identifier.of("bbs_together", "c_coop_mouse");
+    public static final Identifier SERVER_COMMITS_QUERY = Identifier.of("bbs_together", "s_commits_query");
+    public static final Identifier SERVER_COMMIT_INDEX = Identifier.of("bbs_together", "s_commit_index");
+    public static final Identifier SERVER_COMMIT_DIFF = Identifier.of("bbs_together", "s_commit_diff");
+    public static final Identifier SERVER_COMMIT_RENAME = Identifier.of("bbs_together", "s_commit_rename");
+    public static final Identifier SERVER_COMMIT_SELECTION = Identifier.of("bbs_together", "s_commit_selection");
+    public static final Identifier SERVER_COMMIT_COLOR = Identifier.of("bbs_together", "s_commit_color");
+    public static final Identifier SERVER_COMMIT_REVERT = Identifier.of("bbs_together", "s_commit_revert");
+    public static final Identifier SERVER_COMMIT_SQUASH = Identifier.of("bbs_together", "s_commit_squash");
+    public static final Identifier SERVER_COMMIT_CREATE = Identifier.of("bbs_together", "s_commit_create");
+    public static final Identifier SERVER_COMMIT_HEAD = Identifier.of("bbs_together", "s_commit_head");
+    public static final Identifier SERVER_BRANCH_CREATE = Identifier.of("bbs_together", "s_branch_create");
+    public static final Identifier SERVER_BRANCH_CHECKOUT = Identifier.of("bbs_together", "s_branch_checkout");
+    public static final Identifier CLIENT_COMMITS = Identifier.of("bbs_together", "c_commits");
+    public static final Identifier CLIENT_COMMIT_INDEX = Identifier.of("bbs_together", "c_commit_index");
+    public static final Identifier CLIENT_COMMIT_ADDED = Identifier.of("bbs_together", "c_commit_added");
+    public static final Identifier CLIENT_COMMIT_DIFF = Identifier.of("bbs_together", "c_commit_diff");
+    public static final Identifier CLIENT_COMMIT_RENAMED = Identifier.of("bbs_together", "c_commit_renamed");
+    public static final Identifier CLIENT_COMMIT_COLOR = Identifier.of("bbs_together", "c_commit_color");
+    public static final Identifier CLIENT_COMMIT_SELECTIONS = Identifier.of("bbs_together", "c_commit_selections");
+    public static final Identifier CLIENT_PLAYER_COMMIT_POSITIONS = Identifier.of("bbs_together", "c_player_commit_positions");
+    public static final Identifier CLIENT_COMMIT_REJECTED = Identifier.of("bbs_together", "c_commit_rejected");
+    public static final Identifier CLIENT_COMMIT_HEAD = Identifier.of("bbs_together", "c_commit_head");
     private static final ConcurrentHashMap<UUID, CompressedServerPacketCrusher> playerCrushers = new ConcurrentHashMap();
     private static final LinkedHashMap<UUID, Integer> playerReplaySelections = new LinkedHashMap();
     private static final ConcurrentHashMap<UUID, String> playerEditingFilm = new ConcurrentHashMap();
@@ -351,7 +352,7 @@ public class TogetherServerNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(filmId);
         buf.writeString(branch == null ? "" : branch);
-        ServerPlayNetworking.send(player, CLIENT_FILM_BRANCH, buf);
+        TogetherServerNetworking.send(player, CLIENT_FILM_BRANCH, buf);
     }
 
     private static void sendFilmBranchMeta(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch) {
@@ -433,16 +434,17 @@ public class TogetherServerNetwork {
     }
 
     public static void setup() {
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_PLAYER_COLOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handlePlayerColor(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_CURSOR_POSITION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCursorPosition(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmSelection(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REPLAY_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplaySelection(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REPLAY_FORM_LOCK, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplayFormLock(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REPLAY_SWAP, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplaySwap(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetRequest(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_UPLOAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetUpload(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_HELLO, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleHello(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_RESYNC, (server, player, handler, buf, resp) -> {
+        TogetherServerNetworking.preRegister();
+        TogetherServerNetworking.register((Identifier)SERVER_PLAYER_COLOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handlePlayerColor(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_CURSOR_POSITION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCursorPosition(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmSelection(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_REPLAY_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplaySelection(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_REPLAY_FORM_LOCK, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplayFormLock(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_REPLAY_SWAP, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplaySwap(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_ASSET_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetRequest(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_ASSET_UPLOAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetUpload(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_HELLO, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleHello(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_ASSET_RESYNC, (server, player, handler, buf, resp) -> {
             long now = System.currentTimeMillis();
             Long previous = manifestQueryAt.put(player.getUuid(), now);
 
@@ -453,47 +455,47 @@ public class TogetherServerNetwork {
             long clientVersion = buf.readableBytes() >= 8 ? buf.readLong() : 0L;
             TogetherServerNetwork.sendAssetManifest(server, player, clientVersion);
         });
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SYNC_PREF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSyncPref(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReport(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_REPORT_DELTA, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReportDelta(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_INVENTORY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmInventory(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_SCREEN, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmScreen(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_RECORDING_FINISHED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRecordingFinished(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MASTER_DONE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleMasterRecordingDone(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_DATA_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDataSync(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_UNDO_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleUndoSync(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_SAVE_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmSaveSync(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_LIST_CHANGED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmListChanged(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_DELETED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDeleted(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_FILM_RENAMED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmRenamed(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BEHAVIOR_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorReport(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BEHAVIOR_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorQuery(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_SET_OPERATOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSetOperator(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_REMOVE_PLAYER_LOGS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRemovePlayerLogs(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MODEL_DELETE_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteRequest(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_MODEL_DELETE_DECISION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteDecision(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_ASSET_LOCK, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetLock(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_INVITE, (server, player, handler, buf, resp) -> CoopSessionManager.handleInvite(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_RESPOND, (server, player, handler, buf, resp) -> CoopSessionManager.handleRespond(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_PICK, (server, player, handler, buf, resp) -> CoopSessionManager.handlePick(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_LEAVE, (server, player, handler, buf, resp) -> CoopSessionManager.handleLeave(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_START, (server, player, handler, buf, resp) -> CoopSessionManager.handleStart(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_CANCEL, (server, player, handler, buf, resp) -> CoopSessionManager.handleCancel(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COOP_MOUSE, (server, player, handler, buf, resp) -> CoopSessionManager.handleMouse(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMITS_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitsQuery(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_INDEX, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitIndex(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_DIFF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitDiff(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_HEAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitHead(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_RENAME, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRename(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitSelection(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_COLOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitColor(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_REVERT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRevert(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_SQUASH, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitSquash(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_COMMIT_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitCreate(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BRANCH_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCreate(server, player, buf));
-        ServerPlayNetworking.registerGlobalReceiver((Identifier)SERVER_BRANCH_CHECKOUT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCheckout(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_SYNC_PREF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSyncPref(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_ASSET_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReport(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_ASSET_REPORT_DELTA, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetReportDelta(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_INVENTORY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmInventory(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_SCREEN, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmScreen(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_RECORDING_FINISHED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRecordingFinished(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_MASTER_DONE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleMasterRecordingDone(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_DATA_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDataSync(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_UNDO_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleUndoSync(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_SAVE_SYNC, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmSaveSync(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_LIST_CHANGED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmListChanged(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_DELETED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmDeleted(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_FILM_RENAMED, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmRenamed(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_BEHAVIOR_REPORT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorReport(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_BEHAVIOR_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBehaviorQuery(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_SET_OPERATOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleSetOperator(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_REMOVE_PLAYER_LOGS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleRemovePlayerLogs(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_MODEL_DELETE_REQUEST, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteRequest(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_MODEL_DELETE_DECISION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleModelDeleteDecision(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_BBSOP_SET, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopSet(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_BBSOP_GRANT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBbsopGrant(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_ASSET_LOCK, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleAssetLock(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_INVITE, (server, player, handler, buf, resp) -> CoopSessionManager.handleInvite(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_RESPOND, (server, player, handler, buf, resp) -> CoopSessionManager.handleRespond(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_PICK, (server, player, handler, buf, resp) -> CoopSessionManager.handlePick(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_LEAVE, (server, player, handler, buf, resp) -> CoopSessionManager.handleLeave(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_START, (server, player, handler, buf, resp) -> CoopSessionManager.handleStart(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_CANCEL, (server, player, handler, buf, resp) -> CoopSessionManager.handleCancel(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COOP_MOUSE, (server, player, handler, buf, resp) -> CoopSessionManager.handleMouse(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMITS_QUERY, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitsQuery(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_INDEX, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitIndex(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_DIFF, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitDiff(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_HEAD, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitHead(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_RENAME, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRename(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitSelection(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_COLOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitColor(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_REVERT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitRevert(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_SQUASH, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitSquash(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_COMMIT_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitCreate(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_BRANCH_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCreate(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_BRANCH_CHECKOUT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCheckout(server, player, buf));
         BBSTogetherFix28Server.registerReceivers();
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TogetherServerNetwork.sweepUploadAggregates(server);
@@ -549,10 +551,12 @@ public class TogetherServerNetwork {
         pendingAssetHints.clear();
         assetHintPending.set(false);
         AssetEgressBudget.reset();
+        AssetIngressBudget.reset();
         assetBytesSent.set(0L);
         assetTasksSent.set(0L);
         assetRequestsSeen.set(0L);
         assetPendingDropped.set(0L);
+        TransferLog.reset();
         CoopSessionManager.reset();
         BBSTogetherFix28Server.resetState();
     }
@@ -578,7 +582,7 @@ public class TogetherServerNetwork {
                 anyQueue = true;
                 queued += n;
                 Text state = Text.translatable(assetDrainActive.containsKey(p.getUuid()) ? "bbs_together.diag.player.sending" : "bbs_together.diag.player.idle");
-                lines.add(Text.translatable("bbs_together.diag.player", Text.literal(p.getGameProfile().getName()), diagValue(n), state).formatted(Formatting.GRAY));
+                lines.add(Text.translatable("bbs_together.diag.player", Text.literal(PlayerCompat.name(p.getGameProfile())), diagValue(n), state).formatted(Formatting.GRAY));
             }
         }
         if (!anyQueue) {
@@ -595,6 +599,12 @@ public class TogetherServerNetwork {
             : Text.translatable("bbs_together.diag.sync_max.value", diagValue(syncMax / 1024L / 1024L));
         lines.add(Text.translatable("bbs_together.diag.sync_max", limit).formatted(Formatting.GRAY));
         lines.add(Text.translatable("bbs_together.diag.dropped", diagValue(assetPendingDropped.get())).formatted(Formatting.GRAY));
+        lines.add(Text.translatable("bbs_together.diag.transfer",
+            diagValue(TransferLog.egressCompleted()),
+            diagValue(TransferLog.egressFailed()),
+            diagValue(TransferLog.ingressCompleted()),
+            diagValue(TransferLog.averageKiBPerSec()),
+            diagValue(TransferLog.budgetWaitMillis())).formatted(Formatting.GRAY));
         lines.add(Text.translatable("bbs_together.diag.hint").formatted(Formatting.GRAY));
         return lines;
     }
@@ -674,7 +684,7 @@ public class TogetherServerNetwork {
                         outBuf.writeInt(entry.getValue().intValue());
                     }
                 }
-                ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_PLAYER_COLORS, (PacketByteBuf)outBuf);
+                TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_PLAYER_COLORS, (PacketByteBuf)outBuf);
             }
         });
     }
@@ -746,7 +756,7 @@ public class TogetherServerNetwork {
                     outBuf.writeInt(idx);
                 }
                 outBuf.writeInt(playheadTick);
-                ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
+                TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
             }
         });
     }
@@ -764,7 +774,7 @@ public class TogetherServerNetwork {
             outBuf.writeFloat(0.0f);
             outBuf.writeInt(0);
             outBuf.writeInt(0);
-            ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
+            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
         }
     }
 
@@ -803,7 +813,7 @@ public class TogetherServerNetwork {
                 buf.writeUuid(entry.getKey());
                 buf.writeString(entry.getValue());
             }
-            ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_FILM_SELECTIONS, (PacketByteBuf)buf);
+            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_FILM_SELECTIONS, (PacketByteBuf)buf);
         }
     }
 
@@ -877,7 +887,7 @@ public class TogetherServerNetwork {
                     buf.writeInt(entry.getValue().intValue());
                 }
             }
-            ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_SELECTIONS, (PacketByteBuf)buf);
+            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_SELECTIONS, (PacketByteBuf)buf);
         }
     }
 
@@ -914,7 +924,7 @@ public class TogetherServerNetwork {
                 outBuf.writeUuid((UUID)entry.getKey());
                 outBuf.writeInt(((FormLockData)entry.getValue()).replayIndex);
             }
-            ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_FORM_LOCKS, (PacketByteBuf)outBuf);
+            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_FORM_LOCKS, (PacketByteBuf)outBuf);
         }
     }
 
@@ -929,7 +939,7 @@ public class TogetherServerNetwork {
                 outBuf.writeString(filmId);
                 outBuf.writeInt(from);
                 outBuf.writeInt(to);
-                ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_SWAP, (PacketByteBuf)outBuf);
+                TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_SWAP, (PacketByteBuf)outBuf);
             }
         });
     }
@@ -1138,7 +1148,7 @@ public class TogetherServerNetwork {
                 }
                 String uploadModelId = ModelPathUtils.extractModelId(relativePath);
                 if (uploadModelId != null && TogetherServerNetwork.isModelTombstoned(uploadModelId)) {
-                    System.out.println("[BBSTogether] Ignored upload of recently deleted model " + uploadModelId + " from " + uploader.getGameProfile().getName());
+                    System.out.println("[BBSTogether] Ignored upload of recently deleted model " + uploadModelId + " from " + PlayerCompat.name(uploader.getGameProfile()));
                     return;
                 }
                 if (uploadModelId != null && !AssetLockManager.canEdit(uploader.getUuid(), AssetLockType.MODEL, uploadModelId)) {
@@ -1157,6 +1167,17 @@ public class TogetherServerNetwork {
                 try {
                     boolean changed;
                     String existingSha1;
+                    TransferLog.ingressBegin();
+                    long ingressWait = AssetIngressBudget.reserve(bytes.length);
+                    if (ingressWait > 0L) {
+                        try {
+                            TimeUnit.NANOSECONDS.sleep(ingressWait);
+                        }
+                        catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
                     Files.createDirectories(target.getParent(), new FileAttribute[0]);
                     long stampMtime = uploadMtime > 0L ? uploadMtime : System.currentTimeMillis();
                     if (seqTotal > 1) {
@@ -1245,6 +1266,7 @@ public class TogetherServerNetwork {
         catch (Exception exception) {
             // empty catch block
         }
+        TransferLog.ingress(uploader.getUuid(), relativePath, size, changed);
         if (changed) {
             TogetherServerNetwork.recordUploadBehavior(uploader, relativePath, size);
         }
@@ -1257,7 +1279,7 @@ public class TogetherServerNetwork {
 
     public static void broadcastAssetsChanged(MinecraftServer server) {
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            ServerPlayNetworking.send(player, CLIENT_ASSETS_CHANGED, PacketByteBufs.create());
+            TogetherServerNetworking.send(player, CLIENT_ASSETS_CHANGED, PacketByteBufs.create());
         }
     }
 
@@ -1283,7 +1305,7 @@ public class TogetherServerNetwork {
                     for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
                         Boolean pref;
                         if (other.getUuid().equals(uploaderId) || (pref = playerReceivePush.get(other.getUuid())) != null && !pref.booleanValue()) continue;
-                        boolean hintCapable = ServerPlayNetworking.canSend((ServerPlayerEntity)other, (Identifier)CLIENT_ASSET_HINT);
+                        boolean hintCapable = TogetherServerNetworking.canSend((ServerPlayerEntity)other, (Identifier)CLIENT_ASSET_HINT);
                         Map<String, String> owned = playerOwnedAssets.get(other.getUuid());
                         MapType payload = new MapType();
                         for (Map.Entry e : hints.entrySet()) {
@@ -1320,7 +1342,7 @@ public class TogetherServerNetwork {
                 server.execute(() -> {
                     for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                         if (p.getUuid().equals(uploaderId)) continue;
-                        ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_ASSETS_CHANGED, (PacketByteBuf)PacketByteBufs.create());
+                        TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_ASSETS_CHANGED, (PacketByteBuf)PacketByteBufs.create());
                     }
                 });
             }
@@ -1377,11 +1399,14 @@ public class TogetherServerNetwork {
         }
         AssetEgressBudget.sync();
         int totalSlices = (int)Math.max(1L, (size + batchBytes - 1L) / batchBytes);
+        long transferStartNs = TransferLog.begin("egress", player.getUuid(), task.relativePath, size);
+        long transferBudgetWaitNs = 0L;
         try {
             for (int seq = 0; seq < totalSlices; ++seq) {
                 int fSeq = seq;
                 int fTotal = totalSlices;
                 long budgetWaitNs = AssetEgressBudget.reserve((int)Math.min(batchBytes, size - (long)seq * batchBytes));
+                transferBudgetWaitNs += Math.max(0L, budgetWaitNs);
                 if (budgetWaitNs > 0L) {
                     Thread.sleep(budgetWaitNs / 1000000L);
                 }
@@ -1412,8 +1437,10 @@ public class TogetherServerNetwork {
                 if (seq >= totalSlices - 1 || interval <= 0L) continue;
                 Thread.sleep(interval);
             }
+            TransferLog.complete("egress", player.getUuid(), task.relativePath, size, transferStartNs, transferBudgetWaitNs);
         }
         catch (InterruptedException e) {
+            TransferLog.failed("egress", player.getUuid(), task.relativePath, size, transferStartNs, transferBudgetWaitNs, e);
             Thread.currentThread().interrupt();
         }
     }
@@ -1516,12 +1543,12 @@ public class TogetherServerNetwork {
         limits.writeInt(TogetherSettings.getCoopInviteSeconds());
         /* Limits first: the hello packet can immediately trigger the manifest query on the
          * client, and that query should already see the server's size ceiling. */
-        ServerPlayNetworking.send(player, CLIENT_SERVER_LIMITS, limits);
+        TogetherServerNetworking.send(player, CLIENT_SERVER_LIMITS, limits);
 
         PacketByteBuf out = PacketByteBufs.create();
         out.writeInt(PROTOCOL_VERSION);
         out.writeInt(protocol);
-        ServerPlayNetworking.send(player, CLIENT_HELLO, out);
+        TogetherServerNetworking.send(player, CLIENT_HELLO, out);
     }
 
     private static void handleAssetReport(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -1717,7 +1744,7 @@ public class TogetherServerNetwork {
                 boolean wasLast = playerInFilmScreen.size() == 1 && playerInFilmScreen.containsKey(player.getUuid());
                 goneFilm = playerInFilmScreen.remove(player.getUuid());
                 if (wasLast) {
-                    BBSMod.getActions().resetDamage(player.getServerWorld());
+                    BBSMod.getActions().resetDamage(PlayerCompat.serverWorld(player));
                 }
             } else {
                 String branch;
@@ -1725,7 +1752,7 @@ public class TogetherServerNetwork {
                 boolean wasFirst = playerInFilmScreen.isEmpty();
                 playerInFilmScreen.put(player.getUuid(), filmId);
                 if (wasFirst) {
-                    BBSMod.getActions().trackDamage(player.getServerWorld());
+                    BBSMod.getActions().trackDamage(PlayerCompat.serverWorld(player));
                 }
                 if (!(key = filmId + "\t" + (branch = TogetherServerNetwork.playerBranch(filmId, player))).equals(lastBranchStateSent.get(player.getUuid()))) {
                     TogetherServerNetwork.sendFilmBranchState(server, player, filmId);
@@ -1744,7 +1771,7 @@ public class TogetherServerNetwork {
                 buf.writeUuid(entry.getKey());
                 buf.writeString(entry.getValue());
             }
-            ServerPlayNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_FILM_SCREENS, (PacketByteBuf)buf);
+            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_FILM_SCREENS, (PacketByteBuf)buf);
         }
     }
 
@@ -1759,7 +1786,7 @@ public class TogetherServerNetwork {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeBoolean(start);
         buf.writeInt(-1);
-        ServerPlayNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_TOGGLE_RECORDING, (PacketByteBuf)buf);
+        TogetherServerNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_TOGGLE_RECORDING, (PacketByteBuf)buf);
         if (start) {
             recordingPlayers.put(player.getUuid(), Boolean.TRUE);
         } else {
@@ -1880,7 +1907,7 @@ public class TogetherServerNetwork {
         }
         if (defaultBranch) {
             for (ServerPlayerEntity recipient : others) {
-                ServerPlayNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
+                TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
             }
         }
     }
@@ -1908,7 +1935,7 @@ public class TogetherServerNetwork {
                 }
                 String branch = TogetherServerNetwork.playerBranch(filmId, player);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
-                    System.out.println("[BBSTogether] Drop save from stale branch player=" + player.getGameProfile().getName() + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
+                    System.out.println("[BBSTogether] Drop save from stale branch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
                     return;
                 }
                 if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
@@ -1952,7 +1979,7 @@ public class TogetherServerNetwork {
 
     /** Record what was just saved as a commit on the player's current branch. */
     private static void commitAfterSave(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, MapType merged) {
-        FilmCommit commit = FilmCommitStore.commit(filmId, merged, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), "", branch);
+        FilmCommit commit = FilmCommitStore.commit(filmId, merged, player.getUuid().toString(), PlayerCompat.name(player.getGameProfile()), System.currentTimeMillis(), "", branch);
         if (commit == null) {
             return;
         }
@@ -2064,7 +2091,7 @@ public class TogetherServerNetwork {
             outBuf.writeUuid((UUID)entry.getKey());
             outBuf.writeString(((CommitSelection)entry.getValue()).commitId);
         }
-        ServerPlayNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_SELECTIONS, (PacketByteBuf)outBuf);
+        TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_SELECTIONS, (PacketByteBuf)outBuf);
     }
 
     private static void sendAllCommitSelections(MinecraftServer server, ServerPlayerEntity player) {
@@ -2102,7 +2129,7 @@ public class TogetherServerNetwork {
             outBuf.writeUuid((UUID)entry.getKey());
             outBuf.writeString((String)entry.getValue());
         }
-        ServerPlayNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_PLAYER_COMMIT_POSITIONS, (PacketByteBuf)outBuf);
+        TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_PLAYER_COMMIT_POSITIONS, (PacketByteBuf)outBuf);
     }
 
     private static void sendAllPlayerCommitPositions(MinecraftServer server, ServerPlayerEntity recipient) {
@@ -2223,7 +2250,7 @@ public class TogetherServerNetwork {
             if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                 return;
             }
-            FilmCommit squashed = FilmCommitStore.squash(filmId, commitId, player.getUuid().toString(), player.getGameProfile().getName(), null);
+            FilmCommit squashed = FilmCommitStore.squash(filmId, commitId, player.getUuid().toString(), PlayerCompat.name(player.getGameProfile()), null);
             if (squashed == null) {
                 player.sendMessage(Text.translatable("bbs_together.commit.squash.failed").formatted(Formatting.YELLOW), false);
                 return;
@@ -2265,7 +2292,7 @@ public class TogetherServerNetwork {
                     TogetherServerNetwork.rejectCommit(player, 1);
                     return;
                 }
-                FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), message, branch);
+                FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), PlayerCompat.name(player.getGameProfile()), System.currentTimeMillis(), message, branch);
                 if (commit == null) {
                     TogetherServerNetwork.rejectCommit(player, 0);
                     return;
@@ -2292,7 +2319,7 @@ public class TogetherServerNetwork {
             ? Text.translatable("bbs_together.branch.checkout.ok", Text.literal(branch).formatted(Formatting.WHITE)).formatted(Formatting.GREEN)
             : Text.translatable("bbs_together.branch.checkout.failed", Text.literal(branch).formatted(Formatting.WHITE), Text.translatable(reasonKey, reasonArgs)).formatted(Formatting.YELLOW);
         player.sendMessage(message, success);
-        System.out.println("[BBSTogether] Branch checkout " + (success ? "ok" : "failed") + " player=" + player.getGameProfile().getName() + " film=" + playerEditingFilm.get(player.getUuid()) + " branch=" + branch + (String)(success ? "" : " reason=" + reasonKey));
+        System.out.println("[BBSTogether] Branch checkout " + (success ? "ok" : "failed") + " player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + playerEditingFilm.get(player.getUuid()) + " branch=" + branch + (String)(success ? "" : " reason=" + reasonKey));
     }
 
     private static void handleBranchCreate(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -2323,7 +2350,7 @@ public class TogetherServerNetwork {
         String filmId = buf.readString();
         String branch = buf.readString(80);
         server.execute(() -> {
-            System.out.println("[BBSTogether] Branch checkout request player=" + player.getGameProfile().getName() + " film=" + filmId + " branch=" + branch);
+            System.out.println("[BBSTogether] Branch checkout request player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " branch=" + branch);
             if (CoopSessionManager.isPlayerInSession(player.getUuid())) {
                 TogetherServerNetwork.branchCheckoutMessage(player, branch, "bbs_together.branch.reason.coop", false);
                 return;
@@ -2378,22 +2405,22 @@ public class TogetherServerNetwork {
         }
         String current = TogetherServerNetwork.playerBranch(filmId, player);
         if (incomingData != null && sentBranch != null && !sentBranch.isEmpty() && !sentBranch.equals(current)) {
-            System.out.println("[BBSTogether] Ignore coop accept film from stale branch player=" + player.getGameProfile().getName() + " film=" + filmId + " sent=" + sentBranch + " current=" + current);
+            System.out.println("[BBSTogether] Ignore coop accept film from stale branch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " sent=" + sentBranch + " current=" + current);
             incomingData = null;
         }
         if (targetBranch.equals(current)) {
             return true;
         }
         if (CoopSessionManager.isFilmLockedForEditing(filmId, current)) {
-            System.out.println("[BBSTogether] Coop branch switch refused (locked) player=" + player.getGameProfile().getName() + " film=" + filmId + " branch=" + current);
+            System.out.println("[BBSTogether] Coop branch switch refused (locked) player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " branch=" + current);
             return false;
         }
         MapType mapType = data = incomingData != null ? incomingData : FilmBranchStore.workingData(filmId, current);
         if (data == null) {
-            System.out.println("[BBSTogether] Coop branch switch refused (no working data) player=" + player.getGameProfile().getName() + " film=" + filmId + " branch=" + current);
+            System.out.println("[BBSTogether] Coop branch switch refused (no working data) player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " branch=" + current);
             return false;
         }
-        FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), player.getGameProfile().getName(), System.currentTimeMillis(), FilmCommit.autoCoop(targetBranch), current);
+        FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), PlayerCompat.name(player.getGameProfile()), System.currentTimeMillis(), FilmCommit.autoCoop(targetBranch), current);
         if (commit != null || incomingData != null) {
             TogetherServerNetwork.saveBranchNow(filmId, current, data);
             lastSavedFilmSnapshots.put(TogetherServerNetwork.branchKey(filmId, current), data);
@@ -2403,7 +2430,7 @@ public class TogetherServerNetwork {
             BehaviorLogManager.record(player, BehaviorType.EDIT.id, 1, filmId, new ArrayList<String>(), Map.of("commit", commit.id, "branch", current, "coop", "accept"));
         }
         if (!FilmBranchStore.setBranch(filmId, player.getUuid(), targetBranch) || !targetBranch.equals(FilmBranchStore.branchOf(filmId, player.getUuid()))) {
-            System.out.println("[BBSTogether] Coop branch switch failed player=" + player.getGameProfile().getName() + " film=" + filmId + " from=" + current + " to=" + targetBranch);
+            System.out.println("[BBSTogether] Coop branch switch failed player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " from=" + current + " to=" + targetBranch);
             return false;
         }
         playerEditingFilm.put(player.getUuid(), filmId);
@@ -2420,7 +2447,7 @@ public class TogetherServerNetwork {
         TogetherServerNetwork.together_broadcastCursorSnapshot(server, filmId);
         TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
         player.sendMessage(Text.translatable("bbs_together.branch.coop.switched", Text.literal(current).formatted(Formatting.WHITE), Text.literal(targetBranch).formatted(Formatting.WHITE)).formatted(Formatting.GREEN), false);
-        System.out.println("[BBSTogether] Coop branch switch player=" + player.getGameProfile().getName() + " film=" + filmId + " from=" + current + " to=" + targetBranch + (String)(commit == null ? " (nothing to commit)" : " commit=" + commit.id));
+        System.out.println("[BBSTogether] Coop branch switch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " from=" + current + " to=" + targetBranch + (String)(commit == null ? " (nothing to commit)" : " commit=" + commit.id));
         return true;
     }
 
@@ -2462,7 +2489,7 @@ public class TogetherServerNetwork {
             outBuf.writeString(filmId);
             outBuf.writeString(commitId);
             outBuf.writeString(message);
-            ServerPlayNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_RENAMED, (PacketByteBuf)outBuf);
+            TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_RENAMED, (PacketByteBuf)outBuf);
         }
     }
 
@@ -2472,14 +2499,14 @@ public class TogetherServerNetwork {
             outBuf.writeString(filmId);
             outBuf.writeString(commitId);
             outBuf.writeInt(color);
-            ServerPlayNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_COLOR, (PacketByteBuf)outBuf);
+            TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_COLOR, (PacketByteBuf)outBuf);
         }
     }
 
     private static void rejectCommit(ServerPlayerEntity player, int reason) {
         PacketByteBuf outBuf = PacketByteBufs.create();
         outBuf.writeByte(reason);
-        ServerPlayNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_COMMIT_REJECTED, (PacketByteBuf)outBuf);
+        TogetherServerNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_COMMIT_REJECTED, (PacketByteBuf)outBuf);
     }
 
     private static int mergedFilmReplays(MapType filmData) {
@@ -2700,11 +2727,11 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             try {
                 if (!BehaviorLogManager.isOperator(server, player)) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to " + (op ? "op" : "deop") + " someone without being an op");
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " tried to " + (op ? "op" : "deop") + " someone without being an op");
                     return;
                 }
                 boolean done = BehaviorLogManager.setOperator(server, targetId, op);
-                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (done ? (op ? " op'ed " : " deop'ed ") : " FAILED to change op status of ") + String.valueOf(targetId));
+                System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + (done ? (op ? " op'ed " : " deop'ed ") : " FAILED to change op status of ") + String.valueOf(targetId));
                 TogetherServerNetwork.broadcastPermissions(server);
             }
             catch (Exception e) {
@@ -2719,13 +2746,13 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             try {
                 if (!BbsOpManager.canManage(player)) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to set a BBS op level without permission");
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " tried to set a BBS op level without permission");
                     return;
                 }
                 boolean changed = BbsOpManager.set(targetId, level);
                 ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetId);
-                String targetName = target == null ? String.valueOf(targetId) : target.getGameProfile().getName();
-                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (changed ? " set " : " kept ") + targetName + " BBS op level at " + level);
+                String targetName = target == null ? String.valueOf(targetId) : PlayerCompat.name(target.getGameProfile());
+                System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + (changed ? " set " : " kept ") + targetName + " BBS op level at " + level);
                 BbsOpManager.syncToAll(server);
                 TogetherServerNetwork.broadcastPermissions(server);
             }
@@ -2742,7 +2769,7 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             try {
                 if (!BbsOpManager.canManage(player)) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to change a BBS domain grant without permission");
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " tried to change a BBS domain grant without permission");
                     return;
                 }
                 BbsOpDomain domain = BbsOpDomain.byId(domainId);
@@ -2751,7 +2778,7 @@ public class TogetherServerNetwork {
                 }
                 boolean changed = BbsOpManager.setGrant(targetId, domain, allowed);
                 if (changed) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (allowed ? " allowed " : " denied ") + domain.id + " for " + String.valueOf(targetId));
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + (allowed ? " allowed " : " denied ") + domain.id + " for " + String.valueOf(targetId));
                     BbsOpManager.syncToAll(server);
                 }
             }
@@ -2780,7 +2807,7 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             try {
                 if (!BbsOpManager.canManage(player)) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to change an asset lock without permission");
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " tried to change an asset lock without permission");
                     return;
                 }
                 AssetLockType type = AssetLockType.byId(typeId);
@@ -2797,7 +2824,7 @@ public class TogetherServerNetwork {
                 }
                 boolean changed = AssetLockManager.set(player, type, id, mode, members);
                 if (changed) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName()
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile())
                         + (mode == null ? " unlocked " : " locked ") + type.id + " " + id);
                     TogetherServerNetwork.broadcastAssetLocks(server);
                 }
@@ -2825,7 +2852,7 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.writeLockMembers(out, lock.whitelist);
             TogetherServerNetwork.writeLockMembers(out, lock.blacklist);
         }
-        ServerPlayNetworking.send(player, CLIENT_ASSET_LOCKS, out);
+        TogetherServerNetworking.send(player, CLIENT_ASSET_LOCKS, out);
     }
 
     private static void writeLockMembers(PacketByteBuf out, Map<UUID, String> members) {
@@ -2854,7 +2881,7 @@ public class TogetherServerNetwork {
                     return;
                 }
                 int removed = BehaviorLogManager.removePlayerLogs(targetId);
-                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " removed " + removed + " log entries of " + String.valueOf(targetId));
+                System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " removed " + removed + " log entries of " + String.valueOf(targetId));
             }
             catch (Exception e) {
                 e.printStackTrace();
@@ -2898,14 +2925,14 @@ public class TogetherServerNetwork {
                 File assetsFolder = BBSMod.getAssetsFolder();
                 File modelDir = new File(assetsFolder, "models/" + modelId.replace('/', File.separatorChar));
                 if (!TogetherServerNetwork.modelFolderHasFiles(modelDir)) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " requested deletion of model " + modelId + " which does not exist on the server");
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " requested deletion of model " + modelId + " which does not exist on the server");
                     return;
                 }
                 if (BehaviorLogManager.hasPendingRequest(modelId)) {
                     return;
                 }
                 BehaviorLogManager.recordUnique(player, BehaviorType.OTHER.id, 6, modelId, Collections.singletonList(modelId), Map.of("status", "pending"));
-                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " requested server deletion of model " + modelId);
+                System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " requested server deletion of model " + modelId);
             }
             catch (Exception e) {
                 e.printStackTrace();
@@ -2921,7 +2948,7 @@ public class TogetherServerNetwork {
                 boolean isManager;
                 boolean bl = isManager = BehaviorLogManager.isOperator(server, player) || BbsOpManager.get(player.getUuid()) >= 2;
                 if (!isManager) {
-                    System.out.println("[BBSTogether] " + player.getGameProfile().getName() + " tried to decide a model delete request without being a manager");
+                    System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " tried to decide a model delete request without being a manager");
                     return;
                 }
                 BehaviorEntry entry = BehaviorLogManager.find(entryId);
@@ -2930,7 +2957,7 @@ public class TogetherServerNetwork {
                 }
                 synchronized (BehaviorLogManager.class) {
                     entry.extra.put("status", approve ? "approved" : "denied");
-                    entry.extra.put("by", player.getGameProfile().getName());
+                    entry.extra.put("by", PlayerCompat.name(player.getGameProfile()));
                     entry.extra.put("byId", player.getUuid().toString());
                     entry.extra.put("decidedAt", String.valueOf(System.currentTimeMillis()));
                     BehaviorLogManager.bump();
@@ -2938,7 +2965,7 @@ public class TogetherServerNetwork {
                 if (approve) {
                     TogetherServerNetwork.deleteServerModel(server, entry.target);
                 }
-                System.out.println("[BBSTogether] " + player.getGameProfile().getName() + (approve ? " approved" : " denied") + " the deletion of model " + entry.target);
+                System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + (approve ? " approved" : " denied") + " the deletion of model " + entry.target);
             }
             catch (Exception e) {
                 e.printStackTrace();
@@ -2965,8 +2992,8 @@ public class TogetherServerNetwork {
         for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
             PacketByteBuf out = PacketByteBufs.create();
             out.writeString(modelId);
-            ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_MODEL_DELETED, (PacketByteBuf)out);
-            ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_ASSETS_CHANGED, (PacketByteBuf)PacketByteBufs.create());
+            TogetherServerNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_MODEL_DELETED, (PacketByteBuf)out);
+            TogetherServerNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_ASSETS_CHANGED, (PacketByteBuf)PacketByteBufs.create());
         }
     }
 
@@ -3003,7 +3030,7 @@ public class TogetherServerNetwork {
         PacketByteBuf out = PacketByteBufs.create();
         out.writeBoolean(isOp);
         out.writeBoolean(isManager);
-        ServerPlayNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_PERMISSIONS, (PacketByteBuf)out);
+        TogetherServerNetworking.send((ServerPlayerEntity)player, (Identifier)CLIENT_PERMISSIONS, (PacketByteBuf)out);
     }
 
     public static void broadcastPermissions(MinecraftServer server) {
@@ -3117,7 +3144,7 @@ public class TogetherServerNetwork {
         for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
             PacketByteBuf out = PacketByteBufs.create();
             out.writeString(filmId);
-            ServerPlayNetworking.send(other, CLIENT_FILM_DELETED, out);
+            TogetherServerNetworking.send(other, CLIENT_FILM_DELETED, out);
         }
     }
 
@@ -3205,10 +3232,10 @@ public class TogetherServerNetwork {
                 PacketByteBuf renameOut = PacketByteBufs.create();
                 renameOut.writeString(oldId);
                 renameOut.writeString(newId);
-                ServerPlayNetworking.send(other, CLIENT_FILM_RENAMED, renameOut);
+                TogetherServerNetworking.send(other, CLIENT_FILM_RENAMED, renameOut);
             }
 
-            ServerPlayNetworking.send(other, CLIENT_FILM_LIST_CHANGED, PacketByteBufs.create());
+            TogetherServerNetworking.send(other, CLIENT_FILM_LIST_CHANGED, PacketByteBufs.create());
         }
     }
 
@@ -3230,7 +3257,7 @@ public class TogetherServerNetwork {
         server.execute(() -> {
             for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
                 if (other.getUuid().equals(player.getUuid())) continue;
-                ServerPlayNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
+                TogetherServerNetworking.send((ServerPlayerEntity)other, (Identifier)CLIENT_FILM_LIST_CHANGED, (PacketByteBuf)PacketByteBufs.create());
             }
         });
     }
@@ -3328,7 +3355,7 @@ public class TogetherServerNetwork {
                 }
                 String branch = TogetherServerNetwork.playerBranch(filmId, player);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
-                    System.out.println("[BBSTogether] Drop delta from stale branch player=" + player.getGameProfile().getName() + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
+                    System.out.println("[BBSTogether] Drop delta from stale branch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
                     return;
                 }
                 if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
@@ -3548,7 +3575,7 @@ public class TogetherServerNetwork {
                 }
                 out.writeInt(cursor.playheadTick);
             }
-            ServerPlayNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)out);
+            TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)out);
         }
     }
 

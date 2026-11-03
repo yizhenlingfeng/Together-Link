@@ -35,7 +35,7 @@ run_2/
 run_server/
 run-*/
 
-# 多版本构建输出（1.20.4 使用 build-1.20.4/）
+# Multi-version build output (1.20.4 uses build-1.20.4/)
 build-*/
 
 # java
@@ -45,23 +45,25 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+/p*.log
+/run_client_*.txt
 
 ik_test/*
 .claude/settings.local.json
 OrthoCamera-1.20.1
 temp_change_log.md
 
-# 归档的旧版 jar（dist/ 目录）
+# Archived old jars (dist/ directory)
 dist/*.jar
 
-# BBS 子项目源码构建产物
+# Build output of the BBS sub-project sources
 lib/**/.gradle/
 lib/**/build/
 
-# 参考模组原始压缩包（解包后的源码树已入库，zip 本体不进 git）
+# Original reference-mod archives (the unpacked source tree is tracked; the zips are not)
 lib/**/*.zip
 .workbuddy/
 .crash-report/
 
-# 部署备份（旧版 jar 快照）
+# Deployment backups (old jar snapshots)
 dist/*.bak

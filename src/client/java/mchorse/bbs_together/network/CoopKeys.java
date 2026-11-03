@@ -1,6 +1,5 @@
 package mchorse.bbs_together.network;
 
-import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.utils.keys.KeyCombo;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
