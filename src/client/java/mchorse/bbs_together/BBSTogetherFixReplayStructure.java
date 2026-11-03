@@ -27,6 +27,8 @@ import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.replays.UIReplayList;
 import mchorse.bbs_together.BBSTogetherFix22;
 import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.network.CompressedClientPacketCrusher;
+import mchorse.bbs_together.network.CompressedServerPacketCrusher;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.entity.player.PlayerEntity;
@@ -39,15 +41,25 @@ import net.minecraft.server.MinecraftServer;
 public final class BBSTogetherFixReplayStructure {
     private static final Identifier SERVER_REPLAY_STRUCTURE = Identifier.of("bbs_together", "s_replay_structure_fix1615");
     private static final Identifier CLIENT_REPLAY_STRUCTURE = Identifier.of("bbs_together", "c_replay_structure_fix1615");
-    private static final ClientPacketCrusher CLIENT_CRUSHER = new ClientPacketCrusher();
+    /* Use Together's compressed crushers so 1.21.11 payload channels go through
+     * TogetherPayload instead of BBS's unregistered ServerNetwork.BufPayload. */
+    private static final ClientPacketCrusher CLIENT_CRUSHER = new CompressedClientPacketCrusher();
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> SERVER_SENDERS = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> SERVER_RECEIVERS = new ConcurrentHashMap();
-    private static final ClientPacketCrusher CLIENT_RECEIVER = new ClientPacketCrusher();
+    private static final ClientPacketCrusher CLIENT_RECEIVER = new CompressedClientPacketCrusher();
     private static final ConcurrentHashMap<String, Boolean> CLIENT_STRUCTURE_APPLY = new ConcurrentHashMap();
     private static boolean clientRegistered;
     private static boolean serverRegistered;
 
     private BBSTogetherFixReplayStructure() {
+    }
+
+    public static Identifier getServerReplayStructureChannel() {
+        return SERVER_REPLAY_STRUCTURE;
+    }
+
+    public static Identifier getClientReplayStructureChannel() {
+        return CLIENT_REPLAY_STRUCTURE;
     }
 
     public static List<Replay> capture(UIReplayList uIReplayList) {
@@ -96,7 +108,7 @@ public final class BBSTogetherFixReplayStructure {
         }
         serverRegistered = true;
         TogetherServerNetworking.register((Identifier)SERVER_REPLAY_STRUCTURE, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
-            ServerPacketCrusher serverPacketCrusher = SERVER_RECEIVERS.computeIfAbsent(class_32222.getUuid(), uUID -> new ServerPacketCrusher());
+            ServerPacketCrusher serverPacketCrusher = SERVER_RECEIVERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
                 Metadata metadata = BBSTogetherFixReplayStructure.readMetadata(class_25402);
                 BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
@@ -134,7 +146,7 @@ public final class BBSTogetherFixReplayStructure {
         BBSTogetherFixReplayStructure.remapServerSelections(class_32222.getUuid(), metadata, n);
         for (ServerPlayerEntity class_32223 : minecraftServer.getPlayerManager().getPlayerList()) {
             if (class_32223 == class_32222) continue;
-            ServerPacketCrusher serverPacketCrusher = SERVER_SENDERS.computeIfAbsent(class_32223.getUuid(), uUID -> new ServerPacketCrusher());
+            ServerPacketCrusher serverPacketCrusher = SERVER_SENDERS.computeIfAbsent(class_32223.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.send((PlayerEntity)class_32223, CLIENT_REPLAY_STRUCTURE, baseType, class_25402 -> {
                 class_25402.writeUuid(class_32222.getUuid());
                 BBSTogetherFixReplayStructure.writeMetadata(class_25402, metadata.filmId, metadata.oldSize, metadata.newSize, metadata.oldToNew, metadata.selectedIndex);

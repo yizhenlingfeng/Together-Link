@@ -1,5 +1,7 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_together.BBSTogetherFix28;
+import mchorse.bbs_together.BBSTogetherFixReplayStructure;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketSender;
 import net.minecraft.client.MinecraftClient;
@@ -25,6 +27,9 @@ public final class TogetherClientNetworking
     public static void preRegister()
     {
         TogetherPayloads.registerAll(TogetherServerNetwork.class);
+        TogetherPayloads.registerAll(BBSTogetherFix28.class);
+        TogetherPayloads.ensureRegistered(BBSTogetherFixReplayStructure.getServerReplayStructureChannel());
+        TogetherPayloads.ensureRegistered(BBSTogetherFixReplayStructure.getClientReplayStructureChannel());
     }
 
     public static void register(Identifier id, Receiver receiver)

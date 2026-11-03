@@ -1,5 +1,6 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_together.BBSTogetherFix28;
 import net.fabricmc.fabric.api.networking.v1.PacketSender;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.PacketByteBuf;
@@ -26,6 +27,7 @@ public final class TogetherServerNetworking
     public static void preRegister()
     {
         TogetherPayloads.registerAll(TogetherServerNetwork.class);
+        TogetherPayloads.registerAll(BBSTogetherFix28.class);
     }
 
     public static void register(Identifier id, Receiver receiver)
