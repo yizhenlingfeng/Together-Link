@@ -4,6 +4,7 @@ import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.forms.ModelForm;
 import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
+import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.TogetherSettings;
@@ -21,7 +22,16 @@ import net.fabricmc.api.Environment;
 @Environment(EnvType.CLIENT)
 public class ModelDeleteActions
 {
-    /** Append the two actions for the model under the context menu's cursor. */
+    /**
+     * Append the two actions for the model under the context menu's cursor.
+     *
+     * <p>The UI context is resolved here, while the menu is being built and the category is
+     * still part of the tree, and is captured by the two confirmations. Asking the category for
+     * it on click is not safe: reloading assets rebuilds the form list and drops the category
+     * that built this menu out of the tree, and {@code UIElement.getContext()} returns null for
+     * an element outside it. The menu lives in the context's overlay, so the captured context
+     * is still the one on screen when a row runs.</p>
+     */
     public static void addActions(ContextMenuManager menu, UIFormCategory category, Form form)
     {
         if (!(form instanceof ModelForm) || category.isGroupContext())
@@ -36,13 +46,21 @@ public class ModelDeleteActions
             return;
         }
 
-        menu.action(Icons.REMOVE, L10n.lang("bbs_together.models.context.request_delete"), () -> confirmRequest(category, modelId));
-        menu.action(Icons.TRASH, L10n.lang("bbs_together.models.context.local_delete"), () -> confirmLocal(category, modelId));
+        UIContext context = category.getContext();
+
+        /* Without a context there is nowhere to open a confirmation menu in. */
+        if (context == null)
+        {
+            return;
+        }
+
+        menu.action(Icons.REMOVE, L10n.lang("bbs_together.models.context.request_delete"), () -> confirmRequest(context, modelId));
+        menu.action(Icons.TRASH, L10n.lang("bbs_together.models.context.local_delete"), () -> confirmLocal(context, modelId));
     }
 
-    private static void confirmRequest(UIFormCategory category, String modelId)
+    private static void confirmRequest(UIContext context, String modelId)
     {
-        category.getContext().replaceContextMenu((confirm) ->
+        context.replaceContextMenu((confirm) ->
         {
             confirm.action(Icons.REMOVE, L10n.lang("bbs_together.models.context.request_confirm").format(modelId), () ->
             {
@@ -50,7 +68,7 @@ public class ModelDeleteActions
             });
             confirm.action(Icons.CLOSE, L10n.lang("bbs_together.models.context.cancel"), () ->
             {
-                category.getContext().closeContextMenu();
+                context.closeContextMenu();
             });
         });
     }
@@ -61,9 +79,9 @@ public class ModelDeleteActions
      * model would be re-synced back otherwise) besides the plain delete; with
      * auto sync off it's a plain confirm.
      */
-    private static void confirmLocal(UIFormCategory category, String modelId)
+    private static void confirmLocal(UIContext context, String modelId)
     {
-        category.getContext().replaceContextMenu((confirm) ->
+        context.replaceContextMenu((confirm) ->
         {
             if (isAutoSyncOn())
             {
@@ -87,7 +105,7 @@ public class ModelDeleteActions
 
             confirm.action(Icons.CLOSE, L10n.lang("bbs_together.models.context.cancel"), () ->
             {
-                category.getContext().closeContextMenu();
+                context.closeContextMenu();
             });
         });
     }

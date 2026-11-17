@@ -194,11 +194,20 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
         return record.bbsGrants == null || record.bbsGrants.contains(domain.id);
     }
 
+    /**
+     * Build the right-click menu for the row under the cursor.
+     *
+     * <p>The UI context is resolved while the menu is being built, with this list still in the
+     * tree, and is captured by the nested menus. They must not ask this element for it on
+     * click: a rebuilt or removed element returns null from {@code UIElement.getContext()}.
+     * The captured context outlives the element because it belongs to the menu.</p>
+     */
     private void fillContextMenu(ContextMenuManager menu)
     {
         PlayerRecord record = this.getCurrentFirst();
+        UIContext context = this.getContext();
 
-        if (record == null || record.id == null)
+        if (record == null || record.id == null || context == null)
         {
             return;
         }
@@ -208,7 +217,7 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
         {
             menu.action(Icons.EDIT, L10n.lang("bbs_together.bbsop.context.level_menu"), () ->
             {
-                this.getContext().replaceContextMenu((sub) ->
+                context.replaceContextMenu((sub) ->
                 {
                     for (int level = 2; level >= 0; level--)
                     {
@@ -264,7 +273,7 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
                         };
                     }
 
-                    this.getContext().replaceContextMenu(manager.create());
+                    context.replaceContextMenu(manager.create());
                 });
             }
         }
@@ -290,7 +299,7 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
             {
                 PlayerRecord target = record;
 
-                this.getContext().replaceContextMenu((confirm) ->
+                context.replaceContextMenu((confirm) ->
                 {
                     confirm.action(Icons.TRASH, L10n.lang("bbs_together.behaviors.context.remove_logs_confirm"), () ->
                     {
@@ -298,7 +307,7 @@ public class UIPlayerBehaviorList extends UIList<PlayerRecord>
                     });
                     confirm.action(Icons.CLOSE, L10n.lang("bbs_together.behaviors.context.remove_logs_cancel"), () ->
                     {
-                        this.getContext().closeContextMenu();
+                        context.closeContextMenu();
                     });
                 });
             });

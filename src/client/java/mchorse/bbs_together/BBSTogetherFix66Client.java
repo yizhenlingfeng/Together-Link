@@ -8,6 +8,7 @@ import mchorse.bbs_mod.settings.ui.UIValueFactory;
 import mchorse.bbs_mod.settings.ui.UIValueMap;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.ui.UIKeys;
+import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
 import mchorse.bbs_mod.ui.framework.elements.context.UIContextMenu;
@@ -34,21 +35,36 @@ public class BBSTogetherFix66Client {
         }
         registered = true;
         UIValueMap.register(ValueKeyframeShape.class, (valueKeyframeShape, uIElement) -> {
-            UIIcon uIIcon2 = new UIIcon(() -> BBSTogetherFix66Client.shapeIcon((Integer)valueKeyframeShape.get()), uIIcon -> uIIcon.getContext().replaceContextMenu(contextMenuManager -> {
-                KeyframeShape keyframeShape = BBSTogetherFix66Client.shapeAt((Integer)valueKeyframeShape.get());
-                for (KeyframeShape keyframeShape2 : KeyframeShape.values()) {
-                    IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(keyframeShape2);
-                    if (iKeyframeShapeRenderer == null) continue;
-                    contextMenuManager.action(iKeyframeShapeRenderer.getIcon(), iKeyframeShapeRenderer.getLabel(), keyframeShape2 == keyframeShape, () -> valueKeyframeShape.set(keyframeShape2.ordinal()));
+            UIIcon uIIcon2 = new UIIcon(() -> BBSTogetherFix66Client.shapeIcon((Integer)valueKeyframeShape.get()), uIIcon -> {
+                UIContext context = uIIcon.getContext();
+
+                /* Outside the tree (a settings row that has been rebuilt) there is no menu to open. */
+                if (context == null) {
+                    return;
                 }
-            }));
+
+                context.replaceContextMenu(contextMenuManager -> {
+                    KeyframeShape keyframeShape = BBSTogetherFix66Client.shapeAt((Integer)valueKeyframeShape.get());
+                    for (KeyframeShape keyframeShape2 : KeyframeShape.values()) {
+                        IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(keyframeShape2);
+                        if (iKeyframeShapeRenderer == null) continue;
+                        contextMenuManager.action(iKeyframeShapeRenderer.getIcon(), iKeyframeShapeRenderer.getLabel(), keyframeShape2 == keyframeShape, () -> valueKeyframeShape.set(keyframeShape2.ordinal()));
+                    }
+                });
+            });
             uIIcon2.tooltip(BBSTogetherFix66Client.shapeLabel((Integer)valueKeyframeShape.get()));
             return Arrays.asList(UIValueFactory.column((UIElement)uIIcon2, (BaseValue)valueKeyframeShape));
         });
         UIValueMap.register(ValueKeyframeInterpolation.class, (valueKeyframeInterpolation, uIElement) -> {
             UIIcon uIIcon2 = new UIIcon(() -> BBSTogetherFix66Client.interpolationIcon((Integer)valueKeyframeInterpolation.get()), uIIcon -> {
+                UIContext context = uIIcon.getContext();
+
+                if (context == null) {
+                    return;
+                }
+
                 Interpolation interpolation = new Interpolation("default_interpolation_picker", Interpolations.MAP, BBSTogetherFix66Client.interpolationAt((Integer)valueKeyframeInterpolation.get()));
-                uIIcon.getContext().replaceContextMenu((UIContextMenu)new UIInterpolationContextMenu(interpolation).callback(() -> valueKeyframeInterpolation.set(BBSTogetherFix66Client.interpolationIndex(interpolation.getInterp()))));
+                context.replaceContextMenu((UIContextMenu)new UIInterpolationContextMenu(interpolation).callback(() -> valueKeyframeInterpolation.set(BBSTogetherFix66Client.interpolationIndex(interpolation.getInterp()))));
             });
             uIIcon2.tooltip((ITooltip)new InterpolationTooltip(0.0f, 0.5f, () -> BBSTogetherFix66Client.interpolationAt((Integer)valueKeyframeInterpolation.get())));
             return Arrays.asList(UIValueFactory.column((UIElement)uIIcon2, (BaseValue)valueKeyframeInterpolation));

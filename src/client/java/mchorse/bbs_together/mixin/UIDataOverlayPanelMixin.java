@@ -115,7 +115,6 @@ public class UIDataOverlayPanelMixin {
 
     @Inject(method = "<init>", at = @At("TAIL"), remap = false)
     private void together$addFilmLock(IKey title, UIDataDashboardPanel panel, Consumer<String> callback, CallbackInfo ci) {
-        UIDataOverlayPanel self = (UIDataOverlayPanel) (Object) this;
         UIDataPathList namesList = ((UICRUDOverlayPanel) (Object) this).namesList;
 
         if (this.panel != null && this.panel.getType() == ContentType.FILMS && namesList instanceof IFilmListMarker marker) {
@@ -135,8 +134,16 @@ public class UIDataOverlayPanelMixin {
 
             String filmId = path.toString();
 
+            /* Resolved while the menu is built, with the list still in the tree: asking it
+             * again on click returns null once an asset reload has rebuilt the list. */
+            UIContext context = namesList.getContext();
+
+            if (context == null) {
+                return;
+            }
+
             menu.icons.add(new MenuIcon(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.FILM), MenuVerb.Slot.CLIPBOARD, () -> {
-                AssetLockUi.openMenu(self.getContext(), AssetLockType.FILM, filmId);
+                AssetLockUi.openMenu(context, AssetLockType.FILM, filmId);
             }));
         });
     }

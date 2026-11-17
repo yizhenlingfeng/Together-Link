@@ -112,10 +112,17 @@ public class UIFormCategoryBbsOpMixin
 
             if (modelId != null && !modelId.isEmpty())
             {
-                menu.action(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.MODEL), () ->
+                /* Resolved now, while this category is still in the tree: the row may be
+                 * clicked after an asset reload rebuilt the form list and dropped it. */
+                UIContext context = self.getContext();
+
+                if (context != null)
                 {
-                    AssetLockUi.openMenu(self.getContext(), AssetLockType.MODEL, modelId);
-                });
+                    menu.action(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.MODEL), () ->
+                    {
+                        AssetLockUi.openMenu(context, AssetLockType.MODEL, modelId);
+                    });
+                }
             }
         }
     }

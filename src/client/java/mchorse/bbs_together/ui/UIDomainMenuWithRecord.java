@@ -130,7 +130,7 @@ public class UIDomainMenuWithRecord extends UISimpleContextMenu
         int w = Math.max(MIN_WIDTH, 28 + font.getWidth(label));
         int h = Math.max(this.filmRowH, 16);
         int x = this.filmRowRight + GAP;
-        int screenW = this.getContext().menu.width;
+        int screenW = context.menu.width;
 
         if (x + w > screenW - 2)
         {

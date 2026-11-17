@@ -13,7 +13,7 @@ Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension 
 | Universal | 1.20.1 – 1.20.4 | 17+ | >= 0.15.6 | >= 2.6 (2.7 recommended) | Primary |
 | 1.21.11 compatibility | 1.21.11 | 21+ | >= 0.19.3 | 2.7-1.21.11 | Experimental |
 
-Current version: **2.0.3**. Fabric API is required; licensed under MIT.
+Current version: **2.0.4**. Fabric API is required; licensed under MIT.
 
 ## Feature overview
 
@@ -107,14 +107,14 @@ Feature domains: `morph`, `film`, `record`, `model_blocks`, `particles`, `model_
 | Step | Action |
 |---|---|
 | 1 | Install Minecraft 1.20.1 or 1.20.4, Fabric Loader, Fabric API, and the matching BBS FS version |
-| 2 | Put `together-link-2.0.3-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
+| 2 | Put `together-link-2.0.4-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
 | 3 | Start the server, then run `/bbsop <player> 2` from the console or as OP to set up an admin |
 | 4 | Connect all clients to the same server; client and server must run the same version |
 | 5 | Open the BBS dashboard to start collaborating |
 
 > Updating only the client has no effect: asset paths, permissions, CAS, tombstones, co-op recording locks, and other server-side checks all run on the server.
 >
-> The 1.21.11 compatibility build is installed the same way, but requires `together-link-2.0.3-1.21.11.jar` and BBS `2.7-1.21.11`. The 1.20.x and 1.21.11 builds are not interchangeable.
+> The 1.21.11 compatibility build is installed the same way, but requires `together-link-2.0.4-1.21.11.jar` and BBS `2.7-1.21.11`. The 1.20.x and 1.21.11 builds are not interchangeable.
 
 ## Configuration
 
@@ -153,7 +153,7 @@ Config file: `config/bbs/settings/bbs_together.json`.
 | Command | Description |
 |---|---|
 | `.\gradlew.bat build` | Build the universal artifact (1.20.1 / 1.20.4) |
-| `build/libs/together-link-2.0.3-1.20.1-1.20.4.jar` | Primary release artifact |
+| `build/libs/together-link-2.0.4-1.20.1-1.20.4.jar` | Primary release artifact |
 | `.\gradlew.bat build "-Pmcver=1.20.4"` | Compile/run verification for 1.20.4 only; the artifact has a `-verify` suffix and is not released |
 | `.\gradlew.bat build12111` | Build the experimental 1.21.11 compatibility artifact (separate release) |
 | `.\gradlew.bat runClient12111` | Start the 1.21.11 dev client (`run-1.21.11-client/`) |
@@ -188,6 +188,18 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 | `src/client/resources/bbs-together.client.mixins.json` | Client mixin config |
 
 ## Changelog
+
+### v2.0.4
+
+#### Fixed
+
+- Fixed a client crash when picking "request deletion" or "delete local copy" from a model category's context menu. If BBS reloaded its assets and rebuilt the model list while the menu was open, the category that built the menu left the UI tree and its `getContext()` returned `null`, which the menu action dereferenced on click (`crash-2026-11-17_11.38.31-client.txt`). The UI context is now resolved once, while the menu is built, instead of being requested from the element on click.
+- Fixed the same pattern in the player behavior list menus (level, feature domain, and clear logs), the model and film lock menus, and the keyframe shape and interpolation pickers: each one now keeps the context resolved at build time and skips the action when it is missing.
+
+#### Notes
+
+- Client-side only; no server update is required. Both the 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build carry the fix, and the network protocol remains version 3.
+- All three targets build successfully.
 
 ### v2.0.3
 
