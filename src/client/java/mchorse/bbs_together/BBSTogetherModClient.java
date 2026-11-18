@@ -8,6 +8,7 @@ import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.network.CoopClient;
 import mchorse.bbs_together.network.TogetherClientNetwork;
+import mchorse.bbs_together.sync.FormCategorySync;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -25,6 +26,7 @@ implements ClientModInitializer {
         BBSSettings.primaryColor.postCallback((value, fromFile) -> TogetherClientNetwork.sendPlayerColor((Integer)BBSSettings.primaryColor.get()));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             TogetherClientNetwork.tickCommitColors();
+            FormCategorySync.tick();
             if (client.world != null) {
                 TogetherClientNetwork.interpolateCursors(ClientCompat.frameDelta(client));
             }

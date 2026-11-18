@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -632,6 +633,12 @@ public final class CoopSessionManager {
         session.members.remove(uuid); /* Handed in and out of the room; the session lives until the merge. */
         membership.remove(uuid);
 
+        if (!session.pendingData.isEmpty()) {
+            /* Still waiting for someone: tell the players who handed in how far the take is,
+             * and the ones still recording that another take is in. */
+            broadcastRoom(server, session);
+        }
+
         tryFinishRecording(server, session);
 
         return true;
@@ -815,7 +822,11 @@ public final class CoopSessionManager {
         System.out.println("[BBSTogether] Coop session " + session.id + " ended (reason " + reason + ")");
     }
 
-    /** Pushes the full room state to host + members (the room UI is fully server-driven). */
+    /**
+     * Pushes the full room state to everyone who watches it: the members, plus the players who
+     * already handed their take in (they are out of {@code members} but keep following the
+     * session from the read-only progress screen).
+     */
     private static void broadcastRoom(MinecraftServer server, CoopSession session) {
         Film film = FilmBranchStore.working(session.filmId, session.branch);
         List<String> labels = new ArrayList<>();
@@ -828,7 +839,11 @@ public final class CoopSessionManager {
             }
         }
 
-        for (UUID uuid : session.members.keySet()) {
+        Set<UUID> recipients = new LinkedHashSet<>(session.members.keySet());
+
+        recipients.addAll(session.received.keySet());
+
+        for (UUID uuid : recipients) {
             ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
 
             if (p == null) {
@@ -853,6 +868,27 @@ public final class CoopSessionManager {
                 out.writeUuid(member.uuid);
                 out.writeString(member.name, 256);
                 out.writeInt(member.pick);
+            }
+
+            /* Read-only progress, appended so that a client that predates it just stops reading
+             * after the members: how long the take has been running, the branch it records into,
+             * the takes already handed in and the invites still pending. */
+            out.writeLong(session.isRecording() ? Math.max(0L, System.currentTimeMillis() - session.recordingStartedAt) : 0L);
+            out.writeString(session.branch == null ? "" : session.branch, 256);
+
+            out.writeInt(session.received.size());
+
+            for (Map.Entry<UUID, MergedTake> entry : session.received.entrySet()) {
+                out.writeUuid(entry.getKey());
+                out.writeString(nameOf(server, entry.getKey()), 256);
+                out.writeInt(entry.getValue().replayIndex);
+            }
+
+            out.writeInt(session.invited.size());
+
+            for (Member member : session.invited.values()) {
+                out.writeUuid(member.uuid);
+                out.writeString(member.name, 256);
             }
 
             TogetherServerNetworking.send(p, TogetherServerNetwork.CLIENT_COOP_ROOM, out);

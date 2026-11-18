@@ -45,7 +45,8 @@
         "UIDataDashboardPanelCommitsMixin",
         "UITabListCommitsMixin",
         "FilmRepositoryMixin",
-        "ValueChangeUndoResolveMixin"
+        "ValueChangeUndoResolveMixin",
+        "UserFormSectionCategoriesPathMixin"
     ],
     "injectors": {
         "defaultRequire": 1

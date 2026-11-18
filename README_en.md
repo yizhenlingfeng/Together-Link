@@ -32,7 +32,8 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Feature | Description |
 |---|---|
 | Invite and claim | Invite players from the record replay button; after accepting, each player joins the picking room and claims one replay |
-| Room list | The replay list scrolls, and every row previews the model of its replay's form (following BBS' list model preview setting) |
+| Room list | The replay list scrolls, and every row shows a model preview (following BBS' list model preview setting), its length and its keyframe count; participants and progress sit on the right |
+| Read-only progress board | After recording starts the room turns read-only: replays handed in, elapsed time and the members still recording, so those who handed in can wait on the board |
 | Hidden re-recorded actors | While recording, the old bodies of the claimed replays are hidden, so the previous cast does not stand next to the real players |
 | Automatic merge | Once everyone hands in, the server merges the replay data and broadcasts the result |
 
@@ -72,6 +73,7 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Chunk isolation | Multi-chunk temp files are isolated per player, with their cumulative size verified |
 | Size ceiling | Server and client share `asset_sync_max_mb` |
 | CDN (optional) | Read-only download fallback: CDN first, falling back to the server when verification fails |
+| Form categories | BBS user categories live in `assets/form_categories/` and are shared through the asset sync; an existing `settings/forms` folder is migrated on first launch |
 | Anti-resurrection | Model deletion tombstones are persisted, so offline clients cannot re-upload deleted models |
 | Restore | `/bbstogether restore <model>` clears the tombstone and allows re-uploading |
 
@@ -191,7 +193,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 | `src/main/java/.../commits` | Commit graph, branch working copies, diffs, atomic writes |
 | `src/main/java/.../bbsop` | Permission levels and feature domains |
 | `src/main/java/.../behaviors` | Behavior log |
-| `src/client/java/.../sync` | Bottom-left sync status widget |
+| `src/client/java/.../sync` | Bottom-left sync status widget, shared form categories |
 | `src/client/java/.../mixin` | Client UI and sync hooks |
 | `src/main/resources/bbs-together.mixins.json` | Common mixin config |
 | `src/client/resources/bbs-together.client.mixins.json` | Client mixin config |
@@ -202,9 +204,11 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 #### Added
 
-- The cooperative recording room's replay list now scrolls: when the film has more replays than the panel is tall, the list scrolls with the mouse wheel or the scrollbar.
-- Every replay row now previews the model of that replay's form, following BBS' list model preview setting. The preview only reads the local film copy and never writes a received film to disk, so opening the room cannot overwrite unsaved edits.
+- The cooperative recording room has been redesigned: the panel follows the BBS UI scale (its size can be dragged by the corner grip and is remembered), with the film, branch and phase in the header, a scrolling replay list on the left, the participants on the right, and the status line with the actions at the bottom. A film with more replays than the panel is tall scrolls with the mouse wheel or the scrollbar.
+- Every replay row now previews the model of that replay's form, following BBS' list model preview setting, and also shows its length and keyframe count plus first-person, actor and disabled markers. A claimed replay shows its claimer's face and name, and your own is highlighted. The preview only reads the local film copy and never writes a received film to disk, so opening the room cannot overwrite unsaved edits.
+- During recording the room becomes a read-only progress board: replays handed in and a progress bar, the elapsed time, and the members still recording. Players who hand their take in return to that board automatically instead of waiting on set.
 - Saving or committing a film with zero replays now logs a diagnostic line, so it is clear whether the empty data came from the client or from the server working copy.
+- Form categories (the "category" folders in the form palette) now travel through the server's asset sync. Category files only ever lived in the local `config/bbs/settings/forms`, which the manifest, download and upload paths never look at, so a player's categories never reached anybody else. They are stored under `form_categories/` in the asset folder instead, reusing the existing SHA-1 comparison, mtime arbitration, sliced transfer and upload permission; the category list is re-read after the server delivers files, and existing files are copied into the new folder on first launch (the old folder is left in place).
 
 #### Fixed
 
@@ -212,6 +216,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Fixed other players not syncing, and the committed replays being emptied, after changing a film's replay count and committing. The structure sync called `ValueStableList.sync()` after rebuilding the replay list, and that method always throws `UnsupportedOperationException` in BBS. The exception also happened inside the server's `execute` scheduling, where it is dropped silently, so both the save and the relay were skipped and the new replays were never filled in. Replays are now built from the payload ids before the list is replaced, and the call is gone.
 - Added payload validation to the structure sync: a payload is applied only when it is a list whose size matches the metadata. A mismatched payload used to clear the whole replay list first, which is how a film ended up with zero replays; a failed apply now logs instead of silently aborting.
 - Fixed cooperative recording end notices showing raw translation keys (such as `bbs_together.coop.notify.merged`): those keys were only written to the vanilla language table, while BBS' own table is what resolves them.
+- Fixed the room panel popping back over the world after a recording member closed chat or the inventory. A member who is recording and still owes a take is no longer interrupted by the pending room screen.
 
 #### Verified
 
@@ -219,7 +224,8 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 #### Compatibility
 
-- The network protocol remains version 3 with no new fields; the 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build are updated together.
+- The network protocol remains version 3. The room state packet only gained trailing fields (recording time, branch, handed-in takes, unanswered invites): an older client stops after the fields it knows, and a newer client defaults whatever is missing, so mixed versions can still connect. The 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build are updated together.
+- Category sync needs no server changes, since a category file is just an asset; uploading one requires the `upload` domain. The asset sync does not express deletions, so a client only drops a category once the server's file count goes down.
 - The old bodies are hidden on the server before the actor list is broadcast, so every client receives the same cast with no extra configuration.
 
 ### v2.0.4

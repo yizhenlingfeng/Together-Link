@@ -1200,6 +1200,15 @@ public class TogetherClientNetwork {
                             }
                         }
                     }
+                    /* Category files are named by index, so a deletion on the server leaves a
+                     * stale file behind that shifts every later category along. The count is all
+                     * the manifest gives us; the sync only prunes while it shrinks. */
+                    if (doDownload && !serverSha1Map.isEmpty()) {
+                        mchorse.bbs_together.sync.FormCategorySync.pruneTo(
+                            mchorse.bbs_together.sync.FormCategorySync.countServerCategories(serverSha1Map.keySet()),
+                            serverSha1Map.values()
+                        );
+                    }
                     /* Per-model size aggregation is only used to *label* big models for the
                      * "models too large" list. It must never gate the download: skipping a
                      * whole model's files but keeping its config.json left folders with a model
@@ -1569,6 +1578,11 @@ public class TogetherClientNetwork {
                         Files.move(part, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
                         /* D1: our own write, not a local edit —keep the watcher quiet. */
                         mchorse.bbs_together.sync.SelfWriteGuard.record(dest.toPath());
+                        /* A shared category arrived: re-read the palette once the burst settles. */
+                        if (relativePath.startsWith(mchorse.bbs_together.sync.FormCategorySync.FOLDER + "/"))
+                        {
+                            mchorse.bbs_together.sync.FormCategorySync.requestReload();
+                        }
                         if (fileMtime > 0L) {
                             try {
                                 Files.setLastModifiedTime(dest.toPath(), java.nio.file.attribute.FileTime.fromMillis(fileMtime));

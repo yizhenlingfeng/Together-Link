@@ -78,20 +78,44 @@ public final class CoopClient {
         public final UUID host;
         public final List<String> replayLabels;
         public final List<RoomMember> members;
+        /** How long the recording has been running in milliseconds, 0 while still picking. */
+        public final long recordingElapsedMs;
+        /** Branch the session records into, empty when the server could not resolve one. */
+        public final String branch;
+        /** Members who already handed their take in; their replay index sits in {@link RoomMember#pick}. */
+        public final List<RoomMember> submitted;
+        /** Invited players that have not answered yet. */
+        public final List<RoomMember> invited;
         /** Other members' mouse positions inside the room, normalized 0..1. */
         public final Map<UUID, float[]> mice = new HashMap<>();
 
-        Room(long id, int phase, String filmId, UUID host, List<String> replayLabels, List<RoomMember> members) {
+        Room(long id, int phase, String filmId, UUID host, List<String> replayLabels, List<RoomMember> members,
+             long recordingElapsedMs, String branch, List<RoomMember> submitted, List<RoomMember> invited) {
             this.id = id;
             this.phase = phase;
             this.filmId = filmId;
             this.host = host;
             this.replayLabels = replayLabels;
             this.members = members;
+            this.recordingElapsedMs = recordingElapsedMs;
+            this.branch = branch;
+            this.submitted = submitted;
+            this.invited = invited;
         }
 
         public boolean isRecording() {
             return this.phase == CoopSessionManager.PHASE_RECORDING;
+        }
+
+        /** Whether this player is a member that still owes a take. */
+        public boolean hasMember(UUID uuid) {
+            for (RoomMember member : this.members) {
+                if (member.uuid.equals(uuid)) {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 
@@ -99,6 +123,8 @@ public final class CoopClient {
     public static volatile Room room;
     /** A room arrived while a non-BBS screen (chat, inventory) was open; open when free. */
     public static volatile boolean roomPendingOpen = false;
+    /** Room the player closed on purpose; late broadcasts for it must not pop the panel back up. */
+    private static volatile long dismissedRoomId = -1L;
 
     /** Edge-detection state for the popup hotkeys. */
     private static boolean prevAccept = false;
@@ -303,9 +329,38 @@ public final class CoopClient {
             members.add(new RoomMember(buf.readUuid(), buf.readString(256), buf.readInt()));
         }
 
+        /* Progress tail. Same packet, appended fields: an older server simply stops here
+         * and everything below stays at its neutral value. */
+        long recordingElapsedMs = buf.isReadable(8) ? buf.readLong() : 0L;
+        String branch = buf.isReadable() ? buf.readString(256) : "";
+        List<RoomMember> submitted = new ArrayList<>();
+
+        if (buf.isReadable(4)) {
+            int submittedCount = buf.readInt();
+
+            for (int i = 0; i < submittedCount; i++) {
+                submitted.add(new RoomMember(buf.readUuid(), buf.readString(256), buf.readInt()));
+            }
+        }
+
+        List<RoomMember> invited = new ArrayList<>();
+
+        if (buf.isReadable(4)) {
+            int invitedCount = buf.readInt();
+
+            for (int i = 0; i < invitedCount; i++) {
+                invited.add(new RoomMember(buf.readUuid(), buf.readString(256), -1));
+            }
+        }
+
+        final List<RoomMember> submittedF = submitted;
+        final List<RoomMember> invitedF = invited;
+        final long elapsedF = recordingElapsedMs;
+        final String branchF = branch;
+
         client.execute(() -> {
             Room existing = room;
-            Room next = new Room(id, phase, filmId, host, labels, members);
+            Room next = new Room(id, phase, filmId, host, labels, members, elapsedF, branchF, submittedF, invitedF);
 
             /* Carry the mice over: the room broadcast replaces state wholesale, and the
              * mice trickle in on their own rhythm. */
@@ -315,9 +370,18 @@ public final class CoopClient {
 
             room = next;
 
-            if (next.isRecording()) {
+            boolean dismissed = dismissedRoomId == id;
+
+            if (!dismissed) {
+                /* Another room: the dismissal of the closed one no longer applies. */
+                dismissedRoomId = -1L;
+            }
+
+            /* A member who still owes a take has to be in the world, so the room steps aside
+             * there; everyone else - already handed in, or watching - keeps it as a progress board. */
+            if (owesTake(next)) {
                 closeRoomScreen();
-            } else if (!roomPendingOpen) {
+            } else if (!dismissed && !roomPendingOpen) {
                 openRoomScreen();
             }
         });
@@ -373,8 +437,21 @@ public final class CoopClient {
         pendingInvite = null;
         room = null;
         roomPendingOpen = false;
+        dismissedRoomId = -1L;
         prevAccept = false;
         prevDeny = false;
+    }
+
+    /** The local player's UUID, or null while the world is still loading. */
+    public static UUID playerId() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+
+        return mc.player == null ? null : mc.player.getUuid();
+    }
+
+    /** Whether this player is out recording and still owes the session a take. */
+    private static boolean owesTake(Room room) {
+        return room != null && room.isRecording() && room.hasMember(playerId());
     }
 
     /* =====================================================================================
@@ -401,6 +478,50 @@ public final class CoopClient {
         mc.execute(() -> UIScreen.open(new UICoopRoomMenu()));
     }
 
+    /**
+     * Closes the room at the player's request, and leaves whatever the player is still part of.
+     * The closed room is remembered so later broadcasts do not pop the panel back up.
+     */
+    public static void dismissRoom() {
+        Room current = room;
+
+        if (current != null) {
+            dismissedRoomId = current.id;
+            sendLeave(current.id);
+        }
+
+        room = null;
+        roomPendingOpen = false;
+        closeRoomScreen();
+    }
+
+    /**
+     * Called when the room screen goes away without the panel's close button: Escape, or the screen
+     * being replaced. Counted as putting the board away, except while this player still owes a take.
+     */
+    public static void onRoomScreenClosed() {
+        Room current = room;
+
+        if (current == null) {
+            return;
+        }
+
+        /* The mod takes the screen down itself when a take starts or is handed in; leaving here
+         * would drop the player out of the session. */
+        if (TogetherClientNetwork.recordingSessionActive) {
+            return;
+        }
+
+        if (owesTake(current)) {
+            return;
+        }
+
+        dismissedRoomId = current.id;
+        sendLeave(current.id);
+        room = null;
+        roomPendingOpen = false;
+    }
+
     public static void closeRoomScreen() {
         MinecraftClient mc = MinecraftClient.getInstance();
 
@@ -411,12 +532,23 @@ public final class CoopClient {
 
     /** Called every frame (HUD tick) while a room is pending behind a vanilla screen. */
     public static void tryOpenPendingRoom() {
-        if (roomPendingOpen && room != null) {
-            MinecraftClient mc = MinecraftClient.getInstance();
+        Room current = room;
 
-            if (mc.currentScreen == null || mc.currentScreen instanceof UIScreen) {
-                openRoomScreen();
-            }
+        if (!roomPendingOpen || current == null) {
+            return;
+        }
+
+        if (owesTake(current)) {
+            /* The board must not cover the world while this player is still recording. */
+            roomPendingOpen = false;
+
+            return;
+        }
+
+        MinecraftClient mc = MinecraftClient.getInstance();
+
+        if (mc.currentScreen == null || mc.currentScreen instanceof UIScreen) {
+            openRoomScreen();
         }
     }
 
