@@ -60,6 +60,7 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Asset locks | Models, films, and model blocks can be restricted with a whitelist/blacklist |
 | Lock display | Players without permission see a closed lock; the creator/admin sees a management badge |
 | Lock enforcement | The server re-checks uploads, saves, right-clicks, and breaking; locked blocks cannot be broken or opened by unauthorized players |
+| Lock entry | Model and film locks are icons in the top bar of their context menu; the model lock sits next to the add-category plus |
 | Film write guard | Film saves, renames, deletions, undos, and folder operations all go through `FilmWriteGuard` |
 
 ### Asset synchronization
@@ -208,6 +209,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Every replay row now previews the model of that replay's form, following BBS' list model preview setting, and also shows its length and keyframe count plus first-person, actor and disabled markers. A claimed replay shows its claimer's face and name, and your own is highlighted. The preview only reads the local film copy and never writes a received film to disk, so opening the room cannot overwrite unsaved edits.
 - During recording the room becomes a read-only progress board: replays handed in and a progress bar, the elapsed time, and the members still recording. Players who hand their take in return to that board automatically instead of waiting on set.
 - Saving or committing a film with zero replays now logs a diagnostic line, so it is clear whether the empty data came from the client or from the server working copy.
+- The model lock is now an icon in the top bar of the model's context menu, beside the add-category plus, instead of a row in the list; it opens the same lock submenu.
 - Form categories (the "category" folders in the form palette) now travel through the server's asset sync. Category files only ever lived in the local `config/bbs/settings/forms`, which the manifest, download and upload paths never look at, so a player's categories never reached anybody else. They are stored under `form_categories/` in the asset folder instead, reusing the existing SHA-1 comparison, mtime arbitration, sliced transfer and upload permission; the category list is re-read after the server delivers files, and existing files are copied into the new folder on first launch (the old folder is left in place).
 
 #### Fixed

@@ -7,6 +7,8 @@ import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.cells.CellState;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
+import mchorse.bbs_mod.ui.utils.context.MenuIcon;
+import mchorse.bbs_mod.ui.utils.context.MenuVerb;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.locks.AssetLockClient;
@@ -29,10 +31,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * (The read-only block on the category's right-click menu lives in
  * {@link UIElementContextMenuBbsOpMixin} — the subclasses each register their own menus.)
  *
- * <p>Also appends the two delete actions (request server deletion / local deletion) to every
- * form category's right-click menu: {@code UIFormCategory.buildContextMenu} is the one shared
- * menu builder all categories funnel through, and the model category doesn't override it —
- * so a single TAIL injection covers them all.</p>
+ * <p>Also completes the model cell's right-click menu with the two delete actions (request server
+ * deletion / local deletion) and the level-2 model lock, which sits in the menu's icon bar.
+ * {@code UIFormCategory.buildContextMenu} is the one shared menu builder all categories funnel
+ * through, and the model category doesn't override it — so a single TAIL injection reaches them
+ * all.</p>
  */
 @Environment(EnvType.CLIENT)
 @Mixin(value = UIFormCategory.class, remap = false)
@@ -40,7 +43,7 @@ public class UIFormCategoryBbsOpMixin
 {
     private static boolean together$isLocalOnly(Form form)
     {
-        if (!!BbsOpClientState.canEdit("upload") || !(form instanceof ModelForm modelForm))
+        if (BbsOpClientState.canEdit("upload") || !(form instanceof ModelForm modelForm))
         {
             return false;
         }
@@ -73,7 +76,7 @@ public class UIFormCategoryBbsOpMixin
     }
 
     @Inject(method = "buildContextMenu", at = @At("TAIL"), remap = false)
-    private void together$addModelDeleteActions(ContextMenuManager menu, CallbackInfo ci)
+    private void together$addModelMenuEntries(ContextMenuManager menu, CallbackInfo ci)
     {
         UIFormCategory self = (UIFormCategory) (Object) this;
         Form form = self.getContextForm();
@@ -112,16 +115,18 @@ public class UIFormCategoryBbsOpMixin
 
             if (modelId != null && !modelId.isEmpty())
             {
-                /* Resolved now, while this category is still in the tree: the row may be
+                /* Resolved now, while this category is still in the tree: the icon may be
                  * clicked after an asset reload rebuilt the form list and dropped it. */
                 UIContext context = self.getContext();
 
                 if (context != null)
                 {
-                    menu.action(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.MODEL), () ->
+                    /* The bar orders its icons by slot, so CLIPBOARD puts the lock right of the
+                     * add-category plus instead of making it one more row to read past. */
+                    menu.icons.add(new MenuIcon(Icons.LOCKED, AssetLockUi.lockActionLabel(AssetLockType.MODEL), MenuVerb.Slot.CLIPBOARD, () ->
                     {
                         AssetLockUi.openMenu(context, AssetLockType.MODEL, modelId);
-                    });
+                    }));
                 }
             }
         }
