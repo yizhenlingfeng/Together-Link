@@ -13,7 +13,7 @@ Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension 
 | Universal | 1.20.1 – 1.20.4 | 17+ | >= 0.15.6 | >= 2.6 (2.7 recommended) | Primary |
 | 1.21.11 compatibility | 1.21.11 | 21+ | >= 0.19.3 | 2.7-1.21.11 | Experimental |
 
-Current version: **2.0.4**. Fabric API is required; licensed under MIT.
+Current version: **2.1**. Fabric API is required; licensed under MIT.
 
 ## Feature overview
 
@@ -26,6 +26,15 @@ Current version: **2.0.4**. Fabric API is required; licensed under MIT.
 | Selection sync | Form, keyframe, and replay clip selections are broadcast to online players |
 | Form lock | When the same replay form is in use, it is displayed as locked to prevent concurrent edits |
 | Replay swap | Players can swap replay order with each other |
+
+### Cooperative recording
+
+| Feature | Description |
+|---|---|
+| Invite and claim | Invite players from the record replay button; after accepting, each player joins the picking room and claims one replay |
+| Room list | The replay list scrolls, and every row previews the model of its replay's form (following BBS' list model preview setting) |
+| Hidden re-recorded actors | While recording, the old bodies of the claimed replays are hidden, so the previous cast does not stand next to the real players |
+| Automatic merge | Once everyone hands in, the server merges the replay data and broadcasts the result |
 
 ### Films, commits, and branches
 
@@ -107,14 +116,14 @@ Feature domains: `morph`, `film`, `record`, `model_blocks`, `particles`, `model_
 | Step | Action |
 |---|---|
 | 1 | Install Minecraft 1.20.1 or 1.20.4, Fabric Loader, Fabric API, and the matching BBS FS version |
-| 2 | Put `together-link-2.0.4-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
+| 2 | Put `together-link-2.1-1.20.1-1.20.4.jar` into the `mods/` folder on both client and server |
 | 3 | Start the server, then run `/bbsop <player> 2` from the console or as OP to set up an admin |
 | 4 | Connect all clients to the same server; client and server must run the same version |
 | 5 | Open the BBS dashboard to start collaborating |
 
 > Updating only the client has no effect: asset paths, permissions, CAS, tombstones, co-op recording locks, and other server-side checks all run on the server.
 >
-> The 1.21.11 compatibility build is installed the same way, but requires `together-link-2.0.4-1.21.11.jar` and BBS `2.7-1.21.11`. The 1.20.x and 1.21.11 builds are not interchangeable.
+> The 1.21.11 compatibility build is installed the same way, but requires `together-link-2.1-1.21.11.jar` and BBS `2.7-1.21.11`. The 1.20.x and 1.21.11 builds are not interchangeable.
 
 ## Configuration
 
@@ -153,7 +162,7 @@ Config file: `config/bbs/settings/bbs_together.json`.
 | Command | Description |
 |---|---|
 | `.\gradlew.bat build` | Build the universal artifact (1.20.1 / 1.20.4) |
-| `build/libs/together-link-2.0.4-1.20.1-1.20.4.jar` | Primary release artifact |
+| `build/libs/together-link-2.1-1.20.1-1.20.4.jar` | Primary release artifact |
 | `.\gradlew.bat build "-Pmcver=1.20.4"` | Compile/run verification for 1.20.4 only; the artifact has a `-verify` suffix and is not released |
 | `.\gradlew.bat build12111` | Build the experimental 1.21.11 compatibility artifact (separate release) |
 | `.\gradlew.bat runClient12111` | Start the 1.21.11 dev client (`run-1.21.11-client/`) |
@@ -188,6 +197,30 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 | `src/client/resources/bbs-together.client.mixins.json` | Client mixin config |
 
 ## Changelog
+
+### v2.1
+
+#### Added
+
+- The cooperative recording room's replay list now scrolls: when the film has more replays than the panel is tall, the list scrolls with the mouse wheel or the scrollbar.
+- Every replay row now previews the model of that replay's form, following BBS' list model preview setting. The preview only reads the local film copy and never writes a received film to disk, so opening the room cannot overwrite unsaved edits.
+- Saving or committing a film with zero replays now logs a diagnostic line, so it is clear whether the empty data came from the client or from the server working copy.
+
+#### Fixed
+
+- Fixed leftover actors from the previous take: starting a new cooperative recording on a film that already had one left the previous cast standing on set next to the real players. The bodies of the replays the session claimed (including members who already handed in but are not merged yet) are hidden for the duration of the recording; replays nobody claimed keep their bodies as blocking reference.
+- Fixed other players not syncing, and the committed replays being emptied, after changing a film's replay count and committing. The structure sync called `ValueStableList.sync()` after rebuilding the replay list, and that method always throws `UnsupportedOperationException` in BBS. The exception also happened inside the server's `execute` scheduling, where it is dropped silently, so both the save and the relay were skipped and the new replays were never filled in. Replays are now built from the payload ids before the list is replaced, and the call is gone.
+- Added payload validation to the structure sync: a payload is applied only when it is a list whose size matches the metadata. A mismatched payload used to clear the whole replay list first, which is how a film ended up with zero replays; a failed apply now logs instead of silently aborting.
+- Fixed cooperative recording end notices showing raw translation keys (such as `bbs_together.coop.notify.merged`): those keys were only written to the vanilla language table, while BBS' own table is what resolves them.
+
+#### Verified
+
+- All three targets (1.20.1, 1.20.4, 1.21.11) build successfully.
+
+#### Compatibility
+
+- The network protocol remains version 3 with no new fields; the 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build are updated together.
+- The old bodies are hidden on the server before the actor list is broadcast, so every client receives the same cast with no extra configuration.
 
 ### v2.0.4
 

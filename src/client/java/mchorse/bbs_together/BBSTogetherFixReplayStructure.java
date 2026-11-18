@@ -21,6 +21,7 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.network.ClientPacketCrusher;
 import mchorse.bbs_mod.network.ServerPacketCrusher;
+import mchorse.bbs_mod.settings.values.core.StableIds;
 import mchorse.bbs_mod.ui.ContentType;
 import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
@@ -48,6 +49,7 @@ public final class BBSTogetherFixReplayStructure {
     private static final ConcurrentHashMap<UUID, ServerPacketCrusher> SERVER_RECEIVERS = new ConcurrentHashMap();
     private static final ClientPacketCrusher CLIENT_RECEIVER = new CompressedClientPacketCrusher();
     private static final ConcurrentHashMap<String, Boolean> CLIENT_STRUCTURE_APPLY = new ConcurrentHashMap();
+    private static final int MAX_STRUCTURE_REPLAYS = 4096;
     private static boolean clientRegistered;
     private static boolean serverRegistered;
 
@@ -132,16 +134,28 @@ public final class BBSTogetherFixReplayStructure {
         if (minecraftServer == null || class_32222 == null || metadata == null || baseType == null || metadata.filmId.isEmpty()) {
             return;
         }
+        if (!BBSTogetherFixReplayStructure.isUsableStructure(metadata, baseType)) {
+            System.out.println("[BBSTogether] Dropped replay structure film=" + metadata.filmId + " player=" + class_32222.getUuid() + " old=" + metadata.oldSize + " new=" + metadata.newSize + " payload=" + (baseType.isList() ? baseType.asList().size() : "not-a-list"));
+            return;
+        }
         Film film = (Film)BBSMod.getFilms().load(metadata.filmId);
         if (film == null) {
             return;
         }
         int n = film.replays.getList().size();
-        if (n == metadata.oldSize) {
-            BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
-        } else {
-            film.replays.fromData(baseType);
+        try {
+            if (n == metadata.oldSize) {
+                BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
+            } else {
+                film.replays.fromData(baseType);
+            }
         }
+        catch (Throwable throwable) {
+            System.out.println("[BBSTogether] Failed to apply replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " server=" + n + ": " + throwable);
+            throwable.printStackTrace();
+            return;
+        }
+        System.out.println("[BBSTogether] Applied replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " server=" + n);
         BBSMod.getFilms().save(metadata.filmId, film.toData().asMap());
         BBSTogetherFixReplayStructure.remapServerSelections(class_32222.getUuid(), metadata, n);
         for (ServerPlayerEntity class_32223 : minecraftServer.getPlayerManager().getPlayerList()) {
@@ -157,6 +171,10 @@ public final class BBSTogetherFixReplayStructure {
 
     private static void applyClientStructure(UUID uUID, Metadata metadata, BaseType baseType) {
         if (metadata == null || baseType == null || metadata.filmId.isEmpty()) {
+            return;
+        }
+        if (!BBSTogetherFixReplayStructure.isUsableStructure(metadata, baseType)) {
+            System.out.println("[BBSTogether] Dropped remote replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " payload=" + (baseType.isList() ? baseType.asList().size() : "not-a-list"));
             return;
         }
         if (CLIENT_STRUCTURE_APPLY.putIfAbsent(metadata.filmId, Boolean.TRUE) != null) {
@@ -187,10 +205,16 @@ public final class BBSTogetherFixReplayStructure {
         boolean bl = n == metadata.oldSize;
         BBSTogetherFix22.beginRemoteSyncApply();
         try {
-            if (bl) {
-                BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
-            } else {
-                film.replays.fromData(baseType);
+            try {
+                if (bl) {
+                    BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
+                } else {
+                    film.replays.fromData(baseType);
+                }
+            }
+            catch (Throwable throwable) {
+                System.out.println("[BBSTogether] Failed to apply remote replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " local=" + n + ": " + throwable);
+                throwable.printStackTrace();
             }
             List list = film.replays.getList();
             int n3 = bl ? BBSTogetherFixReplayStructure.remapIndex(n2, metadata.oldToNew, list.size()) : BBSTogetherFixReplayStructure.clampIndex(n2, list.size());
@@ -320,36 +344,55 @@ public final class BBSTogetherFixReplayStructure {
         return n2 <= 0 || n < 0 ? -1 : Math.min(n, n2 - 1);
     }
 
+    /**
+     * Rebuilds the list around the replays that survived, then fills the new slots from the
+     * payload. Replays are a {@code ValueStableList}, so the ids must be taken from the payload
+     * before insertion: {@code add()} would otherwise mint a random id that differs between the
+     * server and each client and break every id-addressed delta for that replay. Building the new
+     * elements before touching the list keeps a malformed entry from half replacing the film.
+     */
     private static void applyMappedReplayStructure(Film film, Metadata metadata, BaseType baseType) {
-        int n;
-        if (film == null || metadata == null || baseType == null || !baseType.isList()) {
+        if (film == null || !BBSTogetherFixReplayStructure.isUsableStructure(metadata, baseType)) {
             return;
         }
         ArrayList arrayList = new ArrayList(film.replays.getList());
         ListType listType = baseType.asList();
         Replay[] replayArray = new Replay[metadata.newSize];
-        boolean[] blArray = new boolean[metadata.newSize];
-        for (n = 0; n < metadata.oldToNew.length && n < arrayList.size(); ++n) {
-            int n2 = metadata.oldToNew[n];
+        for (int i = 0; i < metadata.oldToNew.length && i < arrayList.size(); ++i) {
+            int n2 = metadata.oldToNew[i];
             if (n2 < 0 || n2 >= replayArray.length || replayArray[n2] != null) continue;
-            replayArray[n2] = (Replay)arrayList.get(n);
-            blArray[n2] = true;
+            replayArray[n2] = (Replay)arrayList.get(i);
         }
-        for (n = 0; n < replayArray.length; ++n) {
-            Replay replay;
-            if (replayArray[n] != null) continue;
-            replayArray[n] = replay = new Replay(String.valueOf(n));
+        for (int i = 0; i < replayArray.length; ++i) {
+            if (replayArray[i] != null) continue;
+            BaseType item = listType.get(i);
+            Replay replay = new Replay(String.valueOf(i));
+            replay.fromData(item);
+
+            if (item.isMap() && StableIds.isStableId(item.asMap().getString(StableIds.KEY))) {
+                replay.setId(item.asMap().getString(StableIds.KEY));
+            }
+            replayArray[i] = replay;
         }
         List list = film.replays.getAllTyped();
         list.clear();
         for (Replay replay : replayArray) {
             film.replays.add(replay);
         }
-        film.replays.sync();
-        for (int i = 0; i < replayArray.length; ++i) {
-            if (blArray[i] || i >= listType.size()) continue;
-            replayArray[i].fromData(listType.get(i));
+    }
+
+    /**
+     * {@code ValueStableList#fromData} clears the list before it checks the payload type, so a
+     * payload that does not carry the promised replays is how a film ends up with none.
+     */
+    private static boolean isUsableStructure(Metadata metadata, BaseType baseType) {
+        if (metadata == null || baseType == null || !baseType.isList()) {
+            return false;
         }
+        if (metadata.newSize < 0 || metadata.newSize > MAX_STRUCTURE_REPLAYS) {
+            return false;
+        }
+        return baseType.asList().size() == metadata.newSize;
     }
 
     private static void saveHiddenFilmStructure(Metadata metadata, BaseType baseType) {
@@ -357,10 +400,18 @@ public final class BBSTogetherFixReplayStructure {
         if (film == null) {
             return;
         }
-        if (film.replays.getList().size() == metadata.oldSize) {
-            BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
-        } else {
-            film.replays.fromData(baseType);
+        int n = film.replays.getList().size();
+        try {
+            if (n == metadata.oldSize) {
+                BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
+            } else {
+                film.replays.fromData(baseType);
+            }
+        }
+        catch (Throwable throwable) {
+            System.out.println("[BBSTogether] Failed to apply replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " stored=" + n + ": " + throwable);
+            throwable.printStackTrace();
+            return;
         }
         BBSMod.getFilms().save(metadata.filmId, film.toData().asMap());
         try {

@@ -8,6 +8,7 @@
         "FilmStorageLockMixin",
         "FilmLoadQuietMixin",
         "ActionManagerBbsOpMixin",
+        "ActionPlayerCoopCastMixin",
         "PermissionUtilsBbsOpMixin",
         "ModelBlockEntityMixin",
         "ModelBlockEntityPacketMixin",

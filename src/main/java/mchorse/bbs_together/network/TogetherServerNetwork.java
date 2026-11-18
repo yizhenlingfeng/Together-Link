@@ -1952,6 +1952,10 @@ public class TogetherServerNetwork {
                 TogetherServerNetwork.mergeFilms(stored, incomingFilm);
                 MapType merged = (MapType)stored.toData();
                 ArrayList<String> changedClips = TogetherServerNetwork.collectChangedClips(before, merged);
+                /* A save never removes replays, so an empty result means the sender already had none. */
+                if (TogetherServerNetwork.mergedFilmReplays(merged) == 0) {
+                    System.out.println("[BBSTogether] Saved film=" + filmId + " branch=" + branch + " with no replays (incoming=" + incomingFilm.replays.getList().size() + ") player=" + player.getUuid());
+                }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 TogetherServerNetwork.saveBranchNow(filmId, branch, merged);
                 lastSavedFilmSnapshots.put(key, merged);
@@ -2291,6 +2295,9 @@ public class TogetherServerNetwork {
                 if (data == null) {
                     TogetherServerNetwork.rejectCommit(player, 1);
                     return;
+                }
+                if (TogetherServerNetwork.mergedFilmReplays(data) == 0) {
+                    System.out.println("[BBSTogether] Committing film=" + filmId + " branch=" + branch + " with no replays (from " + (payload != null ? "client payload" : "server working copy") + ") player=" + player.getUuid());
                 }
                 FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), PlayerCompat.name(player.getGameProfile()), System.currentTimeMillis(), message, branch);
                 if (commit == null) {

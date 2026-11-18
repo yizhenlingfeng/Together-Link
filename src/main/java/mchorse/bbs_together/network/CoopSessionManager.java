@@ -172,6 +172,50 @@ public final class CoopSessionManager {
         return expiry != null && expiry > System.currentTimeMillis();
     }
 
+    /**
+     * The replay indices an active coop take has claimed, including takes already handed in but
+     * not merged yet. Their recorded bodies are stale for the whole session, so the client hides
+     * them instead of spawning the previous take's cast next to the people acting now.
+     *
+     * @return claimed indices, empty when no session is recording this film
+     */
+    public static Set<Integer> recordingPicks(String filmId) {
+        if (filmId == null) {
+            return Collections.emptySet();
+        }
+
+        Set<Integer> picks = null;
+
+        for (CoopSession session : sessions.values()) {
+            if (!session.isRecording() || !filmId.equals(session.filmId)) {
+                continue;
+            }
+
+            for (Member member : session.members.values()) {
+                if (member.pick >= 0) {
+                    if (picks == null) {
+                        picks = new HashSet<>();
+                    }
+
+                    picks.add(member.pick);
+                }
+            }
+
+            /* Handed-in members are no longer in members, so their take counts too. */
+            for (MergedTake take : session.received.values()) {
+                if (take.replayIndex >= 0) {
+                    if (picks == null) {
+                        picks = new HashSet<>();
+                    }
+
+                    picks.add(take.replayIndex);
+                }
+            }
+        }
+
+        return picks == null ? Collections.emptySet() : picks;
+    }
+
     private static String lockKey(String filmId, String branch) {
         return filmId + '\t' + branch;
     }

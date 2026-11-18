@@ -615,6 +615,23 @@ public final class CoopClient {
      * so the copy arriving with the begin packet is what makes its take possible.
      */
     private static Film resolveSessionFilm(String filmId) {
+        return resolveFilm(filmId, true);
+    }
+
+    /**
+     * Look-only sibling of {@link #resolveSessionFilm(String)} for the room's previews: it never
+     * writes a received copy to disk, so opening the room cannot overwrite an unsaved film.
+     * Returns null when no copy is available yet and the caller retries.
+     */
+    public static Film previewFilm(String filmId) {
+        try {
+            return resolveFilm(filmId, false);
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private static Film resolveFilm(String filmId, boolean save) {
         UIFilmPanel panel = CommitUi.filmPanel();
         Object panelData = panel == null ? null : panel.getData();
 
@@ -630,8 +647,11 @@ public final class CoopClient {
 
                 film.setId(filmId);
                 film.fromData(received);
-                /* Saved from a copy: saving stamps a format version into the data. */
-                TogetherClientNetwork.saveReceivedFilm(filmId, (MapType) received.copy());
+
+                if (save) {
+                    /* Saved from a copy: saving stamps a format version into the data. */
+                    TogetherClientNetwork.saveReceivedFilm(filmId, (MapType) received.copy());
+                }
 
                 return film;
             } catch (Exception exception) {
