@@ -20,6 +20,7 @@ import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockType;
+import mchorse.bbs_together.locks.ClipLockGuard;
 import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.network.CompressedServerPacketCrusher;
 import mchorse.bbs_together.BBSTogetherFix28;
@@ -139,7 +140,7 @@ public final class BBSTogetherFix28Server {
             }
             MapType mapType = baseType.asMap();
             String branch = FilmBranchStore.branchOf(string, sender.getUuid());
-            if (!BBSTogetherFix28Server.canWriteFilmSnapshot(sender, string, branch, false)) {
+            if (!BBSTogetherFix28Server.canWriteFilmSnapshot(sender, string, branch, false, mapType)) {
                 return;
             }
             BBSTogetherFix28Server.saveBranchSnapshot(string, branch, mapType);
@@ -160,15 +161,15 @@ public final class BBSTogetherFix28Server {
              * working copy of the branch they are on now. */
             return;
         }
-        if (!BBSTogetherFix28Server.canWriteFilmSnapshot(class_32222, string, branch, false)) {
-            return;
-        }
-        ACTIVE_FILM_EDITORS.remove(class_32222.getUuid(), string);
         BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
         if (baseType == null || !baseType.isMap()) {
             return;
         }
         MapType mapType = baseType.asMap();
+        if (!BBSTogetherFix28Server.canWriteFilmSnapshot(class_32222, string, branch, false, mapType)) {
+            return;
+        }
+        ACTIVE_FILM_EDITORS.remove(class_32222.getUuid(), string);
         BBSTogetherFix28Server.saveBranchSnapshot(string, branch, mapType);
         if (BBSTogetherFix28Server.hasOtherEditor(class_32222.getUuid(), string, branch)) {
             return;
@@ -190,7 +191,7 @@ public final class BBSTogetherFix28Server {
             if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
                 return;
             }
-            if (!BBSTogetherFix28Server.canWriteFilmSnapshot(player, string, branch, false)) {
+            if (!BBSTogetherFix28Server.canWriteFilmSnapshot(player, string, branch, false, mapType)) {
                 return;
             }
             Film film = FilmBranchStore.working(string, branch);
@@ -214,10 +215,10 @@ public final class BBSTogetherFix28Server {
 
     /**
      * Every snapshot is a film write. Keep the same gates as the normal film save path:
-     * FILM domain, per-film asset lock, deletion tombstone, RECORD for recording baselines
-     * and the cooperative-recording write lock.
+     * FILM domain, per-film asset lock, deletion tombstone, RECORD for recording baselines,
+     * the cooperative-recording write lock and the per-clip locks inside the snapshot.
      */
-    private static boolean canWriteFilmSnapshot(ServerPlayerEntity player, String filmId, String branch, boolean recording) {
+    private static boolean canWriteFilmSnapshot(ServerPlayerEntity player, String filmId, String branch, boolean recording, MapType incoming) {
         if (player == null || filmId == null || filmId.isEmpty()) {
             return false;
         }
@@ -238,7 +239,11 @@ public final class BBSTogetherFix28Server {
             return false;
         }
 
-        return !CoopSessionManager.isFilmLockedForEditing(filmId, branch);
+        if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
+            return false;
+        }
+
+        return ClipLockGuard.canWrite(player, filmId, branch, incoming);
     }
 
     private static void handleRecordingBaselineSnapshot(ServerPlayerEntity player, String string, String sentBranch, byte[] byArray) {
@@ -259,7 +264,7 @@ public final class BBSTogetherFix28Server {
         if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
             return;
         }
-        if (!BBSTogetherFix28Server.canWriteFilmSnapshot(player, string, branch, true)) {
+        if (!BBSTogetherFix28Server.canWriteFilmSnapshot(player, string, branch, true, baseType.asMap())) {
             return;
         }
         BBSTogetherFix28Server.saveBranchSnapshot(string, branch, baseType.asMap());

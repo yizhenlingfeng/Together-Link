@@ -74,6 +74,7 @@ import mchorse.bbs_together.locks.AssetLockManager;
 import mchorse.bbs_together.locks.AssetLockMode;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.locks.AssetTombstones;
+import mchorse.bbs_together.locks.ClipLockGuard;
 import mchorse.bbs_together.network.AssetEgressBudget;
 import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.utils.AssetPaths;
@@ -3355,6 +3356,14 @@ public class TogetherServerNetwork {
                 path.add(packetByteBuf.readString());
             }
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
+            BaseType payload;
+            try {
+                payload = DataStorageUtils.readFromBytes((byte[])bytes);
+            }
+            catch (Exception e) {
+                System.out.println("[BBSTogether] Malformed film delta film=" + filmId + ": " + e);
+                return;
+            }
             server.execute(() -> {
                 Film film;
                 if (deletedFilmIds.contains(filmId)) {
@@ -3371,6 +3380,11 @@ public class TogetherServerNetwork {
                 if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
                     return;
                 }
+                /* A clip lock is enforced on the clip the server already holds: a path into a
+                 * locked camera clip is refused before it can reach the other editors. */
+                if (!ClipLockGuard.canSyncCamera(player, filmId, branch, path, payload)) {
+                    return;
+                }
                 playerEditingFilm.put(player.getUuid(), filmId);
                 for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
                     ServerPlayerEntity other;
@@ -3384,12 +3398,12 @@ public class TogetherServerNetwork {
                         }
                     });
                 }
-                if (path.size() >= 2 && "replays".equals(path.get(0)) && (film = FilmBranchStore.working(filmId, branch)) != null) {
+                if (payload != null && TogetherServerNetwork.isServerTracked(path) && (film = FilmBranchStore.working(filmId, branch)) != null) {
                     lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)film.toData());
                     BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, path);
                     if (target != null) {
                         try {
-                            target.fromData(DataStorageUtils.readFromBytes((byte[])bytes));
+                            target.fromData(payload);
                         }
                         catch (Exception e) {
                             e.printStackTrace();
@@ -3444,11 +3458,16 @@ public class TogetherServerNetwork {
     }
 
     /**
-     * Whether the server mirrors a sync path in its branch working copy. Only replay data is
-     * applied there; everything else is relayed to the other editors and compared by nobody.
+     * Whether the server mirrors a sync path in its branch working copy. Replays and camera
+     * clips are both authoritative there: the clip lock of a camera clip has to survive on
+     * the server, or the guard would have nothing to compare a late edit against.
      */
     private static boolean isServerTracked(List<String> path) {
-        return path != null && path.size() >= 2 && "replays".equals(path.get(0));
+        if (path == null || path.size() < 2) {
+            return false;
+        }
+        String root = path.get(0);
+        return "replays".equals(root) || "camera".equals(root);
     }
 
     private static void applyUndoSync(MinecraftServer server, ServerPlayerEntity player, String filmId, ArrayList<UndoChange> changes) {

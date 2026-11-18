@@ -47,7 +47,10 @@
         "UITabListCommitsMixin",
         "FilmRepositoryMixin",
         "ValueChangeUndoResolveMixin",
-        "UserFormSectionCategoriesPathMixin"
+        "UserFormSectionCategoriesPathMixin",
+        "ValueGroupForeignAccessor",
+        "UIClipsLockMenuMixin",
+        "UIClipLockShieldMixin"
     ],
     "injectors": {
         "defaultRequire": 1

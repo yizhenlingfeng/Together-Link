@@ -60,8 +60,11 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Asset locks | Models, films, and model blocks can be restricted with a whitelist/blacklist |
 | Lock display | Players without permission see a closed lock; the creator/admin sees a management badge |
 | Lock enforcement | The server re-checks uploads, saves, right-clicks, and breaking; locked blocks cannot be broken or opened by unauthorized players |
-| Lock entry | Model and film locks are icons in the top bar of their context menu; the model lock sits next to the add-category plus |
+| Lock entry | Model and film locks are icons in the top bar of their context menu; the model lock sits next to the add-category plus, while the clip lock follows the ≡ (presets) icon of the camera timeline |
 | Film write guard | Film saves, renames, deletions, undos, and folder operations all go through `FilmWriteGuard` |
+| Clip locks | Individual camera timeline clips can be locked to a whitelist or blacklist; the lock lives in the clip's own data and travels with the film |
+| Clip lock display | A locked clip draws a lock mark on its bar; the panel of a player without permission turns grey and the Edit button becomes a lock button |
+| Clip lock enforcement | The server re-checks whole-film snapshots and camera syncs, restoring unauthorized changes to the branch copy; adding or removing a lock requires level 2 |
 
 ### Asset synchronization
 
@@ -189,7 +192,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 | Directory | Contents |
 |---|---|
-| `src/main/java/.../locks` | Asset locks, deletion tombstones, persistence |
+| `src/main/java/.../locks` | Asset locks, clip locks, deletion tombstones, persistence |
 | `src/main/java/.../network` | Server networking, asset sync, film write policy, crusher |
 | `src/main/java/.../commits` | Commit graph, branch working copies, diffs, atomic writes |
 | `src/main/java/.../bbsop` | Permission levels and feature domains |
@@ -211,6 +214,10 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Saving or committing a film with zero replays now logs a diagnostic line, so it is clear whether the empty data came from the client or from the server working copy.
 - The model lock is now an icon in the top bar of the model's context menu, beside the add-category plus, instead of a row in the list; it opens the same lock submenu.
 - Form categories (the "category" folders in the form palette) now travel through the server's asset sync. Category files only ever lived in the local `config/bbs/settings/forms`, which the manifest, download and upload paths never look at, so a player's categories never reached anybody else. They are stored under `form_categories/` in the asset folder instead, reusing the existing SHA-1 comparison, mtime arbitration, sliced transfer and upload permission; the category list is re-read after the server delivers files, and existing files are copied into the new folder on first launch (the old folder is left in place).
+- Camera timeline clips can now be locked one by one: right-clicking a clip shows a lock icon after ≡ (presets) that restricts the clip to nobody, a whitelist or a blacklist, or removes the lock. The lock lives in the clip's own data (key `bbs_together:clip_lock`), so it is saved with the film and travels through copying, pasting and undo; the server matches clips by the random id the lock carries rather than by the list index that BBS rewrites whenever clips are reordered.
+- The lock is visible on the timeline itself: a locked clip draws a lock mark on its bar, and a player without permission sees its whole panel greyed out, with BBS' own locked overlay turning the keyframe Edit button into a lock button. Dragging, cutting, removing, aligning to the cursor and double-clicking to open no longer work for such a clip.
+- A lock is broadcast to the other editors of the same branch the moment it changes and is written into the server's branch copy, so it survives a rejoin or a restart. Camera clips are not part of the full-film save, which is why a lock used to exist only on the locking player's client while everybody else kept editing the clip.
+- The server re-checks both write paths: in a whole-film snapshot, a locked clip the player may not edit is restored from the branch copy instead of throwing the save away, so the player's other edits still count, and a camera sync that touches such a clip is dropped with a notice. Creating, changing or removing a lock requires level 2.
 
 #### Fixed
 
@@ -228,6 +235,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 - The network protocol remains version 3. The room state packet only gained trailing fields (recording time, branch, handed-in takes, unanswered invites): an older client stops after the fields it knows, and a newer client defaults whatever is missing, so mixed versions can still connect. The 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build are updated together.
 - Category sync needs no server changes, since a category file is just an asset; uploading one requires the `upload` domain. The asset sync does not express deletions, so a client only drops a category once the server's file count goes down.
+- Clip locks live in a namespaced key inside the clip, so older data without it is simply unlocked and needs no migration. The sync and the checks reuse the existing full-film snapshot and camera path sync, and the network protocol stays at version 3.
 - The old bodies are hidden on the server before the actor list is broadcast, so every client receives the same cast with no extra configuration.
 
 ### v2.0.4

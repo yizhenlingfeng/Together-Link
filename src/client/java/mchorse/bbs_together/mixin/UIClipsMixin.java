@@ -14,11 +14,13 @@ import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.bbsop.ReadOnlyOverlay;
+import mchorse.bbs_together.locks.ClipLockClient;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -30,6 +32,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * removed, shifted or selected — but clicking/dragging anywhere on the timeline
  * (ruler <em>and</em> clip rows) scrubs the playhead, so a level-0 player can still
  * preview the film in time. A slim lock band above the layers advertises why.
+ *
+ * <p>It also carries the client half of the per-clip lock: a padlock is painted on
+ * every locked clip bar, picking a locked clip only opens its (shielded) panel, and
+ * the destructive timeline operations are refused for it.</p>
  */
 @Environment(value=EnvType.CLIENT)
 @Mixin(value={UIClips.class}, remap=false)
@@ -42,6 +48,12 @@ public class UIClipsMixin {
 
     @Shadow(remap = false)
     private boolean isInRuler(int mouseY)
+    {
+        throw new AssertionError();
+    }
+
+    @Shadow(remap = false)
+    private int getLayerHeight()
     {
         throw new AssertionError();
     }
@@ -74,6 +86,59 @@ public class UIClipsMixin {
             }
         }
         context.batcher.unclip(context);
+    }
+
+    /**
+     * Paints a padlock on the bar of every locked camera clip, so a player can tell which
+     * clips are off limits without opening a panel first.
+     */
+    @Inject(method={"render"}, at={@At("TAIL")}, remap=false)
+    private void together$renderClipLocks(UIContext context, CallbackInfo ci)
+    {
+        UIClips self = (UIClips) (Object) this;
+
+        if (self.getClips() == null || self.hasEmbeddedView())
+        {
+            return;
+        }
+
+        List<Clip> clips = self.getClips().get();
+
+        if (clips.isEmpty())
+        {
+            return;
+        }
+
+        int h = this.getLayerHeight();
+
+        context.batcher.clip(self.area, context);
+
+        try
+        {
+            for (Clip clip : clips)
+            {
+                if (!ClipLockClient.isLocked(clip))
+                {
+                    continue;
+                }
+
+                int x = self.toGraphX(clip.tick.get());
+                int y = self.toLayerY(clip.layer.get());
+                int x2 = Math.max(x + 2, self.toGraphX(clip.tick.get() + clip.duration.get()));
+
+                if (x2 < self.area.x || x > self.area.ex())
+                {
+                    continue;
+                }
+
+                context.batcher.box(x, y + 1, x + 16, y + h - 1, 0x88000000);
+                context.batcher.icon(Icons.LOCKED, Colors.WHITE, x + 8, y + h / 2F, 0.5F, 0.5F);
+            }
+        }
+        finally
+        {
+            context.batcher.unclip(context);
+        }
     }
 
     @Inject(method = "render", at = @At("TAIL"), remap = false)
@@ -126,6 +191,46 @@ public class UIClipsMixin {
         cir.setReturnValue(true);
     }
 
+    /**
+     * A locked clip can still be picked (so its panel shows the padlocks), but the click must
+     * not start a grab: the server restores a locked clip to the branch copy, so a drag would
+     * silently snap back while the player believes the clip moved.
+     */
+    @Inject(method = "subMouseClicked", at = @At("HEAD"), cancellable = true, remap = false)
+    private void together$refuseLockedClipGrab(UIContext context, CallbackInfoReturnable<Boolean> cir)
+    {
+        if (context.mouseButton != 0)
+        {
+            return;
+        }
+
+        UIClips self = (UIClips) (Object) this;
+
+        if (self.getClips() == null || !self.area.isInside(context) || self.hasEmbeddedView())
+        {
+            return;
+        }
+
+        int layer = self.fromLayerY(context.mouseY);
+
+        if (layer < 0)
+        {
+            return;
+        }
+
+        int tick = (int) Math.floor(self.fromGraphX(context.mouseX));
+        Clip clip = self.getClips().getClipAt(tick, layer);
+
+        if (clip == null || ClipLockClient.canEdit(clip))
+        {
+            return;
+        }
+
+        this.delegate.pickClip(clip);
+
+        cir.setReturnValue(true);
+    }
+
     @Inject(method = "handleRightClick", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockRightClick(int mouseX, int mouseY, boolean ctrl, boolean shift, boolean alt, CallbackInfoReturnable<Boolean> cir)
     {
@@ -171,10 +276,24 @@ public class UIClipsMixin {
         }
     }
 
+    /**
+     * A locked clip is still viewable, but a destructive operation would only be undone by the
+     * server (the locked clip is restored from the branch copy), so those operations are
+     * cancelled locally instead of flashing a change that cannot stick.
+     */
+    @Inject(method = "cut", at = @At("HEAD"), cancellable = true, remap = false)
+    private void together$blockCutLocked(CallbackInfo ci)
+    {
+        if (this.together$pickedClipLocked())
+        {
+            ci.cancel();
+        }
+    }
+
     @Inject(method = "removeSelected", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockRemove(CallbackInfo ci)
     {
-        if (!BbsOpClientState.canEdit("film"))
+        if (!BbsOpClientState.canEdit("film") || this.together$pickedClipLocked())
         {
             ci.cancel();
         }
@@ -183,7 +302,7 @@ public class UIClipsMixin {
     @Inject(method = "shiftToCursor", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockShift(CallbackInfo ci)
     {
-        if (!BbsOpClientState.canEdit("film"))
+        if (!BbsOpClientState.canEdit("film") || this.together$pickedClipLocked())
         {
             ci.cancel();
         }
@@ -192,9 +311,17 @@ public class UIClipsMixin {
     @Inject(method = "shiftDurationToCursor", at = @At("HEAD"), cancellable = true, remap = false)
     private void together$blockShiftDuration(CallbackInfo ci)
     {
-        if (!BbsOpClientState.canEdit("film"))
+        if (!BbsOpClientState.canEdit("film") || this.together$pickedClipLocked())
         {
             ci.cancel();
         }
+    }
+
+    @Unique
+    private boolean together$pickedClipLocked()
+    {
+        Clip picked = this.delegate == null ? null : this.delegate.getClip();
+
+        return picked != null && !ClipLockClient.canEdit(picked);
     }
 }
