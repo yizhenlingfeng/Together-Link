@@ -176,6 +176,7 @@
   "bbs_together.keyframe_lock.status.selection_duration": "Select a non-empty keyframe range first",
   "bbs_together.keyframe_lock.status.selection_range": "Select every keyframe between the first and the last one",
   "bbs_together.keyframe_lock.status.selection_overlap": "Part of the selection is already locked",
+  "bbs_together.keyframe_lock.status.ready": "%s keyframes can be locked",
   "bbs_together.locks.picker.blacklist.title": "Pick blacklisted players",
   "bbs_together.locks.picker.save": "Save",
   "bbs_together.locks.picker.cancel": "Cancel",

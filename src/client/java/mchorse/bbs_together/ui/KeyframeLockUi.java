@@ -8,6 +8,7 @@ import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.context.MenuIcon;
 import mchorse.bbs_mod.ui.utils.context.MenuVerb;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
+import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.locks.KeyframeLockClient;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -49,14 +50,27 @@ public final class KeyframeLockUi
         /* Locked keys must never stay in the selection, even for look-only players. */
         KeyframeLockClient.filterLockedSelection(view);
 
-        if (!KeyframeLockClient.canManage() || KeyframeLockClient.film(view) == null)
+        if (KeyframeLockClient.film(view) == null)
         {
             return;
         }
 
         List<KeyframeLockClient.HitRecord> hits = KeyframeLockClient.hits(view, context.mouseX, context.mouseY);
+        boolean manage = KeyframeLockClient.canManage();
 
-        menu.icons.add(new MenuIcon(hits.isEmpty() ? Icons.UNLOCKED : Icons.LOCKED, key("bbs_together.keyframe_lock.menu.label"), MenuVerb.Slot.COMMON, () -> openMenu(view, hits)));
+        /* The button is present for everyone: a closed padlock when the locks in view are
+         * enforced on this player, an open one when they are not. Only managers can press it. */
+        MenuIcon icon = new MenuIcon(hits.isEmpty() || manage ? Icons.UNLOCKED : Icons.LOCKED, key("bbs_together.keyframe_lock.menu.label"), MenuVerb.Slot.COMMON, () ->
+        {
+            if (manage)
+            {
+                openMenu(view, hits);
+            }
+        });
+
+        icon.enabled = manage;
+
+        menu.icons.add(icon);
     }
 
     private static void openMenu(UIKeyframes view, List<KeyframeLockClient.HitRecord> hits)
@@ -70,23 +84,19 @@ public final class KeyframeLockUi
 
         context.replaceContextMenu((menu) ->
         {
+            /* BBS owns the menu width: without a row of its own the bar is as wide as its
+             * buttons and a label would stick out past the right edge. One row is always
+             * written, so it reads as the menu's caption and not as a button that lies. */
             KeyframeLockClient.Selection selection = KeyframeLockClient.selection(view);
+            IKey status = selection.problem() == null
+                ? key("bbs_together.keyframe_lock.status.ready").format(selection.keys().size())
+                : key("bbs_together.keyframe_lock.status." + selection.problem());
 
-            if (!selection.ok() && selection.problem() != null)
+            menu.action(Icons.NONE, status, Colors.setA(Colors.WHITE, 0.65F), () ->
             {
-                menu.action(Icons.NONE, key("bbs_together.keyframe_lock.status." + selection.problem()), () -> {});
-            }
-
-            menu.action(Icons.LOCKED, key("bbs_together.keyframe_lock.menu.create"), () ->
-            {
-                if (!selection.ok())
+                if (selection.ok())
                 {
-                    return;
-                }
-
-                if (KeyframeLockClient.create(view, selection))
-                {
-                    view.getGraph().clearSelection();
+                    KeyframeLockClient.create(view, selection);
                 }
             });
 

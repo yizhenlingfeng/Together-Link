@@ -180,6 +180,7 @@
   "bbs_together.keyframe_lock.status.selection_duration": "请先选中一段关键帧区间",
   "bbs_together.keyframe_lock.status.selection_range": "请选中首尾之间的全部关键帧",
   "bbs_together.keyframe_lock.status.selection_overlap": "选区中已有被锁定的关键帧",
+  "bbs_together.keyframe_lock.status.ready": "这 %s 个关键帧可以锁定",
   "bbs_together.coop.key.accept": "同意录制",
   "bbs_together.coop.key.deny": "取消录制",
   "bbs_together.coop.menu.request": "请求合作录制",

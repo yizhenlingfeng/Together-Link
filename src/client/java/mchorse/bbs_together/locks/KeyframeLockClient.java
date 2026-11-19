@@ -49,8 +49,17 @@ public final class KeyframeLockClient
         return ClipLockClient.canManage();
     }
 
-    public record Selection(ValueGroup owner, List<KeyframeLockData.Range> ranges, String problem)
+    /**
+     * The ranges the current selection would lock, plus what the menu needs to explain itself:
+     * the keys that bound each range, and the lock that already covers part of it.
+     */
+    public record Selection(ValueGroup owner, List<KeyframeLockData.Range> ranges, List<Keyframe<?>> keys, String problem, String overlapping)
     {
+        public static Selection fail(String problem)
+        {
+            return new Selection(null, List.of(), List.of(), problem, null);
+        }
+
         public boolean ok()
         {
             return this.problem == null && this.owner != null && !this.ranges.isEmpty();
@@ -76,11 +85,12 @@ public final class KeyframeLockClient
     {
         if (view == null || view.getGraph() == null)
         {
-            return new Selection(null, List.of(), PROBLEM_DURATION);
+            return Selection.fail(PROBLEM_DURATION);
         }
 
         Map<String, float[]> bounds = new LinkedHashMap<>();
         Map<String, KeyframeChannel<?>> channels = new LinkedHashMap<>();
+        List<Keyframe<?>> keys = new ArrayList<>();
         ValueGroup owner = null;
         boolean anySelection = false;
 
@@ -99,13 +109,15 @@ public final class KeyframeLockClient
 
             if (sheetOwner == null || (owner != null && owner != sheetOwner))
             {
-                return new Selection(null, List.of(), PROBLEM_RANGE);
+                return Selection.fail(PROBLEM_RANGE);
             }
 
             owner = sheetOwner;
 
             float min = Float.MAX_VALUE;
             float max = -Float.MAX_VALUE;
+            Keyframe<?> first = null;
+            Keyframe<?> last = null;
 
             for (int index : selection.getIndices())
             {
@@ -114,10 +126,12 @@ public final class KeyframeLockClient
                     continue;
                 }
 
-                float tick = tick(sheet.channel, index);
+                Keyframe<?> key = (Keyframe<?>) sheet.channel.getKeyframes().get(index);
 
-                min = Math.min(min, tick);
-                max = Math.max(max, tick);
+                min = Math.min(min, key.getTick());
+                max = Math.max(max, key.getTick());
+                first = first == null || key.getTick() < first.getTick() ? key : first;
+                last = last == null || key.getTick() > last.getTick() ? key : last;
             }
 
             if (min > max)
@@ -145,8 +159,18 @@ public final class KeyframeLockClient
 
                 if (tick >= min && tick <= max && !selection.has(i))
                 {
-                    return new Selection(null, List.of(), PROBLEM_RANGE);
+                    return Selection.fail(PROBLEM_RANGE);
                 }
+            }
+
+            if (first != null && !keys.contains(first))
+            {
+                keys.add(first);
+            }
+
+            if (last != null && !keys.contains(last))
+            {
+                keys.add(last);
             }
 
             String id = channel.getId();
@@ -166,7 +190,7 @@ public final class KeyframeLockClient
 
         if (!anySelection || bounds.isEmpty())
         {
-            return new Selection(null, List.of(), PROBLEM_DURATION);
+            return Selection.fail(PROBLEM_DURATION);
         }
 
         ArrayList<KeyframeLockData.Range> ranges = new ArrayList<>();
@@ -178,7 +202,7 @@ public final class KeyframeLockClient
 
             if (end <= start)
             {
-                return new Selection(null, List.of(), PROBLEM_DURATION);
+                return Selection.fail(PROBLEM_DURATION);
             }
 
             ranges.add(new KeyframeLockData.Range(entry.getKey(), start, end));
@@ -192,13 +216,13 @@ public final class KeyframeLockClient
                 {
                     if (range.channel().equals(candidate.channel()) && range.intersects(candidate.start(), candidate.end()))
                     {
-                        return new Selection(owner, ranges, PROBLEM_OVERLAP);
+                        return new Selection(owner, ranges, keys, PROBLEM_OVERLAP, lock.id());
                     }
                 }
             }
         }
 
-        return new Selection(owner, ranges, null);
+        return new Selection(owner, ranges, keys, null, null);
     }
 
     public static boolean create(UIKeyframes view, Selection selection)
@@ -215,6 +239,17 @@ public final class KeyframeLockClient
         locks.add(new KeyframeLockData(null, selection.ranges()));
         KeyframeLockData.set(selection.owner(), locks);
         broadcast(film, selection.owner());
+
+        /* Locking a range takes the keys off the selection: dragging what is now frozen would
+         * only look broken. The first locked key becomes the picked one instead, the way the
+         * keyframe editor moves the pick on every other click. */
+        Keyframe<?> first = selection.keys().isEmpty() ? null : selection.keys().get(0);
+
+        if (first != null)
+        {
+            view.getGraph().clearSelection();
+            view.pickKeyframe(first);
+        }
 
         return true;
     }
