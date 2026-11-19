@@ -58,9 +58,9 @@ public final class ClipLockUi
             return;
         }
 
-        ClipLockData lock = ClipLockClient.get(clip);
+        boolean effective = ClipLockClient.isLockedForSelf(clip);
 
-        menu.icons.add(new MenuIcon(lock != null ? Icons.LOCKED : Icons.UNLOCKED, key("bbs_together.clip_lock.menu.label"), MenuVerb.Slot.COMMON, () -> openMenu(clips, delegate, clip)));
+        menu.icons.add(new MenuIcon(effective ? Icons.LOCKED : Icons.UNLOCKED, key("bbs_together.clip_lock.menu.label"), MenuVerb.Slot.COMMON, () -> openMenu(clips, delegate, clip)));
     }
 
     private static Clip clipAt(UIClips clips, int mouseX, int mouseY)
@@ -99,8 +99,9 @@ public final class ClipLockUi
         context.replaceContextMenu((menu) ->
         {
             ClipLockData lock = ClipLockClient.get(clip);
+            boolean editable = ClipLockClient.canEdit(clip);
 
-            menu.action(Icons.LOCKED, key("bbs_together.clip_lock.menu.all"), () -> apply(clips, delegate, clip, AssetLockMode.ALL, Collections.emptyMap()));
+            menu.action(editable ? Icons.UNLOCKED : Icons.LOCKED, key("bbs_together.clip_lock.menu.all"), () -> apply(clips, delegate, clip, AssetLockMode.ALL, Collections.emptyMap()));
 
             int whitelist = lock == null ? 0 : lock.whitelist.size();
             int blacklist = lock == null ? 0 : lock.blacklist.size();

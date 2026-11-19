@@ -52,6 +52,15 @@ public final class ClipLockClient
         return get(clip) != null;
     }
 
+    /**
+     * Whether the clip's lock actually keeps this player out. A clip locked for others but
+     * open to this player reads as unlocked here, which is how its icon is picked.
+     */
+    public static boolean isLockedForSelf(Clip clip)
+    {
+        return !canEdit(clip);
+    }
+
     public static boolean canEdit(Clip clip)
     {
         if (!TogetherClientNetwork.isConnected())
