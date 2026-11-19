@@ -208,41 +208,33 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 #### Added
 
-- The cooperative recording room has been redesigned: the panel follows the BBS UI scale (its size can be dragged by the corner grip and is remembered), with the film, branch and phase in the header, a scrolling replay list on the left, the participants on the right, and the status line with the actions at the bottom. A film with more replays than the panel is tall scrolls with the mouse wheel or the scrollbar.
-- Every replay row now previews the model of that replay's form, following BBS' list model preview setting, and also shows its length and keyframe count plus first-person, actor and disabled markers. A claimed replay shows its claimer's face and name, and your own is highlighted. The preview only reads the local film copy and never writes a received film to disk, so opening the room cannot overwrite unsaved edits.
-- During recording the room becomes a read-only progress board: replays handed in and a progress bar, the elapsed time, and the members still recording. Players who hand their take in return to that board automatically instead of waiting on set.
-- Saving or committing a film with zero replays now logs a diagnostic line, so it is clear whether the empty data came from the client or from the server working copy.
-- The model lock is now an icon in the top bar of the model's context menu, beside the add-category plus, instead of a row in the list; it opens the same lock submenu.
-- Form categories (the "category" folders in the form palette) now travel through the server's asset sync. Category files only ever lived in the local `config/bbs/settings/forms`, which the manifest, download and upload paths never look at, so a player's categories never reached anybody else. They are stored under `form_categories/` in the asset folder instead, reusing the existing SHA-1 comparison, mtime arbitration, sliced transfer and upload permission; the category list is re-read after the server delivers files, and existing files are copied into the new folder on first launch (the old folder is left in place).
-- Camera timeline clips can now be locked one by one: right-clicking a clip shows a lock icon after ≡ (presets) that restricts the clip to nobody, a whitelist or a blacklist, or removes the lock. The lock lives in the clip's own data (key `bbs_together:clip_lock`), so it is saved with the film and travels through copying, pasting and undo; the server matches clips by the random id the lock carries rather than by the list index that BBS rewrites whenever clips are reordered.
-- The lock is visible on the timeline itself: a locked clip draws a lock mark on its bar, and a player without permission sees its whole panel greyed out, with BBS' own locked overlay turning the keyframe Edit button into a lock button. Dragging, cutting, removing, aligning to the cursor and double-clicking to open no longer work for such a clip.
-- A lock is broadcast to the other editors of the same branch the moment it changes and is written into the server's branch copy, so it survives a rejoin or a restart. Camera clips are not part of the full-film save, which is why a lock used to exist only on the locking player's client while everybody else kept editing the clip.
-- The server re-checks both write paths: in a whole-film snapshot, a locked clip the player may not edit is restored from the branch copy instead of throwing the save away, so the player's other edits still count, and a camera sync that touches such a clip is dropped with a notice. Creating, changing or removing a lock requires level 2.
-- Added a film commits tab (`Film nodes`): it draws every film's branches and commits as a scrollable node graph with the main branch in the middle and the others split left and right. Clicking a node shows its details and offers rename, revert, squash and branch checkout; the graph refreshes as new commits arrive and follows the bottom.
-- The clip context menu now validates the clipboard: the system clipboard is checked for parseable BBS data before the menu opens, and anything else is treated as "nothing to paste" with the paste button disabled. Arbitrary text in the clipboard (such as a log line or a crash report) used to throw a parse exception and take the client down.
-- Sending now checks every custom packet against Minecraft's single-packet limit (32767 bytes) before encoding. A payload over the limit is dropped and logged instead of being sent, so the player is no longer disconnected. Previously a few channels (such as the full snapshot or the camera path sync) could hand the encoder more than the limit, which made the server fail to decode the packet and kick the player with "connection lost".
+- Coop recording room redesigned: a scalable panel showing the film, branch, recording stage, replay list (with model preview, duration, keyframe count and the player who claimed it) and the participant roster; the recording stage becomes a read-only progress panel.
+- The model lock entry is now a top-right icon in the context menu, next to the "add category" plus button.
+- Form category folders are now synced as server assets (stored under `form_categories/`, reusing the existing chunked transfer and permissions).
+- Camera clips can be locked individually: a lock icon appears after ≡ in the clip context menu, setting the clip to nobody / whitelist / blacklist, or removing the lock. The lock lives in the clip's own data (`bbs_together:clip_lock`), travels with the film and through copy, paste and undo; the server matches clips by the lock's random ID.
+- The lock is drawn on the timeline: a lock badge on the bar; without permission the panel greys out, "Keyframes → Edit" shows as a lock button and cannot be clicked, and dragging, cutting, removing, shifting to cursor and double-click-to-open all stop working. The lock is broadcast to same-branch editors and written to the server copy; the server re-checks the full snapshot and the camera sync and reverts unauthorized changes. Creating or removing a lock requires level 2.
+- New film commits graph tab (`影片节点`): a scrollable branch/commit node graph; click a node to view, rename, revert, squash or switch branch; auto-refreshes and follows the bottom.
+- The clip context menu validates the clipboard first: non-BBS data counts as "nothing to paste" and the paste button is disabled (arbitrary text used to throw and crash the client).
+- A packet size check before sending: packets over 32767 bytes are skipped and logged instead of dropping the connection (a few channels could trigger "connection lost").
 
 #### Fixed
 
-- Fixed leftover actors from the previous take: starting a new cooperative recording on a film that already had one left the previous cast standing on set next to the real players. The bodies of the replays the session claimed (including members who already handed in but are not merged yet) are hidden for the duration of the recording; replays nobody claimed keep their bodies as blocking reference.
-- Fixed other players not syncing, and the committed replays being emptied, after changing a film's replay count and committing. The structure sync called `ValueStableList.sync()` after rebuilding the replay list, and that method always throws `UnsupportedOperationException` in BBS. The exception also happened inside the server's `execute` scheduling, where it is dropped silently, so both the save and the relay were skipped and the new replays were never filled in. Replays are now built from the payload ids before the list is replaced, and the call is gone.
-- Added payload validation to the structure sync: a payload is applied only when it is a list whose size matches the metadata. A mismatched payload used to clear the whole replay list first, which is how a film ended up with zero replays; a failed apply now logs instead of silently aborting.
-- Fixed cooperative recording end notices showing raw translation keys (such as `bbs_together.coop.notify.merged`): those keys were only written to the vanilla language table, while BBS' own table is what resolves them.
-- Fixed the room panel popping back over the world after a recording member closed chat or the inventory. A member who is recording and still owes a take is no longer interrupted by the pending room screen.
-- Fixed the `Film nodes` tab showing its graph crammed against the top and unable to scroll the first time it is opened after each launch, until a splitter was dragged once. As a tab it has no periodic refresh, and its layout was skipped while the panel was still unmeasured on the first frame, so the graph never received a real viewport; it now lays out as soon as the panel has a size and re-applies the layout every frame, so the very first open is correct.
+- Re-starting a coop recording now hides the old bodies of already-claimed replays, so they no longer double up with real players.
+- Changing the replay count then committing no longer desyncs or wipes replays: the throwing `ValueStableList.sync()` call is removed and replays are rebuilt by payload id; a payload check skips mismatched lists instead of clearing the whole table.
+- The coop recording end notice no longer shows raw keys (now resolved through the BBS language table).
+- Closing chat or inventory while recording no longer makes the coop room panel cover the world again.
+- The `影片节点` tab no longer stacks nodes at the top and refuses to scroll on the first open after each launch; it re-lays out as soon as the size is known and re-checks every frame.
 
 #### Verified
 
-- All three targets (1.20.1, 1.20.4, 1.21.11) build successfully.
+- Builds pass for all three targets: 1.20.1, 1.20.4, 1.21.11.
 
 #### Compatibility
 
-- The network protocol remains version 3. The room state packet only gained trailing fields (recording time, branch, handed-in takes, unanswered invites): an older client stops after the fields it knows, and a newer client defaults whatever is missing, so mixed versions can still connect. The 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build are updated together.
-- Category sync needs no server changes, since a category file is just an asset; uploading one requires the `upload` domain. The asset sync does not express deletions, so a client only drops a category once the server's file count goes down.
-- Clip locks live in a namespaced key inside the clip, so older data without it is simply unlocked and needs no migration. The sync and the checks reuse the existing full-film snapshot and camera path sync, and the network protocol stays at version 3.
-- The film commits graph and the clipboard check are client-only changes that need no server support, and the network protocol stays at version 3.
-- The packet size check is send-side only: an oversized sync message is dropped (that one edit does not apply, everything else goes through), packet formats are unchanged, and the network protocol stays at version 3.
-- The old bodies are hidden on the server before the actor list is broadcast, so every client receives the same cast with no extra configuration.
+- The network protocol stays at version 3. The coop room state packet only appends fields, so old and new versions can still connect.
+- Category sync rides the normal asset channel and needs the `upload` permission to push.
+- Clip locks live in the clip's namespaced key; old data without it is treated as unlocked, no migration needed.
+- The commits graph, clipboard check and packet size check are client-only or send-side only; the protocol stays at version 3.
 
 ### v2.0.4
 
