@@ -504,6 +504,10 @@ public class UICommitGraph extends UIElement
      * into the wrong place until the user drags a splitter. Syncing the body from the live area
      * each frame keeps the first frame correct; the scroll clamp only follows when the geometry
      * really moved, so it cannot undo the user's scroll position.
+     *
+     * The content height is refreshed every frame (it is cheap) because the node list can grow
+     * without the area moving: a clip added while the viewer is pinned to the bottom must extend
+     * the scroll size, otherwise the last rows would be unreachable and drawn clipped.
      */
     private void syncGeometry()
     {
@@ -512,13 +516,31 @@ public class UICommitGraph extends UIElement
         int w = this.area.w;
         int h = Math.max(0, this.area.h - HEADER);
 
-        if (x == this.body.x && y == this.body.y && w == this.body.w && h == this.body.h)
+        boolean moved = x != this.body.x || y != this.body.y || w != this.body.w || h != this.body.h;
+        int want = this.nodes.size() * ROW_H + 8;
+
+        if (!moved && want == this.scroll.scrollSize)
         {
             return;
         }
 
-        this.body.set(x, y, w, h);
-        this.updateScroll();
+        if (moved)
+        {
+            this.body.set(x, y, w, h);
+        }
+
+        this.scroll.scrollSize = want;
+        this.scroll.clamp();
+
+        /* Sticking to the bottom keeps the newest commit visible while the history grows */
+        if (this.pinned)
+        {
+            this.scroll.scrollToEnd();
+        }
+        else if (this.atEnd())
+        {
+            this.pinned = true;
+        }
     }
 
     private int columnWidth()
