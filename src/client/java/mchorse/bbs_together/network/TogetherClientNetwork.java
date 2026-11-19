@@ -2069,12 +2069,11 @@ public class TogetherClientNetwork {
     }
 
     /** crusher.send isn't thread-safe; every send goes through here so background upload
-     * threads can't interleave chunk streams with main-thread sends. */
+     * threads can't interleave chunk streams with main-thread sends. A payload the server would
+     * refuse to decode is dropped here instead of taking the connection down. */
     private static void sendCrusher(PlayerEntity player, Identifier id, byte[] payload, java.util.function.Consumer<PacketByteBuf> consumer) {
         if (payload != null && !PacketSizeGuard.fits(payload.length)) {
-            System.out.println("[BBS Together] Skipped oversized payload for " + id
-                + " (" + payload.length + " bytes > " + PacketSizeGuard.MAX_PAYLOAD
-                + "); the value is too large to sync and was not sent.");
+            PacketSizeGuard.warn(id, payload.length);
 
             return;
         }
@@ -2085,16 +2084,10 @@ public class TogetherClientNetwork {
     }
 
     private static void sendCrusher(PlayerEntity player, Identifier id, BaseType data, java.util.function.Consumer<PacketByteBuf> consumer) {
-        if (data != null) {
-            byte[] encoded = mchorse.bbs_mod.data.DataStorageUtils.writeToBytes(data);
+        if (data != null && !PacketSizeGuard.fits(mchorse.bbs_mod.data.DataStorageUtils.writeToBytes(data).length)) {
+            PacketSizeGuard.warn(id, mchorse.bbs_mod.data.DataStorageUtils.writeToBytes(data).length);
 
-            if (!PacketSizeGuard.fits(encoded.length)) {
-                System.out.println("[BBS Together] Skipped oversized payload for " + id
-                    + " (" + encoded.length + " bytes > " + PacketSizeGuard.MAX_PAYLOAD
-                    + "); the value is too large to sync and was not sent.");
-
-                return;
-            }
+            return;
         }
 
         synchronized (crusher) {

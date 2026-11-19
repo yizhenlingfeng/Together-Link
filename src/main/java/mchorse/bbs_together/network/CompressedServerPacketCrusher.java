@@ -1,5 +1,7 @@
 package mchorse.bbs_together.network;
 
+import mchorse.bbs_mod.data.DataStorageUtils;
+import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.network.IBufferReceiver;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.PacketByteBuf;
@@ -15,12 +17,12 @@ public class CompressedServerPacketCrusher extends SafeServerPacketCrusher
     @Override
     protected void sendBuffer(PlayerEntity entity, Identifier identifier, PacketByteBuf buf)
     {
-        /* Same guard as the client: a chunk over the vanilla 32 KiB inbound limit would make
-         * the receiving client error out and drop the connection. Drop it here instead. */
+        /* A chunk over the vanilla 32 KiB inbound limit would make the receiving client error
+         * out and drop the connection. Drop it here instead; the crusher keeps every chunk
+         * well under the limit, so this only catches a path that bypassed its split. */
         if (!PacketSizeGuard.fits(buf.readableBytes()))
         {
-            System.out.println("[BBS Together] Dropped oversized packet " + identifier
-                + " (" + buf.readableBytes() + " bytes > " + PacketSizeGuard.MAX_PAYLOAD + ")");
+            PacketSizeGuard.warn(identifier, buf.readableBytes());
 
             return;
         }
@@ -28,17 +30,13 @@ public class CompressedServerPacketCrusher extends SafeServerPacketCrusher
         TogetherServerNetworking.send((ServerPlayerEntity) entity, identifier, buf);
     }
 
-    /**
-     * {@link #send(PlayerEntity, Identifier, byte[], Consumer)} with a size check up front: a
-     * payload the receiving client would refuse to decode is dropped and logged instead of
-     * being handed to the encoder, which would otherwise disconnect that client.
-     */
+    /** {@link #send} with a size check up front, so an oversized payload is dropped and logged
+     * instead of being handed to the encoder, which would disconnect the receiving client. */
     public void sendGuarded(PlayerEntity target, Identifier identifier, byte[] bytes, Consumer<PacketByteBuf> consumer)
     {
         if (bytes != null && !PacketSizeGuard.fits(bytes.length))
         {
-            System.out.println("[BBS Together] Skipped oversized payload for " + identifier
-                + " (" + bytes.length + " bytes > " + PacketSizeGuard.MAX_PAYLOAD + "); not sent.");
+            PacketSizeGuard.warn(identifier, bytes.length);
 
             return;
         }
@@ -47,16 +45,15 @@ public class CompressedServerPacketCrusher extends SafeServerPacketCrusher
     }
 
     /** Same as above for a structured payload. */
-    public void sendGuarded(PlayerEntity target, Identifier identifier, mchorse.bbs_mod.data.types.BaseType data, Consumer<PacketByteBuf> consumer)
+    public void sendGuarded(PlayerEntity target, Identifier identifier, BaseType data, Consumer<PacketByteBuf> consumer)
     {
         if (data != null)
         {
-            byte[] encoded = mchorse.bbs_mod.data.DataStorageUtils.writeToBytes(data);
+            int length = DataStorageUtils.writeToBytes(data).length;
 
-            if (!PacketSizeGuard.fits(encoded.length))
+            if (!PacketSizeGuard.fits(length))
             {
-                System.out.println("[BBS Together] Skipped oversized payload for " + identifier
-                    + " (" + encoded.length + " bytes > " + PacketSizeGuard.MAX_PAYLOAD + "); not sent.");
+                PacketSizeGuard.warn(identifier, length);
 
                 return;
             }

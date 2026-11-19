@@ -220,6 +220,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The server re-checks both write paths: in a whole-film snapshot, a locked clip the player may not edit is restored from the branch copy instead of throwing the save away, so the player's other edits still count, and a camera sync that touches such a clip is dropped with a notice. Creating, changing or removing a lock requires level 2.
 - Added a film commits tab (`Film nodes`): it draws every film's branches and commits as a scrollable node graph with the main branch in the middle and the others split left and right. Clicking a node shows its details and offers rename, revert, squash and branch checkout; the graph refreshes as new commits arrive and follows the bottom.
 - The clip context menu now validates the clipboard: the system clipboard is checked for parseable BBS data before the menu opens, and anything else is treated as "nothing to paste" with the paste button disabled. Arbitrary text in the clipboard (such as a log line or a crash report) used to throw a parse exception and take the client down.
+- Sending now checks every custom packet against Minecraft's single-packet limit (32767 bytes) before encoding. A payload over the limit is dropped and logged instead of being sent, so the player is no longer disconnected. Previously a few channels (such as the full snapshot or the camera path sync) could hand the encoder more than the limit, which made the server fail to decode the packet and kick the player with "connection lost".
 
 #### Fixed
 
@@ -240,6 +241,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Category sync needs no server changes, since a category file is just an asset; uploading one requires the `upload` domain. The asset sync does not express deletions, so a client only drops a category once the server's file count goes down.
 - Clip locks live in a namespaced key inside the clip, so older data without it is simply unlocked and needs no migration. The sync and the checks reuse the existing full-film snapshot and camera path sync, and the network protocol stays at version 3.
 - The film commits graph and the clipboard check are client-only changes that need no server support, and the network protocol stays at version 3.
+- The packet size check is send-side only: an oversized sync message is dropped (that one edit does not apply, everything else goes through), packet formats are unchanged, and the network protocol stays at version 3.
 - The old bodies are hidden on the server before the actor list is broadcast, so every client receives the same cast with no extra configuration.
 
 ### v2.0.4
