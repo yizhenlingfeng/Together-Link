@@ -5,6 +5,7 @@ import mchorse.bbs_mod.data.types.ListType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
+import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.KeyframeSelection;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
@@ -250,6 +251,19 @@ public final class KeyframeLockClient
         return ((Keyframe<?>) channel.getKeyframes().get(index)).getTick();
     }
 
+    /** The channel an undo entry edited, either the value itself or the group a key sits in. */
+    private static KeyframeChannel<?> channelOf(BaseValue value)
+    {
+        if (value instanceof KeyframeChannel<?> channel)
+        {
+            return channel;
+        }
+
+        BaseValue parent = value == null ? null : value.getParent();
+
+        return parent instanceof KeyframeChannel<?> channel ? channel : null;
+    }
+
     public static void filterLockedSelection(UIKeyframes view)
     {
         for (UIKeyframeSheet sheet : view.getGraph().getSheets())
@@ -428,26 +442,28 @@ public final class KeyframeLockClient
     /* Undo */
 
     /**
-     * Whether a remembered value, written back by Ctrl+Z, would rewrite keyframes or loop
-     * blocks that a lock covers. A channel payload is compared key by key and loop by loop,
-     * so a rollback that leaves locked keys alone still goes through; a payload that cannot
-     * be inspected that way (the whole owner or a whole replay group) is refused when the
-     * owner has any lock.
+     * Whether a remembered value, written back by Ctrl+Z or Ctrl+Y, would rewrite keyframes or
+     * loop blocks that a lock covers. {@code target} is the value the undo entry was recorded
+     * for: a whole channel or a single keyframe. A channel payload is compared key by key and
+     * loop by loop, so a rollback that leaves locked keys alone still goes through; a value that
+     * cannot be inspected that way is refused when the owner has any lock at all.
      */
-    public static boolean undoBlocked(ValueGroup owner, BaseType value)
+    public static boolean undoBlocked(BaseValue target, BaseType value)
     {
-        if (owner == null || value == null)
+        if (target == null || value == null)
         {
             return false;
         }
 
-        if (!value.isMap() || !value.asMap().has("keyframes"))
+        ValueGroup owner = KeyframeLockData.ownerOf(target);
+
+        if (owner == null)
         {
-            return !value.isList() && KeyframeLockData.hasAny(owner);
+            return false;
         }
 
-        MapType channel = value.asMap();
-        String channelId = channel.getString("type");
+        KeyframeChannel<?> channel = channelOf(target);
+        String channelId = channel != null ? channel.getId() : value.isMap() ? value.asMap().getString("type") : null;
         List<KeyframeLockData.Range> ranges = channelId == null ? List.of() : KeyframeLockData.rangesFor(owner, channelId);
 
         if (ranges.isEmpty())
@@ -455,7 +471,18 @@ public final class KeyframeLockClient
             return false;
         }
 
-        ListType keys = channel.getList("keyframes");
+        if (target instanceof Keyframe<?> keyframe)
+        {
+            return locked(ranges, keyframe.getTick());
+        }
+
+        if (!value.isMap() || !value.asMap().has("keyframes"))
+        {
+            return !value.isList() && KeyframeLockData.hasAny(owner);
+        }
+
+        MapType values = value.asMap();
+        ListType keys = values.getList("keyframes");
 
         if (keys != null)
         {
@@ -468,7 +495,7 @@ public final class KeyframeLockClient
             }
         }
 
-        ListType loops = channel.getList("loops");
+        ListType loops = values.getList("loops");
 
         if (loops != null)
         {
