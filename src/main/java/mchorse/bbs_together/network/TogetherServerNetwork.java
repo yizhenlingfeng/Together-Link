@@ -56,8 +56,12 @@ import mchorse.bbs_mod.forms.FormUtils;
 import mchorse.bbs_mod.network.IBufferReceiver;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.base.BaseValueGroup;
+
+import mchorse.bbs_mod.settings.values.core.ValueList;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
+
+import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_together.BBSTogetherFix18;
 import mchorse.bbs_together.BBSTogetherFix28Server;
 import mchorse.bbs_together.TogetherSettings;
@@ -75,6 +79,8 @@ import mchorse.bbs_together.locks.AssetLockMode;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.locks.AssetTombstones;
 import mchorse.bbs_together.locks.ClipLockGuard;
+
+import mchorse.bbs_together.locks.KeyframeLockGuard;
 import mchorse.bbs_together.network.AssetEgressBudget;
 import mchorse.bbs_together.network.CoopSessionManager;
 import mchorse.bbs_together.utils.AssetPaths;
@@ -1874,7 +1880,9 @@ public class TogetherServerNetwork {
                 Film stored = FilmBranchStore.working(filmId, branch);
                 Film incomingFilm = new Film();
                 incomingFilm.fromData((BaseType)incoming.asMap());
-                TogetherServerNetwork.mergeFilms(stored, incomingFilm);
+                UUID playerId = player.getUuid();
+                boolean canManage = BbsOpManager.canManage(player);
+                TogetherServerNetwork.mergeFilms(stored, incomingFilm, playerId, canManage);
                 MapType merged = (MapType)stored.toData();
                 TogetherServerNetwork.saveBranchNow(filmId, branch, merged);
                 lastSavedFilmSnapshots.put(TogetherServerNetwork.branchKey(filmId, branch), merged);
@@ -1925,6 +1933,8 @@ public class TogetherServerNetwork {
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
             /* True when the save button asked for a commit on the player's current branch head;
              * duplication and recorded keyframe syncs keep it false, older clients omit it. */
+            UUID playerId = player.getUuid();
+            boolean canManage = BbsOpManager.canManage(player);
             boolean commitOnSave = packetByteBuf.isReadable() && packetByteBuf.readBoolean();
             BaseType incoming = DataStorageUtils.readFromBytes((byte[])bytes);
             if (!incoming.isMap()) {
@@ -1950,7 +1960,7 @@ public class TogetherServerNetwork {
                 Film incomingFilm = new Film();
                 incomingFilm.fromData((BaseType)incoming.asMap());
                 MapType before = lastSavedFilmSnapshots.containsKey(key) ? lastSavedFilmSnapshots.get(key) : (MapType)stored.toData();
-                TogetherServerNetwork.mergeFilms(stored, incomingFilm);
+                TogetherServerNetwork.mergeFilms(stored, incomingFilm, playerId, canManage);
                 MapType merged = (MapType)stored.toData();
                 ArrayList<String> changedClips = TogetherServerNetwork.collectChangedClips(before, merged);
                 /* A save never removes replays, so an empty result means the sender already had none. */
@@ -3270,13 +3280,17 @@ public class TogetherServerNetwork {
         });
     }
 
-    private static void mergeFilms(Film stored, Film incoming) {
+    private static void mergeFilms(Film stored, Film incoming, UUID playerId, boolean canManageLocks) {
         List storedReplays = stored.replays.getList();
         List incomingReplays = incoming.replays.getList();
         for (int i = 0; i < incomingReplays.size(); ++i) {
             KeyframeChannel storedCh;
             Replay incomingReplay = (Replay)incomingReplays.get(i);
             if (i >= storedReplays.size()) {
+                /* A full save must not carry lock records into a replay the saver just created. */
+                if (!canManageLocks) {
+                    KeyframeLockGuard.stripLocks(incomingReplay);
+                }
                 stored.replays.add(incomingReplay);
                 continue;
             }
@@ -3286,6 +3300,7 @@ public class TogetherServerNetwork {
                 if (!(storedVal instanceof KeyframeChannel)) continue;
                 storedCh = (KeyframeChannel)storedVal;
                 if (keyframeChannel.getKeyframes().size() <= storedCh.getKeyframes().size()) continue;
+                KeyframeLockGuard.sanitizeChannel(storedReplay, storedCh, keyframeChannel);
                 storedCh.fromData(keyframeChannel.toData());
             }
             for (Map.Entry entry : incomingReplay.properties.tracks.entrySet()) {
@@ -3296,6 +3311,7 @@ public class TogetherServerNetwork {
                     continue;
                 }
                 if (inCh.getKeyframes().size() <= storedCh.getKeyframes().size()) continue;
+                KeyframeLockGuard.sanitizeChannel(storedReplay, storedCh, inCh);
                 storedCh.fromData(inCh.toData());
             }
             if (incomingReplay.form.get() == null) continue;
@@ -3315,6 +3331,28 @@ public class TogetherServerNetwork {
         if (generic != null) {
             return generic;
         }
+        /* Clips has no string lookup, so camera paths only resolve through the index. */
+        if ("camera".equals(path.get(0)) && path.size() >= 2) {
+            try {
+                int clipIndex = Integer.parseInt(path.get(1));
+                List clips = film.camera.get();
+                if (clipIndex < 0 || clipIndex >= clips.size()) {
+                    return null;
+                }
+                Clip clip = (Clip)clips.get(clipIndex);
+                if (path.size() == 2) {
+                    return clip;
+                }
+                BaseValue channel = clip.get(path.get(2));
+                if (path.size() == 3) {
+                    return channel;
+                }
+                return TogetherServerNetwork.keyframeAt(channel, path.get(3));
+            }
+            catch (Exception e) {
+                return null;
+            }
+        }
         if (!"replays".equals(path.get(0)) || path.size() < 4) {
             return null;
         }
@@ -3327,18 +3365,40 @@ public class TogetherServerNetwork {
             Replay replay = (Replay)replays.get(replayIdx);
             String group = path.get(2);
             String chanId = path.get(3);
+            BaseValue channel;
             if ("keyframes".equals(group)) {
-                return replay.keyframes.get(chanId);
+                channel = replay.keyframes.get(chanId);
             }
-            if ("properties".equals(group)) {
+            else if ("properties".equals(group)) {
                 TrackId trackId = TrackId.parse(chanId);
-                return trackId == null ? null : replay.properties.get(trackId);
+                channel = trackId == null ? null : replay.properties.get(trackId);
             }
+            else {
+                return null;
+            }
+            if (path.size() == 4) {
+                return channel;
+            }
+            return TogetherServerNetwork.keyframeAt(channel, path.get(4));
         }
         catch (Exception e) {
             return null;
         }
-        return null;
+    }
+
+    /** Resolves a positional keyframe below a channel, for sync paths that point past it. */
+    private static BaseValue keyframeAt(BaseValue channel, String index) {
+        if (!(channel instanceof ValueList)) {
+            return null;
+        }
+        try {
+            int keyIndex = Integer.parseInt(index);
+            List keys = ((ValueList)channel).getAllTyped();
+            return keyIndex < 0 || keyIndex >= keys.size() ? null : (BaseValue)keys.get(keyIndex);
+        }
+        catch (Exception e) {
+            return null;
+        }
     }
 
     private static void handleFilmDataSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -3383,6 +3443,11 @@ public class TogetherServerNetwork {
                 /* A clip lock is enforced on the clip the server already holds: a path into a
                  * locked camera clip is refused before it can reach the other editors. */
                 if (!ClipLockGuard.canSyncCamera(player, filmId, branch, path, payload)) {
+                    return;
+                }
+                /* Keyframe locks are compared against the branch copy the server holds, so an
+                 * edit inside a locked range never reaches the other editors. */
+                if (!KeyframeLockGuard.canSync(player, filmId, branch, path, payload)) {
                     return;
                 }
                 playerEditingFilm.put(player.getUuid(), filmId);
@@ -3483,6 +3548,22 @@ public class TogetherServerNetwork {
             for (UndoChange c : changes) {
                 BaseValue current;
                 if (!TogetherServerNetwork.isServerTracked(c.path) || (current = TogetherServerNetwork.resolveSyncTarget(film, c.path)) == null) continue;
+                /* A rollback restoring state from before a lock was made would silently undo
+                 * the locked content, so it is refused with an explanation rather than guessed at. */
+                String undoLock;
+
+                try {
+                    undoLock = KeyframeLockGuard.undoReason(player, filmId, branch, film, c.path, DataStorageUtils.readFromBytes(c.data));
+                }
+                catch (Exception e) {
+                    undoLock = KeyframeLockGuard.REASON_LOCKED;
+                }
+
+                if (undoLock != null) {
+                    TogetherServerNetwork.rejectUndo(server, player, film, changes);
+                    player.sendMessage(Text.translatable(undoLock).formatted(Formatting.YELLOW), false);
+                    return;
+                }
                 byte[] actual = DataStorageUtils.writeToBytes((BaseType)current.toData());
                 if (Arrays.equals(actual, c.expected)) continue;
                 TogetherServerNetwork.rejectUndo(server, player, film, changes);

@@ -46,7 +46,7 @@ public final class KeyframeLockGuard
 
     private static final Map<UUID, Long> NOTICE_AT = new ConcurrentHashMap<>();
 
-    private static final String REASON_LOCKED = "bbs_together.keyframe_lock.notify.locked";
+    public static final String REASON_LOCKED = "bbs_together.keyframe_lock.notify.locked";
 
     private KeyframeLockGuard()
     {}
