@@ -1,6 +1,5 @@
 package mchorse.bbs_together.ui;
 
-import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframes;
@@ -60,51 +59,49 @@ public final class KeyframeLockOverlay
         boolean enforced = false;
 
         KeyframeLockClient.renderFilm(KeyframeLockClient.film(view));
+        KeyframeLockClient.currentView(view);
 
         for (UIKeyframeSheet sheet : graph.getSheets())
         {
-            ValueGroup owner = KeyframeLockData.ownerOf(sheet.channel);
-
-            if (owner == null)
+            if (KeyframeLockData.ownerOf(sheet.channel) == null)
             {
                 continue;
             }
 
-            List<KeyframeLockData> locks = KeyframeLockData.get(owner);
+            /* The lookup resolves the channel names the way the editor names them, so a lock saved
+             * in one view (dope sheet) still lands on the right rows in the other (curve graph). */
+            List<KeyframeLockData.Range> ranges = KeyframeLockClient.rangesForSheet(sheet);
 
-            if (locks.isEmpty())
+            if (ranges.isEmpty())
             {
                 continue;
             }
 
             int[] row = KeyframeLockClient.row(view, sheet);
             int bottom = row[0] + row[1];
+            int y1 = Math.max(top, row[0]);
+            int y2 = Math.min(bottomLimit, bottom);
 
-            for (KeyframeLockData lock : locks)
+            if (y2 - y1 < 2)
             {
-                for (KeyframeLockData.Range range : lock.ranges())
+                continue;
+            }
+
+            for (KeyframeLockData.Range range : ranges)
+            {
+                int x1 = Math.max(clipX1, view.toGraphX(range.start()));
+                int x2 = Math.min(clipX2, view.toGraphX(range.end()));
+
+                if (x2 - x1 < 2)
                 {
-                    if (!range.channel().equals(sheet.channel.getId()))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    int x1 = Math.max(clipX1, view.toGraphX(range.start()));
-                    int x2 = Math.min(clipX2, view.toGraphX(range.end()));
-                    int y1 = Math.max(top, row[0]);
-                    int y2 = Math.min(bottomLimit, bottom);
+                boxes.add(new int[] {x1, y1, x2, y2});
 
-                    if (x2 - x1 < 2 || y2 - y1 < 2)
-                    {
-                        continue;
-                    }
-
-                    boxes.add(new int[] {x1, y1, x2, y2});
-
-                    if (KeyframeLockClient.lockedForSelf(sheet))
-                    {
-                        enforced = true;
-                    }
+                if (KeyframeLockClient.lockedForSelf(sheet))
+                {
+                    enforced = true;
                 }
             }
         }

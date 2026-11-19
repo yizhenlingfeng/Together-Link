@@ -2,7 +2,7 @@
 
 > 基线：`main` / `e5a9e4b` / `mod_version=2.1`（1.20.1–1.20.4 通用构建 + 1.21.11 实验构建）
 > 方法：静态代码审计，逐条在源码中定位（见 §6 证据索引）。
-> 实施状态（2026-11-19）：**阶段 0 第 1 条、阶段 1 第 1/3/4 条、阶段 2 第 2–6 条已落地**——`fits(0)` 放行、删除整包前置检查；上传改为服务端回执 `CLIENT_ASSET_UPLOAD_ACK`，客户端等到回执才 `done`，瞬时失败重试 3 次，重复上传幂等；清单（资产/影片）加 `CLIENT_ASSET_INVENTORY_ACK`，`lastReportedSha1`/`lastFilmInventorySent` 改为收到回执后才推进；服务端发不出的资产回 `CLIENT_ASSET_REJECTED`（队列满/读片失败），客户端有界重试后置错；`TransferLog` 按实际发出的片数记成败。协议号升到 5（客户端按 `serverProtocolVersion() >= 5` 决定是否等清单回执，≥4 决定是否等上传回执）。阶段 2 把影片保存/录制/commit 的解析、合并、序列化、写盘搬到 `FILM_IO_EXECUTOR`（先落盘再广播），资产片读盘搬到 drain 线程，影片清单批量化，`lastSavedFilmSnapshots`/`assetHashCache`/客户端清单快照改为有界 LRU，服务端 6 处 + 客户端 4 处 netty 线程解析移入后台池。`build` / `build12111` / `build1204` 三个目标均 BUILD SUCCESSFUL。未实施：>64 MiB 载荷应用层分页（阶段 2 首项）、下载完成回执、`FilmBranchStore.WORKING` LRU、`ASSET_IO_EXECUTOR` 满时回执——原因见 §4 与 §7。
+> 实施状态（更新于 2026-11-20）：阶段 0 第 1 条、阶段 1 第 1/3/4 条、阶段 2 第 2–6 条、阶段 3 第 1–3 条均已落地（提交 `f923940`、`b12eab9`、`57467d0`）。后续计划见 **§8 后续优化计划**：阶段 4（入库正确性与上限对齐）、阶段 5（协议与前向兼容）、阶段 6（性能与可观测性）、阶段 7（归档项），以及 §8.5 的实测结果回填表。
 > 说明：表中「默认配置下」指 `asset_send_batch_kb=1024`、`asset_upload_batch_kb=4096`、`asset_sync_max_mb=256`、`asset_sync_receive=false`、`asset_auto_sync=false`。标注「需实测」的条目来自代码推演，需按 §5 在测试服确认。
 
 ---
@@ -18,6 +18,7 @@
 | 5 | 真正会「掉出服务器」的不是 crusher，而是：**服务端主线程长任务**（整片影片 merge/序列化/写盘、每片 1 MiB 读盘、每部影片一个主线程任务）、**netty 线程整片反序列化**、**无界内存**（`FilmBranchStore.WORKING/LAST_SAVED`、`lastSavedFilmSnapshots`、32 个在途 × 64 MiB）、**协议版本不校验**。 | P1 |
 | 6 | 另有 **29 处直接 `TogetherServerNetworking.send`** 绕过 crusher（资产锁、影片/回放选择、影片屏幕、光标快照、玩家颜色等）。1.21.11 上 >32,767 的包在配置阶段/代理链路会被直接拒（游戏阶段上限更高，见 §2.1 附注），这些路径才是「该分片却没分片」的地方；1.20.1 的 CustomPayload 上限在 1 MiB 量级，风险阈值高得多，但仍应在统一层解决。 | P1/P2 |
 | 7 | 结论顺序：**先修 C1–C4（能同步），再修线程/内存（不卡不炸），最后补协议与直发路径（不混连、不断连）。** | — |
+| 8 | **后续计划已排期（2026-11-20）**：阶段 4 修「资产入库正确性」（临时文件清理、`totalSize`/sha1 校验、mtime 容差 CAS、`SyncRules` 统一入口），阶段 5 做协议前向兼容与 `Seq` 类型兜底，阶段 6 做热路径性能与可观测性（`/bbstogether` 自检），阶段 7 归档已完成的遗留项。详见 §8。 | — |
 
 ---
 
@@ -144,7 +145,7 @@ sendGuarded(整包 1,048,576 B)
 
 ---
 
-## 4. 修复路线（阶段 0、1、2、3 第 1–3 条已实施）
+## 4. 修复路线（阶段 0–3 已实施；后续见 §8）
 
 ### 阶段 0：恢复同步（P0）——**已实施 2026-11-19**
 
@@ -299,3 +300,130 @@ sendGuarded(整包 1,048,576 B)
     - 同时删除了 `KeyframeLockOverlay.render` 里 `-Dbbs.lockdiag` 的临时诊断打印（该段只在排查期间存在，交付版不应保留）。
     - 三个目标分开重跑均 BUILD SUCCESSFUL（`together-link-2.1-1.20.1-1.20.4.jar` 875,209 B @00:37:40 / `-1.21.11.jar` 880,029 B @00:37:55 / `-1.20.4-verify.jar` 875,073 B @00:38:08）。
     - 遗留：`mergeFilms` 仍只在「incoming 通道帧数 > stored」时才做 `sanitizeChannel` + `fromData`，帧数相等但内容不同的编辑不会合入分支副本——这是既有设计（避免整通道覆盖掉他人的编辑），未在本轮改动。
+
+---
+
+## 8. 后续优化计划（2026-11-20 制定）
+
+> 依据：阶段 0–3 已发布后的代码复查（`applyFilmDataSync` / `handleAssetUpload` / `KeyframeLock*` /
+> `AssetAutoSyncWatcher`）、用户实测反馈（关键帧锁选区、锁定后回退、1.20.4 与 1.21.11 的 dev 类路径问题），
+> 以及 §5 尚未跑完的验收项。
+> 优先级：**P0** = 会造成数据不一致或静默丢失；**P1** = 特定规模/混版本下高概率出现；**P2** = 性能、可维护性、可观测性。
+
+### 8.0 计划总览
+
+| 阶段 | 主题 | 条目 | 预估 | 依赖 | 出口条件 |
+|---|---|---|---|---|---|
+| **4** | 资产入库正确性与上限对齐 | A1–A6 | 3–5 天 | 无 | §5.1b 上传用例全绿；跨文件系统复制后上传不再 `stale_base`；`assets/` 无 `.bbsup*` 残留 |
+| **5** | 协议与前向兼容 | V1–V5 | 2–3 天 | 阶段 4 | 1.20.1 ↔ 1.21.11 混连不崩溃、有明确提示；协议号升到 6 并双向识别 |
+| **6** | 性能与可观测性 | O1–O5 | 3–4 天 | 阶段 4/5 | `/bbstogether` 能一眼看出「哪台客户端缺哪个文件、为什么」；50 MB 影片保存 MSPT 峰值 < 50 ms |
+| **7** | 归档与清理 | Z1–Z4 | 1 天 | 4–6 | §7 已决条目转入 §9 归档；文档与 README 单一来源 |
+
+执行约定（沿用本轮做法）：
+
+1. 一个阶段一次交付；每个条目改完立即跑 `build` / `build12111` / `build1204`（必须**分开**跑，串跑会触发 included build 路径冲突），三条都 BUILD SUCCESSFUL 才汇报。
+2. 只改本项目源码；`lib/bbs-fs-*` 是从 Maven 引入的外部 jar，**不可改**，任何边界问题只能在本项目两层 crusher / 通道层解决。
+3. 任何改动 wire 格式（尤其是「服务端加了分片头」这类）必须同时改发送端与接收端，并用 1.20.1 与 1.21.11 两端各跑一次——阶段 3 曾因只改发送端导致 1.21.11 客户端 `readUuid` 越界掉线（§7 第 16 条）。
+4. 交付前清掉临时诊断开关（如 `-Dbbs.lockdiag`）、临时脚本和 `*.log`，避免再次出现「诊断代码进了提交」。
+
+### 8.1 阶段 4：资产入库正确性与上限对齐（P0）
+
+| # | 条目 | 现状 / 证据 | 计划动作 | 验收 |
+|---|---|---|---|---|
+| **A1** | 上传临时文件清理 | `handleAssetUpload` 的失败分支（`sha_mismatch`、`incomplete`、`stale_base`、`io_error`、`interrupted`）只回 ACK，`.bbsup` / `.bbsuptmp` 可能残留；下次同 uuid 上传才覆盖 | 每个终止分支在 `finally` 里删自己的临时文件；启动时清理 `assets/` 下超过 1 小时未被修改的 `*.bbsup` / `*.bbsuptmp`（由 `onServerStarted` 的 `ASSET_IO_EXECUTOR` 异步跑一次） | 人为中断 20 次上传后 `assets/` 无残留；重启服务端自动清掉历史残留 |
+| **A2** | `totalSize` / `sha1` 校验 | 现只校验 `totalSize ≤ maxAssetBytes()`；负值靠「收到字节数 ≠ totalSize」间接拦截；空 sha1 直接跳过完整性校验 | `totalSize < 0 或 > syncMaxBytes` 直接 `too_large`；空 sha1 只在 `clientProtocol < 5` 时放行并记一条日志，新协议一律要求 sha1 | 伪造 `totalSize=-1`、空 sha1、超上限：均被拒并带明确错误码 |
+| **A3** | 上传 CAS 容差 | 服务端 CAS 用精确毫秒 `mtime == baseMtime`，客户端容差 `MTIME_TOLERANCE_MS=3000`，跨文件系统复制（FAT/网络盘）后合法上传会被判 `stale_base` | CAS 改为「`baseSha1` 相同 + 文件大小相同 + mtime 在 ±2 s 内」；冲突回 `stale_base` 时同时下发新候选值，客户端自动重试一次而不是直接失败 | 从 NTFS 复制到 exFAT 后上传成功；并发改同一文件时明确冲突且不静默覆盖 |
+| **A4** | 上限一致性 | `asset_sync_max_mb=256`（默认）、`MAX_TOTAL_BYTES=64 MiB`、`MAX_DECOMPRESSED=256 MiB`、`maxAssetBytes()=2 GiB`、上传 `seqTotal≤4096` 五个数字互不对齐（§7 第 4 条） | 定一条链：客户端上传片 ≤ `asset_sync_max_mb`；单次 crusher 传输 ≤ 64 MiB；服务端在 `handleHello` 把三个上限一起下发（`CLIENT_SERVER_LIMITS` 扩字段），客户端据此截断并给出「文件过大」的明确提示，而不是传到一半失败 | 默认配置下 300 MB 资产给出「超过 256 MB 上限」提示；64–256 MB 的影片保存/打开各一次成功 |
+| **A5** | 开关语义统一 | `assetSyncReceive` 默认 false：服务端已经按 `playerReceivePush` 跳过推送，但客户端在 `handleAssetFilePacket` 里还会再丢一次 `isPush` 包（两处判定、两套语义）；`assetAutoSync`/`asset_sync_receive` 两个开关含义在文档与 UI 里没有一处说清 | 新增 `SyncRules` 单一判定入口（`canDownload` / `canUpload` / `canReceivePush` / `requiresAutoSync`），服务端 `queueAssetHint`、客户端 `handleAssetFilePacket` 与自动同步 watcher 都先问它；UI tooltip 与 README 同步一句说明 | 关掉接收推送后服务端与客户端都只有一处判定；UI/README/代码三处语义一致 |
+| **A6** | 大文件与超时 | 60 s `TRANSFER_TIMEOUT_MS` 只对「已存在的传输」生效（§3.3 M3），慢速链路上大资产可能被误判过期 | 在途传输加「最近一片到达时间」滑动续期；`expire` 由定时任务驱动而不依赖下一个包 | 512 KB/s 链路传 60 MB 资产不失败 |
+
+### 8.2 阶段 5：协议与前向兼容（P1）
+
+| # | 条目 | 现状 / 证据 | 计划动作 | 验收 |
+|---|---|---|---|---|
+| **V1** | 混版本明确降级 | `MIN_SUPPORTED_PROTOCOL=3`，双向比较只写日志、不拒绝（§4 阶段 3 第 1 条） | 新增 `CLIENT_INCOMPATIBLE`（带双方协议号与一句人话提示）：低于最小支持版本时先发提示再断开；高于当前版本时降级为「只读 + 禁用回执等待」并记日志 | 1.20.1 客户端连 1.21.11 服务端：明确提示且不崩溃；1.21.11 连旧服务端：降级可用 |
+| **V2** | 1.21.11 的 payload 双拷贝 | `TogetherPayload.from/asPacketByteBuf` 每包额外两次整包拷贝（§3.4） | 分片路径改走 `sendBuffer` 的低层 API，避免先 `byte[]` 再 `PacketByteBuf`；对 >1 MiB 的包才走拷贝路径 | 20 人同时编辑时客户端 GC 峰值下降可测；`runClient12111` 长跑 2 小时无 OOM |
+| **V3** | 原始类型通道的编译兼容 | BBS 的 `KeyframeChannel#getKeyframes()` 在部分内部类型上是原始类型（`List`），`getKeyframes().get(i).getTick()` 这种链式写法在 1.21.11 目标上直接报「找不到符号」（本轮关键帧锁 UI 曾踩到，见 §7 第 17 条） | 所有跨版本 UI 代码统一走 `Keyframe<?>` 显式类型 + `KeyframeChannel#get(int)`；在 `java-1.21.11` 覆盖层加一处注释说明原因 | 三个目标同时编译通过且无 unchecked 警告新增 |
+| **V4** | 未知 channel 容错 | 新版本向旧客户端发的未注册 channel 行为未实测（§7 第 8 条） | 实测并写入文档：旧客户端是否忽略、是否告警；若会断开则所有新 channel 一律加协议门 | 旧 jar 连新服务端 10 分钟不掉线 |
+| **V5** | 协议号 6 | 当前 5（4 = 上传 ACK，5 = 清单/拒绝回执） | 阶段 4 的 A4 字段扩展与阶段 5 的降级提示各自占用一个新号，统一升到 6，`CLIENT_SERVER_LIMITS` 扩字段走版本门 | 旧客户端连新服务端行为与 5 完全一致 |
+
+### 8.3 阶段 6：性能与可观测性（P2）
+
+| # | 条目 | 现状 / 证据 | 计划动作 | 验收 |
+|---|---|---|---|---|
+| **O1** | `/bbstogether` 自检面板 | 现在只能看日志，没有人能一眼回答「哪台客户端缺哪个文件」 | 加一页「同步体检」：每个在线玩家一行（协议号、是否等回执、待下载数、失败数、最近一次 ACK 时间）；点开看路径级失败原因（`sha_mismatch` / `queue_full` / `ack_timeout`） | 人为制造 3 类失败，面板上三行各自可见且原因正确 |
+| **O2** | 失败原因聚合计数 | 失败只打日志与 `AssetSyncTracker.error`，前后端都没有历史 | 服务端与客户端各加一张 `Map<String, AtomicInteger>` 计数（按错误码），随自检面板展示，`/bbstogether reset` 清零 | 一轮压测后可看到错误码分布 |
+| **O3** | 回执可靠性 | 回执是「尽力而为」的一发，主线程繁忙时客户端会先超时（§3.4 P7） | 回执重发一次（500 ms 后未确认则重发）；上传超时后再主动查一次清单版本再判失败 | 制造 5 s 主线程卡顿后上传：客户端最多一次重试即成功，且服务端文件正确 |
+| **O4** | 每玩家预算 | `SafeServerPacketCrusher` 只有全局 32 在途 / 64 MiB，单玩家可持续占满 | 加「每玩家在途 ≤2、≤16 MiB」，超限回 `CLIENT_ASSET_REJECTED(too_busy)` 让客户端退避 | 单个刷屏客户端不能把整服带宽吃满 |
+| **O5** | 合并策略可解释 | `mergeFilms` 仅在 `incoming 帧数 > stored 帧数` 时才 `sanitizeChannel + fromData`，帧数相等但内容不同不会合入（§7 第 17 条遗留） | 先在 UI 显示「本次保存已合并 N 个通道 / 跳过 M 个通道（帧数不足）」，再评估是否改成逐通道 digest 比较 | 两人同帧数改动时，行为可解释且不静默丢改动 |
+
+### 8.4 阶段 7：归档与清理
+
+| # | 条目 | 说明 |
+|---|---|---|
+| **Z1** | §7 已决条目归档 | 第 12 条（客户端改动丢失事件）、第 13/14 条（32903 与尾部溢出）、第 16 条（1.21.11 `readUuid` 越界）、第 17 条（关键帧锁三项缺陷）已修复并发布：在 §7 每条末尾补一句「若复发看哪里」并折叠成一行摘要，完整过程留在 git 提交信息与本表 §8.5 的实测记录里 |
+| **Z2** | 验收清单闭环 | §5.1–§5.4 的复选框在测试服逐条勾选，把结果回填 §8.5；未跑的项目明确标注「未测」而不是留空 |
+| **Z3** | 文档单一来源 | 本表与 README 的「更新日志」只保留一份权威描述：本表记技术细节，README 记用户可见变化，互相链接而不复制 |
+| **Z4** | 构建脚本健壮性 | 三个目标共用 `build` 目录会互相清掉 `classes`（1.20.4 的 `NoClassDefFoundError` 即由此触发）；在 `build.gradle` 的版本任务里加 `--stop`/`--rerun-tasks` 说明或独立缓存目录 |
+
+### 8.5 实测结果回填表
+
+> 全部为**未测**：本轮只做了静态审计与三目标构建验证，没有测试服压测。测完一行填一行，未跑的项目保留「未测」而不是留空。
+
+| 用例 | 关联条目 | 环境 | 结果 | 日期 |
+|---|---|---|---|---|
+| 9 MB 资产上传（含中断重试） | C4 / A1 / A3 | 1.20.1 测试服 | 未测 | — |
+| 80 MB 资产下载 + SHA-1 核对 | C1 / S3 | 1.20.1 测试服 | 未测 | — |
+| 50 MB 影片保存（MSPT、同分支可见） | T1 / T3 / C3 | 1.20.1 测试服 | 未测 | — |
+| 关键帧锁：等级 1 首次锁定即生效 | §7 第 17 条 | 1.21.11 + 1.20.1 | 未测 | — |
+| 关键帧锁：两人同时加锁不回退 | §7 第 17 条 | 1.21.11 + 1.20.1 | 未测 | — |
+| 关键帧锁：dope sheet / 曲线图两种模式框位一致 | §7 第 17 条 | 1.21.11 + 1.20.1 | 未测 | — |
+| 关键帧锁：非矩形（跳选）区间能否锁定 | §8.6 「关键帧锁选区的非矩形区间」 | 1.21.11 + 1.20.1 | 未测（两次改动均被撤回，现状仍要求全选） | — |
+| 1.21.11 进服不再 `readUuid` 越界 | §7 第 16 条 | 1.21.11 | 未测 | — |
+| 混版本 1.20.1 ↔ 1.21.11 | V1 / V5 | 两端 | 未测 | — |
+
+### 8.5b 关键帧锁的本地执行（2026-11-20 补记）
+
+用户报告两处绕过：单人模式可以用 gizmo 拖动已锁定的关键帧；关键帧剪辑也用「飞行模式」调整已锁定的关键帧。
+
+根因不是漏了某个入口，而是**执行点放错了一层**：`KeyframeLockGuard.canSync` 只在服务端收包路径
+（`TogetherServerNetwork.java:3829`）起作用，而单人/集成服务器里本地玩家就是服务端，编辑走的是
+`Replay`/`Clip` 对象的直接修改，根本不过网络通道，守卫永远看不到。
+
+| 层 | 改动 | 覆盖的编辑入口 |
+|---|---|---|
+| 点击 | `UIKeyframesLockMixin` 改为在 `subMouseClicked` 的 **RETURN** 注入：先 `filterLockedClick` 把锁定的键从选区里摘掉，再吞掉这次点击 | BBS 在同一个点击里先选键、再武装拖拽，吞掉点击才真正阻止 gizmo 拖动 |
+| 选区 | `cacheKeyframes` / `submitKeyframes` 返回后清理选区 | 全选、选择轨道、框选等不经过「点击某个键」的路径 |
+| 判定 | 新增 `KeyframeLockClient.lockedFor` / `lockedKey` / `lockedTick` | 统一「这把锁对本地玩家是否生效」：`!canManage()` 且该通道有锁 |
+
+保留的行为：锁管理者（`canManage`，等级 ≥ 2）照旧可以编辑，和服务端守卫的放行条件一致。
+
+**未做**：关键帧属性面板里数值字段（trackpad）的写入拦截。BBS 的值控件回调是
+`(v) -> value.set(...)`，闭包里拿不到所属值，而 `UINumericInput` 的构造器与 `valueBinding`
+都不暴露绑定目标，需要额外的 shadow 或改 BBS 侧接口；本轮没有可靠的挂接点，强行加会把
+所有数值控件一起包一层，风险大于收益。属性面板编辑单帧数值这一条路径仍不受本地保护，
+但服务端在联机时仍会拒绝并把改动回滚（`CLIENT_UNDO_REJECTED`）。
+
+补记 2026-11-20（第一轮落地后用户反馈「没区别」，第二轮补齐 C 与 D 两条路径）：
+
+| 层 | 改动 | 覆盖的编辑入口 |
+|---|---|---|
+| Ctrl+左键 | `UIKeyframesLockMixin` 在 `subMouseClicked` 的 **HEAD** 注入 `blocksKeyframeEdit`：命中的键被锁则不删，空位落在锁内则不插 | BBS 的 Ctrl+左键走 `removeOrCreateKeyframe`，不经过上一行的选取路径 |
+| 自动插键 | 新增 `IUIKeyframeGraphLockMixin`，在 `IUIKeyframeGraph#addKeyframe` 的 HEAD 快照通道、RETURN 比对撤回 | 播放头插键、自动关键帧、快捷键插键都汇聚到这个接口方法（它是 default 方法，不属于 `UIKeyframes`） |
+| 匹配 | `namesOf(sheet)` 用当前编辑器里各通道的确切名字，替换原先的 `endsWith` 后缀匹配 | 修「同步回来后锁定框变阶梯」：后缀匹配会让一个通道认领相邻通道的锁 |
+
+踩坑记录：`javac` 不校验 mixin 的方法名与描述符，`addKeyframe` 挂在 `UIKeyframes` 上时三个目标都能构建通过，直到启动才以 `InvalidInjectionException` 崩溃。本轮之后凡是新增注入，都在构建后用 `jar tf` 确认类进包，并对照 `javap` 的输出核对目标签名。
+
+三目标构建（分开跑）均 BUILD SUCCESSFUL：`build` 6s、`build12111` 8s、`build1204` 7s。
+
+### 8.6 已知不在本计划内的项
+
+- **>64 MiB 单包应用层分页**（§4 阶段 2 首项）：需要重写 4 条影片通道或改外部 `PacketCrusher` 的聚合契约，
+  单独排期；当前靠 `asset_sync_max_mb` 与 64 MiB 整包上限挡住，并由阶段 4 的 **A4** 把「挡住」变成「明确提示」。
+- **`FilmBranchStore.WORKING` LRU**（§3.3 M1）：依赖 `unload` / `forgetFilm`，改动牵涉保存/回滚/丢弃判定，
+  风险高于收益，除非实测出现堆随影片数线性增长。
+- **下载完成回执**（§4 阶段 2 第 7 条）：现有 20 s stall watchdog + 3 次重试已能兜底，
+  等 **O1** 自检面板能证实「下载确实会卡住」时再决定是否加通道。
+- **CDN 路径审计**（§7 第 5 条）：属部署侧，需拿到实际 CDN 配置后再审计。
+- **关键帧锁选区的「非矩形区间」**（用户 2026-11-20 提出，两次尝试后按用户要求撤回）：现状是「首尾之间必须全选」才可锁定，否则提示 `bbs_together.keyframe_lock.status.selection_range`。撤回原因见 §8.5 备注，重启需要先定位「选区被判定为空」的根因，而不是放宽校验。
+- **README 与语言文件的多余分支清理**：`en_us.json` / `zh_cn.json` 里本轮新增后回退的键（如 `selection_unmapped`）已随撤回删除，后续新增键需与代码同步提交，避免出现「有键无用 / 有用无键」。

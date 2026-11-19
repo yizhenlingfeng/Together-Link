@@ -15,6 +15,7 @@
         "UIKeyframesLockMixin",
         "UIKeyframeLoopsLockMixin",
         "IUIKeyframeGraphDefaultKeyframeMixin",
+        "IUIKeyframeGraphLockMixin",
         "UIDashboardMixin",
         "SyncHudOverlayMixin",
         "UIDashboardPanelsBbsOpMixin",

@@ -425,7 +425,7 @@ public class TogetherClientNetwork {
     /**
      * Flip-flop guard for auto sync. Some generators rewrite files inside a model folder
      * on every client without anyone editing; each rewrite uploads, the other side
-     * downloads, its generator rewrites again 鈥?an endless upload/download loop. When a
+     * downloads, its generator rewrites again — an endless upload/download loop. When a
      * file's auto direction keeps alternating, cool it down and say which file it is.
      *
      * @param relPath the asset-relative path
@@ -462,7 +462,7 @@ public class TogetherClientNetwork {
             if (flips >= AUTO_FLIP_LIMIT) {
                 autoCooldown.put(relPath, now + AUTO_COOLDOWN_MS);
                 autoFlips.remove(relPath);
-                System.out.println("[BBSTogether] Auto sync of \"" + relPath + "\" paused for 5 minutes 鈥?it keeps"
+                System.out.println("[BBSTogether] Auto sync of \"" + relPath + "\" paused for 5 minutes — it keeps"
                     + " flip-flopping between upload and download (something is rewriting this file without you editing it)");
                 return true;
             }
@@ -1215,7 +1215,7 @@ public class TogetherClientNetwork {
     private static void handleAssetManifestPacket(MinecraftClient client, PacketByteBuf buf) {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
             /* An auto-triggered diff is settled once its answer lands (also settles on
-             * manual resync answers 鈥攖hose are rarer and never overlap for long). */
+             * manual resync answers —Those are rarer and never overlap for long). */
             autoSyncInFlight.set(false);
             boolean dl = (Boolean)TogetherSettings.assetSyncDownload.get();
             boolean ul = ((Boolean)TogetherSettings.assetSyncUpload.get()).booleanValue();
@@ -1303,7 +1303,7 @@ public class TogetherClientNetwork {
                     /* Over-size assets are advertised but never transferred (a 700 MB video would
                      * hold the link for minutes and get us dropped). Remembering them lets every
                      * picker, grid and list paint the entry as "too large" instead of showing a
-                     * hole where a file should be 鈥攁nd the stubs below keep the name present. */
+                     * hole where a file should be —and the stubs below keep the name present. */
                     mchorse.bbs_together.sync.OversizedAssets.clear();
                     for (Map.Entry<String, Long> oversized : serverSizeMap.entrySet()) {
                         Long oversizedSize = oversized.getValue();
@@ -1375,7 +1375,7 @@ public class TogetherClientNetwork {
                                  * the entry (and the UI can label it), instead of leaving a hole.
                                  * Models are the exception: a model folder is discovered through
                                  * its config.json, so a stub for any *other* model file would
-                                 * resurrect a half-model (mesh without textures) 鈥攖he exact
+                                 * resurrect a half-model (mesh without textures) —the exact
                                  * bug behind "model synced but has no textures". For models only config.json
                                  * is stubbed, and the rest is left to the "model too large" cell. */
                                 if (relPath.startsWith("models/") && !relPath.endsWith("/config.json")) {
@@ -1389,7 +1389,7 @@ public class TogetherClientNetwork {
                             if (localFile.exists() && localFile.isFile()) {
                                 needsDownload = !((String)entry.getValue()).equalsIgnoreCase(TogetherClientNetwork.sha1OfLocalFileCached(localFile.toPath()));
                                 /* mtime arbitration: a strictly newer local copy must NOT be
-                                 * clobbered by the server's stale one 鈥攕kip it here; the upload
+                                 * clobbered by the server's stale one —skip it here; the upload
                                  * pass sends it up instead. One direction per file per diff pass,
                                  * otherwise download+upload race forever and never converge. */
                                 if (needsDownload) {
@@ -1475,7 +1475,7 @@ public class TogetherClientNetwork {
                                         }
                                     }
                                     /* A brand new local file (server has no copy) can never be
-                                     * flip-flopping either 鈥攁lways push it, otherwise freshly
+                                     * flip-flopping either —always push it, otherwise freshly
                                      * authored models never reach the server at all. */
                                     boolean serverMissing = serverSha1 == null;
                                     if (upload && AssetLockClient.canEditModelPath(relativePath) && (serverMissing || !TogetherClientNetwork.together$isAutoFlip(relativePath, 'U', manual))) {
@@ -1668,7 +1668,7 @@ public class TogetherClientNetwork {
             }
             /* One writer thread for the whole session: a 1 GB asset arrives as ~35k slices and
              * spawning a thread per slice (let alone a main-thread hop per slice) cost seconds
-             * of pure scheduling 鈥攁nd stalled the game while it happened. */
+             * of pure scheduling —and stalled the game while it happened. */
             TogetherClientNetwork.ASSET_WRITER.execute(() -> {
                     try {
                         AssetSyncTracker.active(relativePath, isPush ? AssetSyncTracker.Dir.PUSH : AssetSyncTracker.Dir.DOWNLOAD);
@@ -1714,7 +1714,7 @@ public class TogetherClientNetwork {
                             throw new IOException("sha1 mismatch");
                         }
                         Files.move(part, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                        /* D1: our own write, not a local edit 鈥攌eep the watcher quiet. */
+                        /* D1: our own write, not a local edit —keep the watcher quiet. */
                         mchorse.bbs_together.sync.SelfWriteGuard.record(dest.toPath());
                         /* A shared category arrived: re-read the palette once the burst settles. */
                         if (relativePath.startsWith(mchorse.bbs_together.sync.FormCategorySync.FOLDER + "/"))
@@ -1767,7 +1767,7 @@ public class TogetherClientNetwork {
      *
      * The queue is BOUNDED on purpose. The link can hand us slices faster than the disk can
      * absorb them; with an unbounded queue that difference turns into gigabytes of pending
-     * byte[] and a VM that spends its life in GC 鈥攖he client stops answering keepalives and
+     * byte[] and a VM that spends its life in GC — the client stops answering keepalives and
      * the server times it out ("connection timed out"). CallerRunsPolicy instead lets the network thread
      * perform the write, which slows down reads and pushes back on the peer via TCP.
      */
@@ -2210,7 +2210,7 @@ public class TogetherClientNetwork {
             mchorse.bbs_together.sync.SelfWriteGuard.record(dest);
         }
         catch (Exception e) {
-            /* A stub is cosmetic 鈥攏ever let it break the sync diff. */
+            /* A stub is cosmetic —never let it break the sync diff. */
         }
     }
 
@@ -2462,11 +2462,11 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer) return;
         resyncMode = 2;
         AssetSyncTracker.beginScan();
-        System.out.println("[BBS Assets] Manual upload requested 鈥?waiting for the server's asset manifest");
+        System.out.println("[BBS Assets] Manual upload requested — waiting for the server's asset manifest");
         sendManifestVersionQuery();
     }
 
-    /** B4: request the manifest, riding our cached manifest fingerprint along 鈥攁n unchanged
+    /** B4: request the manifest, riding our cached manifest fingerprint along —an unchanged
      * server answers with a cheap stub instead of the full manifest. */
     private static void sendManifestVersionQuery() {
         if (!isBBSTogetherOnServer) return;
@@ -2490,7 +2490,7 @@ public class TogetherClientNetwork {
      *
      * <p>A1/A2: this only sends what changed since the last report (and nothing at all when
      * nothing changed), because a full inventory of a few thousand assets is 100+ KB of upload
-     * per call and the diff pass used to call it unconditionally 鈥攖wice.</p> */
+     * per call and the diff pass used to call it unconditionally —twice.</p> */
     private static boolean isLocalTransferTemp(String relativePath) {
         return TogetherClientNetwork.isTransferTemp(relativePath);
     }
@@ -2947,7 +2947,7 @@ public class TogetherClientNetwork {
         });
     }
 
-    /** Path sync with an arbitrary payload 鈥攗sed by the undo guard to flush a still-queued
+    /** Path sync with an arbitrary payload —used by the undo guard to flush a still-queued
      * edit's recorded post-edit state (the value's current data is already rolled back at
      * that point, so it cannot be re-serialized). */
     public static void sendSyncDataPayload(String filmId, List<String> pathStrings, BaseType payload) {
@@ -3297,7 +3297,7 @@ public class TogetherClientNetwork {
                 panel.requestNames();
             }
         });
-        /* B3: someone else saved/renamed/created a film 鈥攑ull the changed ones on demand,
+        /* B3: someone else saved/renamed/created a film —pull the changed ones on demand,
          * debounced so a burst of saves during editing doesn't trigger a pull per save. */
         long now = System.currentTimeMillis();
         if (now - lastFilmInventoryAttempt > 3000L) {
@@ -3568,7 +3568,7 @@ public class TogetherClientNetwork {
                 isManager = map.getBool("manager");
                 long version = map.getLong("version");
                 /* A version mismatch means entries were removed, merged or evicted since
-                 * our last pull 鈥攔eplace everything, don't merge increments on top */
+                 * our last pull —replace everything, don't merge increments on top */
                 boolean full = version != behaviorVersion;
                 behaviorVersion = version;
                 if (full) {
@@ -3994,7 +3994,7 @@ public class TogetherClientNetwork {
     }
 
     /** The server refused our undo/redo (someone edited the same subtree after us): apply
-     * the server's current data for every touched path 鈥攚hich reverts the local rollback 鈥?    * and tell the player why. */
+     * the server's current data for every touched path —which reverts the local rollback —    * and tell the player why. */
     private static void handleUndoRejectedPacket(MinecraftClient client, byte[] payload) {
         if (payload == null) {
             return;
@@ -4043,7 +4043,7 @@ public class TogetherClientNetwork {
         for (int i = 0; i < pathSize; ++i) {
             path.add(buf.readString());
         }
-        /* Live edit deltas arrive far more often than full saves 鈥?parse them off the netty
+        /* Live edit deltas arrive far more often than full saves — parse them off the netty
            thread so a burst of keyframe edits cannot stall other packets. */
         FILM_PARSE_EXECUTOR.execute(() -> {
             BaseType data;

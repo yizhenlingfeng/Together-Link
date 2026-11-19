@@ -11,6 +11,7 @@
         "UIDataPathListMixin",
         "UIUtilityOverlayPanelMixin",
         "IUIKeyframeGraphDefaultKeyframeMixin",
+        "IUIKeyframeGraphLockMixin",
         "UIDashboardMixin",
         "SyncHudOverlayMixin",
         "UIDashboardPanelsBbsOpMixin",
