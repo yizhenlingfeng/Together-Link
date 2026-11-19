@@ -510,13 +510,38 @@ public class TogetherClientNetwork {
         return t;
     });
 
+    /**
+     * Decode a crusher-framed payload (the server sends these state channels through the
+     * crusher so a large snapshot is split into safe chunks) and hand the reassembled bytes
+     * to the packet handler. Handlers keep reading a flat {@link PacketByteBuf}, exactly as
+     * they did before chunking, so they never see the 16-byte chunk headers.
+     */
+    private static void registerChunked(PacketByteBuf buf, java.util.function.Consumer<PacketByteBuf> handler) {
+        crusher.receive(buf, (bytes, tail) ->
+        {
+            if (bytes == null) {
+                return;
+            }
+
+            PacketByteBuf payload = PacketByteBufs.create();
+            payload.writeBytes((byte[])bytes);
+
+            try {
+                handler.accept(payload);
+            }
+            finally {
+                payload.release();
+            }
+        });
+    }
+
     public static void setup() {
         TogetherClientNetworking.preRegister();
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COLORS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerColorsPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_CURSOR_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCursorPositionsPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmSelectionsPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplaySelectionsPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_FORM_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplayFormLocksPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COLORS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handlePlayerColorsPacket(client, b)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_CURSOR_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleCursorPositionsPacket(client, b)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleFilmSelectionsPacket(client, b)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleReplaySelectionsPacket(client, b)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_FORM_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleReplayFormLocksPacket(client, b)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_REPLAY_SWAP, (client, handler, buf, resp) -> TogetherClientNetwork.handleReplaySwapPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_TOGGLE_RECORDING, (client, handler, buf, resp) -> TogetherClientNetwork.handleToggleRecordingPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_MANIFEST, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetManifestPacket(client, buf));
@@ -526,7 +551,7 @@ public class TogetherClientNetwork {
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_INVENTORY_ACK, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleInventoryAck(packetByteBuf)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleAssetRejected(packetByteBuf)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_HINT, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetHintPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleFilmScreensPacket(client, b)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH_STATE, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmBranchStatePacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH, (client, handler, buf, resp) ->
         {
@@ -550,7 +575,7 @@ public class TogetherClientNetwork {
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PERMISSIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePermissionsPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_MODEL_DELETED, (client, handler, buf, resp) -> TogetherClientNetwork.handleModelDeletedPacket(client, buf.readString()));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_BBSOP_SYNC, (client, handler, buf, resp) -> TogetherClientNetwork.handleBbsopSyncPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetLocksPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_LOCKS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleAssetLocksPacket(client, b)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST, (client, handler, buf, resp) -> CoopClient.handleRequest(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_REQUEST_CLOSED, (client, handler, buf, resp) -> CoopClient.handleRequestClosed(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COOP_ROOM, (client, handler, buf, resp) -> CoopClient.handleRoom(client, buf));
@@ -563,8 +588,8 @@ public class TogetherClientNetwork {
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_DIFF, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitDiffPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_HEAD, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitHeadPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_RENAMED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRenamedPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitSelectionsPacket(client, buf));
-        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COMMIT_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.handlePlayerCommitPositionsPacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_SELECTIONS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handleCommitSelectionsPacket(client, b)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_PLAYER_COMMIT_POSITIONS, (client, handler, buf, resp) -> TogetherClientNetwork.registerChunked(buf, b -> TogetherClientNetwork.handlePlayerCommitPositionsPacket(client, b)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_COLOR, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitColorPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_HELLO, (client, handler, buf, resp) -> TogetherClientNetwork.handleHelloPacket(client, buf));

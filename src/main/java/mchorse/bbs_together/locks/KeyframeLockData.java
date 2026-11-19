@@ -183,6 +183,36 @@ public final class KeyframeLockData
         return locks;
     }
 
+    /** Lock records carried by a raw owner payload, or null when the payload has no lock key. */
+    public static List<KeyframeLockData> fromPayload(BaseType payload)
+    {
+        if (payload == null || !payload.isMap())
+        {
+            return null;
+        }
+
+        BaseType data = payload.asMap().get(KEY);
+
+        if (data == null || !data.isList())
+        {
+            return null;
+        }
+
+        ArrayList<KeyframeLockData> locks = new ArrayList<>();
+
+        for (BaseType entry : data.asList())
+        {
+            KeyframeLockData lock = fromData(entry);
+
+            if (lock != null)
+            {
+                locks.add(lock);
+            }
+        }
+
+        return locks;
+    }
+
     public static void set(ValueGroup owner, List<KeyframeLockData> locks)
     {
         if (owner == null)
@@ -268,6 +298,20 @@ public final class KeyframeLockData
         }
 
         return false;
+    }
+
+    /** Copies the given foreign keys onto the owner, keeping every other key it already holds. */
+    public static void putForeign(ValueGroup owner, MapType keys)
+    {
+        Map<String, BaseType> foreign = foreign(owner);
+
+        for (String key : keys.keys())
+        {
+            if (key.indexOf(':') >= 0)
+            {
+                foreign.put(key, keys.get(key).copy());
+            }
+        }
     }
 
     static Map<String, BaseType> foreignOrNull(ValueGroup owner)

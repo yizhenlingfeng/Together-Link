@@ -60,6 +60,7 @@ import mchorse.bbs_mod.network.IBufferReceiver;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.base.BaseValueGroup;
 
+import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.settings.values.core.ValueList;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
@@ -82,7 +83,7 @@ import mchorse.bbs_together.locks.AssetLockMode;
 import mchorse.bbs_together.locks.AssetLockType;
 import mchorse.bbs_together.locks.AssetTombstones;
 import mchorse.bbs_together.locks.ClipLockGuard;
-
+import mchorse.bbs_together.locks.KeyframeLockData;
 import mchorse.bbs_together.locks.KeyframeLockGuard;
 import mchorse.bbs_together.network.AssetEgressBudget;
 import mchorse.bbs_together.network.CoopSessionManager;
@@ -3846,13 +3847,45 @@ public class TogetherServerNetwork {
             BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, path);
             if (target != null) {
                 try {
-                    target.fromData(payload);
+                    if (target instanceof ValueGroup owner) {
+                        applyOwnerPayload(owner, payload);
+                    } else {
+                        target.fromData(payload);
+                    }
                 }
                 catch (Exception e) {
                     e.printStackTrace();
                 }
             }
             TogetherServerNetwork.scheduleFilmSave(server, filmId, branch);
+        }
+    }
+
+    /**
+     * Applies a replay/clip payload without letting its foreign map replace the one the branch
+     * already holds. {@code ValueGroup.fromData} drops the whole foreign map first and only puts
+     * back the keys of the payload, so a client that sent a stale or partial owner snapshot could
+     * erase keyframe locks other editors added in the meantime. Child values are written as usual;
+     * foreign keys are merged one by one.
+     */
+    private static void applyOwnerPayload(ValueGroup owner, BaseType payload) {
+        if (!payload.isMap()) {
+            return;
+        }
+        MapType children = new MapType();
+        MapType foreign = new MapType();
+        for (String key : payload.asMap().keys()) {
+            BaseType value = payload.asMap().get(key);
+            if (owner.get(key) != null) {
+                children.put(key, value);
+            } else {
+                foreign.put(key, value);
+            }
+        }
+        owner.fromData(children);
+
+        if (!foreign.isEmpty()) {
+            KeyframeLockData.putForeign(owner, foreign);
         }
     }
 

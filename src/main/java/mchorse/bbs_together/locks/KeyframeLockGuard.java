@@ -144,14 +144,62 @@ public final class KeyframeLockGuard
         return true;
     }
 
+    /**
+     * A replay/clip payload carries the whole foreign map of its owner, so it both creates and
+     * removes locks. Adding a lock to an owner that has none, or rewriting the locks an existing
+     * owner already holds, cannot take a lock away from anybody, and it is what an admin's lock
+     * broadcast looks like; refusing it left the lock only on the client that created it, which
+     * showed up as "locking a clip sometimes does not stick, lock it a second time". Payloads that
+     * drop or clear the lock record stay refused.
+     */
     private static boolean ownerPayload(ServerPlayerEntity player, ValueGroup owner, BaseType payload)
     {
-        if (!KeyframeLockData.hasAny(owner) && !hasKeyframeLock(payload))
+        if (addsOrKeepsLocks(owner, payload))
         {
             return true;
         }
 
         return deny(player);
+    }
+
+    /** Whether {@code payload} still carries a lock for every range the owner holds right now. */
+    private static boolean addsOrKeepsLocks(ValueGroup owner, BaseType payload)
+    {
+        List<KeyframeLockData> locks = KeyframeLockData.fromPayload(payload);
+
+        if (locks == null)
+        {
+            return false;
+        }
+
+        for (KeyframeLockData lock : KeyframeLockData.get(owner))
+        {
+            for (KeyframeLockData.Range range : lock.ranges())
+            {
+                if (!requested(locks, range))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean requested(List<KeyframeLockData> locks, KeyframeLockData.Range range)
+    {
+        for (KeyframeLockData lock : locks)
+        {
+            for (KeyframeLockData.Range candidate : lock.ranges())
+            {
+                if (candidate.channel().equals(range.channel()) && candidate.start() <= range.start() && candidate.end() >= range.end())
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static boolean channelPayload(ServerPlayerEntity player, ValueGroup owner, KeyframeChannel<?> stored, String channelId, BaseType payload)
@@ -614,11 +662,6 @@ public final class KeyframeLockGuard
         {
             foreign.remove(KeyframeLockData.KEY);
         }
-    }
-
-    private static boolean hasKeyframeLock(BaseType payload)
-    {
-        return payload.isMap() && payload.asMap().has(KeyframeLockData.KEY);
     }
 
     private static boolean inRange(List<KeyframeLockData.Range> ranges, float tick)

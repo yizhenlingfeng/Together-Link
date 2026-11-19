@@ -372,7 +372,13 @@ public final class KeyframeLockClient
     public record HitRecord(ValueGroup owner, KeyframeLockData lock, KeyframeLockData.Range range, int y, int height)
     {}
 
-    /** Pixel {@code [y, height]} of a sheet row: its lane in the dope sheet, or the single lane otherwise. */
+    /**
+     * Pixel {@code [y, height]} of a sheet row.
+     *
+     * <p>The dope sheet stacks every channel as its own row. The single-channel curve graph shows
+     * one channel, so its lane is the whole plot below the tick ruler: the height covers the row
+     * and the y is clamped into the graph area by the caller.</p>
+     */
     public static int[] row(UIKeyframes view, UIKeyframeSheet sheet)
     {
         if (view.getGraph() == view.getDopeSheet())
@@ -380,7 +386,7 @@ public final class KeyframeLockClient
             return new int[] {view.getDopeSheet().getDopeSheetY(sheet), view.getDopeSheet().getTrackHeight(sheet)};
         }
 
-        return new int[] {view.graphArea.y + IUIKeyframeGraph.TOP_MARGIN, 16};
+        return new int[] {view.graphArea.y + IUIKeyframeGraph.TOP_MARGIN, Math.max(16, view.graphArea.ey() - view.graphArea.y - IUIKeyframeGraph.TOP_MARGIN)};
     }
 
     /** Whether a loop block of a sheet reacts to the mouse at {@code mouseX}, using BBS' own grab margins. */
