@@ -5,6 +5,7 @@ import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframes;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.graphs.IUIKeyframeGraph;
+import mchorse.bbs_mod.ui.utils.icons.Icon;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.locks.KeyframeLockClient;
@@ -28,6 +29,10 @@ import java.util.TreeSet;
  * drawn as the union of all lock rectangles: only the outer boundary of the merged
  * shape gets a dashed outline (and the outer fill), internal shared edges and the
  * seams between rows disappear.
+ *
+ * <p>The padlock in the corner of each merged shape follows the player the same way the
+ * context menu and the clip bars do: closed while the lock holds them back, open when it
+ * does not, so a whitelisted editor can tell a lock apart from a wall.</p>
  */
 @Environment(EnvType.CLIENT)
 public final class KeyframeLockOverlay
@@ -52,6 +57,9 @@ public final class KeyframeLockOverlay
         int bottomLimit = view.graphArea.ey();
 
         List<int[]> boxes = new ArrayList<>();
+        boolean enforced = false;
+
+        KeyframeLockClient.renderFilm(KeyframeLockClient.film(view));
 
         for (UIKeyframeSheet sheet : graph.getSheets())
         {
@@ -92,19 +100,24 @@ public final class KeyframeLockOverlay
                     }
 
                     boxes.add(new int[] {x1, y1, x2, y2});
+
+                    if (KeyframeLockClient.lockedForSelf(sheet))
+                    {
+                        enforced = true;
+                    }
                 }
             }
         }
 
         if (!boxes.isEmpty())
         {
-            renderUnion(context, boxes);
+            renderUnion(context, boxes, enforced);
         }
     }
 
     /* Union in pixel space: break every rectangle into grid cells, then draw the fill
      * and only the cell sides whose neighbour across that side is empty. */
-    private static void renderUnion(UIContext context, List<int[]> boxes)
+    private static void renderUnion(UIContext context, List<int[]> boxes, boolean enforced)
     {
         TreeSet<Integer> xsSet = new TreeSet<>();
         TreeSet<Integer> ysSet = new TreeSet<>();
@@ -200,14 +213,15 @@ public final class KeyframeLockOverlay
 
         int strong = Colors.setA(Colors.ORANGE, 0.85F);
         int soft = Colors.setA(Colors.ORANGE, 0.55F);
+        Icon padlock = enforced ? Icons.LOCKED : Icons.UNLOCKED;
 
         drawDashes(context, horizontal, true, strong, soft);
         drawDashes(context, vertical, false, strong, soft);
 
-        renderPadlocks(context, covered, xs, ys, nx, ny, strong);
+        renderPadlocks(context, covered, xs, ys, nx, ny, strong, padlock);
     }
 
-    private static void renderPadlocks(UIContext context, boolean[][] covered, int[] xs, int[] ys, int nx, int ny, int color)
+    private static void renderPadlocks(UIContext context, boolean[][] covered, int[] xs, int[] ys, int nx, int ny, int color, Icon padlock)
     {
         int[][] ids = new int[ny][nx];
         Deque<int[]> queue = new ArrayDeque<>();
@@ -251,7 +265,7 @@ public final class KeyframeLockOverlay
 
                 if (maxX - minX >= 18 && maxY - minY >= 12)
                 {
-                    context.batcher.scaledIcon(Icons.LOCKED, color, minX + 3, minY + 3, 9);
+                    context.batcher.scaledIcon(padlock, color, minX + 3, minY + 3, 9);
                 }
             }
         }
@@ -269,91 +283,71 @@ public final class KeyframeLockOverlay
         queue.add(new int[] {i, j});
     }
 
-    private static void drawDashes(UIContext context, Map<Integer, List<int[]>> lines, boolean horizontal, int strong, int soft)
+    private static void addSegment(Map<Integer, List<int[]>> segments, int key, int a, int b, int flag)
     {
-        for (Map.Entry<Integer, List<int[]>> entry : lines.entrySet())
+        segments.computeIfAbsent(key, (k) -> new ArrayList<>()).add(new int[] {a, b, flag});
+    }
+
+    private static void drawDashes(UIContext context, Map<Integer, List<int[]>> segments, boolean horizontal, int strong, int soft)
+    {
+        for (Map.Entry<Integer, List<int[]>> entry : segments.entrySet())
         {
-            int position = entry.getKey();
+            List<int[]> runs = entry.getValue();
 
-            for (int flag = 0; flag <= 1; flag++)
+            runs.sort(Comparator.comparingInt((int[] run) -> run[0]));
+
+            List<int[]> merged = new ArrayList<>();
+            int[] current = null;
+
+            for (int[] run : runs)
             {
-                List<int[]> runs = new ArrayList<>();
-
-                for (int[] segment : entry.getValue())
+                if (current == null || run[0] > current[1])
                 {
-                    if (segment[2] == flag)
-                    {
-                        runs.add(new int[] {segment[0], segment[1]});
-                    }
+                    current = new int[] {run[0], run[1]};
+                    merged.add(current);
                 }
-
-                if (runs.isEmpty())
+                else
                 {
-                    continue;
-                }
-
-                runs.sort(Comparator.comparingInt(a -> a[0]));
-
-                List<int[]> merged = new ArrayList<>();
-
-                for (int[] run : runs)
-                {
-                    if (!merged.isEmpty() && run[0] <= merged.get(merged.size() - 1)[1])
-                    {
-                        int[] last = merged.get(merged.size() - 1);
-
-                        last[1] = Math.max(last[1], run[1]);
-                    }
-                    else
-                    {
-                        merged.add(new int[] {run[0], run[1]});
-                    }
-                }
-
-                int color = flag == 1 ? strong : soft;
-
-                /* Top and left edges are drawn inside the shape, bottom and right edges
-                 * just inside of it, so the outline never bleeds into a neighbouring row. */
-                int offset = flag == 1 ? 0 : -1;
-
-                for (int[] run : merged)
-                {
-                    if (horizontal)
-                    {
-                        dashHorizontal(context, run[0], run[1], position + offset, color);
-                    }
-                    else
-                    {
-                        dashVertical(context, run[0], run[1], position + offset, color);
-                    }
+                    current[1] = Math.max(current[1], run[1]);
                 }
             }
+
+            int offset = 0;
+
+            for (int[] run : merged)
+            {
+                int length = run[1] - run[0];
+                int drawn = 0;
+                int phase = Math.floorMod(offset, DASH + GAP);
+
+                while (drawn < length)
+                {
+                    int dashLength = Math.min(DASH - phase, length - drawn);
+
+                    if (dashLength <= 0)
+                    {
+                        break;
+                    }
+
+                    int from = run[0] + drawn;
+                    int to = from + dashLength;
+
+                    if (horizontal)
+                    {
+                        context.batcher.box(from, entry.getKey() - 0.5F, to, entry.getKey() + 0.5F, (drawn + phase) < DASH ? strong : soft);
+                    }
+                    else
+                    {
+                        context.batcher.box(entry.getKey() - 0.5F, from, entry.getKey() + 0.5F, to, (drawn + phase) < DASH ? strong : soft);
+                    }
+
+                    drawn += dashLength;
+                    phase = 0;
+                }
+
+                offset += length;
+            }
         }
-    }
-
-    private static void dashHorizontal(UIContext context, int x1, int x2, int y, int color)
-    {
-        for (int x = x1; x < x2; x += DASH + GAP)
-        {
-            int end = Math.min(x + DASH, x2);
-
-            context.batcher.box(x, y, end, y + 1, color);
-        }
-    }
-
-    private static void dashVertical(UIContext context, int y1, int y2, int x, int color)
-    {
-        for (int y = y1; y < y2; y += DASH + GAP)
-        {
-            int end = Math.min(y + DASH, y2);
-
-            context.batcher.box(x, y, x + 1, end, color);
-        }
-    }
-
-    private static void addSegment(Map<Integer, List<int[]>> lines, int position, int start, int end, int flag)
-    {
-        lines.computeIfAbsent(position, (key) -> new ArrayList<>()).add(new int[] {start, end, flag});
     }
 
     private static int[] toArray(TreeSet<Integer> set)
@@ -361,7 +355,7 @@ public final class KeyframeLockOverlay
         int[] array = new int[set.size()];
         int i = 0;
 
-        for (Integer value : set)
+        for (int value : set)
         {
             array[i++] = value;
         }
@@ -379,6 +373,6 @@ public final class KeyframeLockOverlay
             }
         }
 
-        return 0;
+        return -1;
     }
 }

@@ -44,9 +44,42 @@ public final class KeyframeLockClient
     private KeyframeLockClient()
     {}
 
+    /* The keyframe editor draws its lock mask from the sheets alone, without handing the
+     * view over, so the film it belongs to is parked here for the duration of a render. */
+    private static Film rendering;
+
+    public static void renderFilm(Film film)
+    {
+        rendering = film;
+    }
+
     public static boolean canManage()
     {
         return ClipLockClient.canManage();
+    }
+
+    /** Whether the clip that owns this keyframe sheet keeps the local player out. */
+    public static boolean lockedForSelf(UIKeyframeSheet sheet)
+    {
+        Film film = rendering;
+
+        if (sheet == null || film == null)
+        {
+            return false;
+        }
+
+        Clip clip = null;
+
+        for (Clip candidate : film.camera.get())
+        {
+            if (candidate == KeyframeLockData.ownerOf(sheet.channel))
+            {
+                clip = candidate;
+                break;
+            }
+        }
+
+        return clip != null && !ClipLockClient.canEdit(clip);
     }
 
     /**

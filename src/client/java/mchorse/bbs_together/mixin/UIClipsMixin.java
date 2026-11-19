@@ -12,6 +12,7 @@ import mchorse.bbs_mod.ui.film.UIClips;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.Area;
+import mchorse.bbs_mod.ui.utils.icons.Icon;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_mod.utils.colors.Colors;
@@ -182,13 +183,15 @@ public class UIClipsMixin {
                     Colors.setA(washColor, 0.42F), Colors.setA(washColor, 0F));
 
                 /* Lock plate: a rounded dark chip with the padlock centred on it, so the icon
-                 * stays readable on top of any clip colour. */
+                 * stays readable on top of any clip colour. The padlock follows the player:
+                 * closed when the lock holds them back, open when it does not. */
+                Icon icon = ClipLockClient.isLockedForSelf(clip) ? Icons.LOCKED : Icons.UNLOCKED;
                 int plateRight = (int) Math.min(washEnd, left + 18F);
                 int plateCx = (left + plateRight) / 2;
 
                 context.batcher.box(left + 1F, top + 1F, plateRight, bottom - 1F, 0x88101010);
                 context.batcher.outline(left + 1F, top + 1F, plateRight, bottom - 1F, 0x40FFFFFF);
-                context.batcher.icon(Icons.LOCKED, Colors.WHITE, plateCx, (top + bottom) / 2F, 0.5F, 0.5F);
+                context.batcher.icon(icon, Colors.WHITE, plateCx, (top + bottom) / 2F, 0.5F, 0.5F);
             }
         }
         finally
