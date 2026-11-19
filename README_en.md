@@ -67,6 +67,8 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Clip locks | Individual camera timeline clips can be locked to a whitelist or blacklist; the lock lives in the clip's own data and travels with the film |
 | Clip lock display | A locked clip draws a lock mark on its bar; the panel of a player without permission turns grey and the Edit button becomes a lock button |
 | Clip lock enforcement | The server re-checks whole-film snapshots and camera syncs, restoring unauthorized changes to the branch copy; adding or removing a lock requires level 2 |
+| Keyframe locks | The lock icon in the keyframe editor's context menu freezes a selected keyframe range at once, across several tracks, in replay tracks and camera clips alike; it is shown to everyone, as an open or closed lock depending on whether the lock applies to the local player |
+| Keyframe lock sync | Locks live in the namespaced key of the replay or camera clip they belong to, are broadcast as soon as one is added or removed, and are written to the server copy; the server merges them per range, so an older snapshot cannot wipe a lock someone just added |
 
 ### Asset synchronization
 
@@ -241,6 +243,11 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Joining with many films stuttered in proportion to the film count: the film inventory used to submit one main-thread task per film; it now collects everything in the background and broadcasts once.
 - Memory grew over long sessions: the server's film snapshot cache, asset hash cache and the client's server manifest snapshot all became bounded LRUs, so opening more films or rejoining repeatedly no longer grows the heap linearly.
 - The keyframe lock context menu in the clip editor showed a white block: the caption row used the coloured menu item overload, which paints a 22-pixel swatch into the icon column. It now uses the plain item and shows text only.
+- The 1.21.11 client disconnected right after joining (`readerIndex + length exceeds writerIndex`): after the server started sending the progress, colour, selection and commit-position channels as chunks, the client still read them as one flat buffer and took the chunk header for a field. Those channels are now reassembled through the chunker before they are parsed, so both ends agree on the format.
+- Non-admins could not lock anything and had to lock a second time: the server only allowed a request when neither the owner nor the payload carried a lock, and refused everything else. The client had already written the lock, the server copy had not, so it took a second click to line up. Decisions are now made per range: a payload that still covers every range the owner holds is accepted, and only requests that drop or narrow an existing lock are refused.
+- Locking a range rolled the film back to the previous edit: BBS clears the owner's namespaced keys before rebuilding them from the payload, and the lock records live there, so a slightly stale snapshot erased locks other editors had just added and wrote that state to disk. Child values are still updated as before, but namespaced keys are merged key by key instead of being replaced.
+- Two players saw the lock box on different rows: in single-channel curve mode every track reused one fixed row height, although that mode shows one channel whose lane is the whole plot area. The box now uses the plot height and shares the row coordinates of the timeline mode.
+- The asset and clip lock menus now read "Whitelisted players" and "Blacklisted players", matching what the lists actually contain.
 
 #### Verified
 
