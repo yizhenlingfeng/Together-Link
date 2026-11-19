@@ -488,26 +488,27 @@ public class UICommitGraph extends UIElement
     {
         super.resize();
 
-        /* Before the first layout the area is empty: Scroll.clamp() then keeps the view at
-         * zero, so nothing jumps while the panel is still being built */
+        /* The body doubles as the scroll view's area (Scroll took this same instance in its
+         * constructor), so Scroll.clamp() and the scrollbar always measure against it. Any
+         * value written here before the first layout is empty and simply keeps the view at
+         * zero, which is safe. */
         this.body.set(this.area.x, this.area.y + HEADER, this.area.w, Math.max(0, this.area.h - HEADER));
 
-        this.updateScroll();
+        this.syncGeometry();
     }
 
     /**
-     * Recompute the body rect and the content height only when the size actually changed.
+     * Recompute the body rect and the content height only when something actually changed.
      *
-     * The graph is normally laid out once when the panel is built, but the first render of a
-     * freshly opened viewer can happen before the dock has given the element its final size.
-     * Calling resize() there would hand the Scroll an empty body, so every row would be clamped
-     * into the wrong place until the user drags a splitter. Syncing the body from the live area
-     * each frame keeps the first frame correct; the scroll clamp only follows when the geometry
-     * really moved, so it cannot undo the user's scroll position.
-     *
-     * The content height is refreshed every frame (it is cheap) because the node list can grow
-     * without the area moving: a clip added while the viewer is pinned to the bottom must extend
-     * the scroll size, otherwise the last rows would be unreachable and drawn clipped.
+     * Two things can go stale while the viewer is open:
+     * <ul>
+     *   <li>the body rect, if the first frame is drawn before the dock applied the final size,
+     *       which used to clamp every row into the wrong place until a splitter was dragged;</li>
+     *   <li>the content height, if the node list grew (a new commit/clip arrived) without the
+     *       area moving, which left the last rows past the scroll range and cut off by the clip.</li>
+     * </ul>
+     * Syncing both from the live state each frame keeps the first frame correct and cannot undo
+     * the user's scroll position, because the scroll is only re-clamped when one of them moved.
      */
     private void syncGeometry()
     {
