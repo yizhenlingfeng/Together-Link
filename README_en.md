@@ -218,6 +218,8 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The lock is visible on the timeline itself: a locked clip draws a lock mark on its bar, and a player without permission sees its whole panel greyed out, with BBS' own locked overlay turning the keyframe Edit button into a lock button. Dragging, cutting, removing, aligning to the cursor and double-clicking to open no longer work for such a clip.
 - A lock is broadcast to the other editors of the same branch the moment it changes and is written into the server's branch copy, so it survives a rejoin or a restart. Camera clips are not part of the full-film save, which is why a lock used to exist only on the locking player's client while everybody else kept editing the clip.
 - The server re-checks both write paths: in a whole-film snapshot, a locked clip the player may not edit is restored from the branch copy instead of throwing the save away, so the player's other edits still count, and a camera sync that touches such a clip is dropped with a notice. Creating, changing or removing a lock requires level 2.
+- Added a film commits tab (`Film nodes`): it draws every film's branches and commits as a scrollable node graph with the main branch in the middle and the others split left and right. Clicking a node shows its details and offers rename, revert, squash and branch checkout; the graph refreshes as new commits arrive and follows the bottom.
+- The clip context menu now validates the clipboard: the system clipboard is checked for parseable BBS data before the menu opens, and anything else is treated as "nothing to paste" with the paste button disabled. Arbitrary text in the clipboard (such as a log line or a crash report) used to throw a parse exception and take the client down.
 
 #### Fixed
 
@@ -226,6 +228,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Added payload validation to the structure sync: a payload is applied only when it is a list whose size matches the metadata. A mismatched payload used to clear the whole replay list first, which is how a film ended up with zero replays; a failed apply now logs instead of silently aborting.
 - Fixed cooperative recording end notices showing raw translation keys (such as `bbs_together.coop.notify.merged`): those keys were only written to the vanilla language table, while BBS' own table is what resolves them.
 - Fixed the room panel popping back over the world after a recording member closed chat or the inventory. A member who is recording and still owes a take is no longer interrupted by the pending room screen.
+- Fixed the `Film nodes` tab showing its graph crammed against the top and unable to scroll the first time it is opened after each launch, until a splitter was dragged once. As a tab it has no periodic refresh, and its layout was skipped while the panel was still unmeasured on the first frame, so the graph never received a real viewport; it now lays out as soon as the panel has a size and re-applies the layout every frame, so the very first open is correct.
 
 #### Verified
 
@@ -236,6 +239,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The network protocol remains version 3. The room state packet only gained trailing fields (recording time, branch, handed-in takes, unanswered invites): an older client stops after the fields it knows, and a newer client defaults whatever is missing, so mixed versions can still connect. The 1.20.1–1.20.4 universal build and the 1.21.11 compatibility build are updated together.
 - Category sync needs no server changes, since a category file is just an asset; uploading one requires the `upload` domain. The asset sync does not express deletions, so a client only drops a category once the server's file count goes down.
 - Clip locks live in a namespaced key inside the clip, so older data without it is simply unlocked and needs no migration. The sync and the checks reuse the existing full-film snapshot and camera path sync, and the network protocol stays at version 3.
+- The film commits graph and the clipboard check are client-only changes that need no server support, and the network protocol stays at version 3.
 - The old bodies are hidden on the server before the actor list is broadcast, so every client receives the same cast with no extra configuration.
 
 ### v2.0.4

@@ -364,7 +364,9 @@ public class UICommitGraph extends UIElement
             this.listener.onSelect(this.selected);
         }
 
-        this.updateScroll();
+        /* Remember the viewport from the pre-rebuild area so the freshly built rows are placed
+         * against the current size as soon as they are drawn. */
+        this.layoutViewport();
     }
 
     /**
@@ -465,23 +467,6 @@ public class UICommitGraph extends UIElement
             this.requested.put(filmId, System.currentTimeMillis());
 
             TogetherClientNetwork.sendCommitsQuery(filmId);
-        }
-    }
-
-    /** Keep the content height and the scroll in sync, and follow the bottom while pinned. */
-    private void updateScroll()
-    {
-        this.scroll.scrollSize = this.nodes.size() * ROW_H + 8;
-        this.scroll.clamp();
-
-        /* Sticking to the bottom keeps the newest commit visible while the history grows */
-        if (this.pinned)
-        {
-            this.scroll.scrollToEnd();
-        }
-        else if (this.atEnd())
-        {
-            this.pinned = true;
         }
     }
 

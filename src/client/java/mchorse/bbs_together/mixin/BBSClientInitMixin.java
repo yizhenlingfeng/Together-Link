@@ -29,10 +29,6 @@ public class BBSClientInitMixin {
 
     @Inject(method={"onInitializeClient"}, at={@At(value="TAIL")}, remap=false)
     private void onBBSClientInit(CallbackInfo ci) {
-        /* The link is registered once through BBSTogetherClient's RegisterL10nEvent.
-         * Older builds also called registerOne() here, which loaded every string file
-         * twice; only the post-init reload is still needed for addon strings. */
-        BBSModClient.getL10n().reload();
         BBSTogetherFix66Client.registerSettingUIs();
     }
 
