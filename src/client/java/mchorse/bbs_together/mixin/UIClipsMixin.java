@@ -10,7 +10,7 @@ import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.ui.film.IUIClipsDelegate;
 import mchorse.bbs_mod.ui.film.UIClips;
 import mchorse.bbs_mod.ui.framework.UIContext;
-import mchorse.bbs_mod.ui.framework.elements.UIElement;
+import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.Area;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.clips.Clip;
@@ -98,11 +98,15 @@ public class UIClipsMixin {
      * When the OS clipboard holds anything that is not BBS data syntax — a link, a crash
      * report, plain prose — that call ends in {@code IllegalStateException} and the whole
      * context menu (and the game) dies. BBS logs the error itself, so the exception never
-     * reaches us; instead we sniff the clipboard here and, if it is not a map, blank it for
-     * this menu build — paste is simply greyed out, everything else works.
+     * reaches us; instead we sniff the clipboard right before the menu is built and, if it
+     * is not a map, blank it — paste is simply greyed out, everything else works.
+     *
+     * <p>Injected on the {@link ContextMenuManager} consumer call inside {@code UIClips}'s
+     * own context-menu lambda, i.e. the moment BBS starts assembling the icon bar (this is
+     * the frame that calls {@code UICopyPasteController.install()}).</p>
      */
-    @Inject(method={"createContextMenu"}, at={@At("HEAD")}, remap=false)
-    private void together$guardClipboardBeforeMenu(UIContext context, CallbackInfoReturnable<UIElement> cir)
+    @Inject(method={"lambda$new$5"}, at={@At("HEAD")}, remap=false)
+    private static void together$guardClipboardBeforeMenu(ContextMenuManager menu, CallbackInfo ci)
     {
         String raw = Window.getClipboard();
 
