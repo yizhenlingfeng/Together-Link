@@ -299,14 +299,17 @@ public final class ClipLockGuard
     /** Compare two clip maps, skipping the lock key itself (checked separately). */
     private static boolean sameClipData(MapType a, MapType b)
     {
-        if (a.size() - (a.has(ClipLockData.KEY) ? 1 : 0) != b.size() - (b.has(ClipLockData.KEY) ? 1 : 0))
+        int extraA = (a.has(ClipLockData.KEY) ? 1 : 0) + (a.has(KeyframeLockData.KEY) ? 1 : 0);
+        int extraB = (b.has(ClipLockData.KEY) ? 1 : 0) + (b.has(KeyframeLockData.KEY) ? 1 : 0);
+
+        if (a.size() - extraA != b.size() - extraB)
         {
             return false;
         }
 
         for (String key : a.keys())
         {
-            if (key.equals(ClipLockData.KEY))
+            if (key.equals(ClipLockData.KEY) || key.equals(KeyframeLockData.KEY))
             {
                 continue;
             }

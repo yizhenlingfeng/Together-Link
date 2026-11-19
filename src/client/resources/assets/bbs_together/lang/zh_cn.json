@@ -50,5 +50,12 @@
     "bbs_together.lock.noun.model": "模型",
     "bbs_together.lock.noun.model_block": "模型方块",
     "bbs_together.coop.notify.host_branch_failed": "[BBS Together] %s 无法自动提交并切换分支，未能接受邀请",
-    "bbs_together.sync.upload.rejected": "[BBS Together] 上传被拒绝：你的 BBS 权限是只读（等级 0），刚上传的资产没有写入服务器。请管理员用 /bbsop 给你授权后再上传。"
+    "bbs_together.sync.upload.rejected": "[BBS Together] 上传被拒绝：你的 BBS 权限是只读（等级 0），刚上传的资产没有写入服务器。请管理员用 /bbsop 给你授权后再上传。",
+    "bbs_together.keyframe_lock.menu.label": "关键帧锁定",
+    "bbs_together.keyframe_lock.menu.create": "锁定选中的关键帧",
+    "bbs_together.keyframe_lock.menu.unlock": "解除关键帧锁定",
+    "bbs_together.keyframe_lock.notify.locked": "[BBS Together] 这些关键帧已锁定，无法编辑",
+    "bbs_together.keyframe_lock.status.selection_duration": "请先选中一段关键帧区间",
+    "bbs_together.keyframe_lock.status.selection_range": "请选中首尾之间的全部关键帧",
+    "bbs_together.keyframe_lock.status.selection_overlap": "选区中已有被锁定的关键帧"
 }

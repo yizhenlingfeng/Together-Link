@@ -12,6 +12,8 @@
         "UIUtilityOverlayPanelMixin",
         "MorphRendererMixin",
         "UIKeyframeDopeSheetMixin",
+        "UIKeyframesLockMixin",
+        "UIKeyframeLoopsLockMixin",
         "IUIKeyframeGraphDefaultKeyframeMixin",
         "UIDashboardMixin",
         "SyncHudOverlayMixin",
@@ -47,8 +49,8 @@
         "UITabListCommitsMixin",
         "FilmRepositoryMixin",
         "ValueChangeUndoResolveMixin",
+        "ValueChangeUndoLockMixin",
         "UserFormSectionCategoriesPathMixin",
-        "ValueGroupForeignAccessor",
         "UIClipsLockMenuMixin",
         "UIClipLockShieldMixin"
     ],

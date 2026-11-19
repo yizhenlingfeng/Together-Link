@@ -32,6 +32,8 @@
         "ModelBlockBreakGuardMixin",
         "MorphRendererMixin",
         "UIKeyframeDopeSheetMixin",
+        "UIKeyframesLockMixin",
+        "UIKeyframeLoopsLockMixin",
         "UIClipsMixin",
         "UIFormCategoryModelSizeMixin",
         "FormCellRendererTooLargeMixin",
@@ -46,8 +48,8 @@
         "UITabListCommitsMixin",
         "FilmRepositoryMixin",
         "ValueChangeUndoResolveMixin",
+        "ValueChangeUndoLockMixin",
         "UserFormSectionCategoriesPathMixin",
-        "ValueGroupForeignAccessor",
         "UIClipsLockMenuMixin",
         "UIClipLockShieldMixin"
     ],

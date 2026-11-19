@@ -152,11 +152,11 @@ public final class ClipLockClient
         }
 
         MapType payload = new MapType();
-        ClipLockData lock = get(clip);
+        Map<String, BaseType> foreign = ((ValueGroupForeignAccessor) (Object) clip).bbs_together$getForeign();
 
-        if (lock != null)
+        for (Map.Entry<String, BaseType> entry : foreign.entrySet())
         {
-            payload.put(ClipLockData.KEY, lock.toData());
+            payload.put(entry.getKey(), entry.getValue().copy());
         }
 
         TogetherClientNetwork.sendSyncDataPayload(film.getId(), List.of("camera", String.valueOf(index)), payload);

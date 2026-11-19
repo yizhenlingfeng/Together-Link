@@ -13,7 +13,8 @@
         "ModelBlockEntityMixin",
         "ModelBlockEntityPacketMixin",
         "PacketCrusherBoundsMixin",
-        "FormStableIdsEmptyKeyMixin"
+        "FormStableIdsEmptyKeyMixin",
+        "ValueGroupForeignAccessor"
     ],
     "injectors": {
         "defaultRequire": 1

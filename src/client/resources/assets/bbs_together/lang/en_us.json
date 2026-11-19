@@ -50,5 +50,12 @@
     "bbs_together.lock.noun.model": "model",
     "bbs_together.lock.noun.model_block": "model block",
     "bbs_together.coop.notify.host_branch_failed": "[BBS Together] %s couldn't commit and switch branches, so they didn't accept the invitation",
-    "bbs_together.sync.upload.rejected": "[BBS Together] Upload rejected: your BBS permission is read-only (level 0), so the assets you just uploaded weren't written to the server. Ask an admin to grant you permission with /bbsop, then upload again."
+    "bbs_together.sync.upload.rejected": "[BBS Together] Upload rejected: your BBS permission is read-only (level 0), so the assets you just uploaded weren't written to the server. Ask an admin to grant you permission with /bbsop, then upload again.",
+    "bbs_together.keyframe_lock.menu.label": "Keyframe lock",
+    "bbs_together.keyframe_lock.menu.create": "Lock selected keyframes",
+    "bbs_together.keyframe_lock.menu.unlock": "Unlock keyframes",
+    "bbs_together.keyframe_lock.notify.locked": "[BBS Together] These keyframes are locked and cannot be edited",
+    "bbs_together.keyframe_lock.status.selection_duration": "Select a non-empty keyframe range first",
+    "bbs_together.keyframe_lock.status.selection_range": "Select every keyframe between the first and the last one",
+    "bbs_together.keyframe_lock.status.selection_overlap": "Part of the selection is already locked"
 }
