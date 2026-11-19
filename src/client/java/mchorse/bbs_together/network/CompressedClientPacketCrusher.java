@@ -18,6 +18,18 @@ public class CompressedClientPacketCrusher extends ClientPacketCrusher
     @Override
     protected void sendBuffer(PlayerEntity entity, Identifier identifier, PacketByteBuf buf)
     {
+        /* Refuse a chunk that the server would reject outright. Vanilla enforces a 32 KiB
+         * inbound limit and disconnects the sender, so an oversized slice is dropped here
+         * (with a trace) rather than taking the whole connection down. The crusher keeps each
+         * chunk well under the limit; this only catches a path that bypassed its split. */
+        if (!PacketSizeGuard.fits(buf.readableBytes()))
+        {
+            System.out.println("[BBS Together] Dropped oversized packet " + identifier
+                + " (" + buf.readableBytes() + " bytes > " + PacketSizeGuard.MAX_PAYLOAD + ")");
+
+            return;
+        }
+
         TogetherClientNetworking.send(identifier, buf);
     }
 

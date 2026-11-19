@@ -364,7 +364,7 @@ public class TogetherServerNetwork {
     }
 
     private static void sendFilmBranchStateTo(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, MapType data) {
-        TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_FILM_BRANCH_STATE, (BaseType)data, outBuf -> {
+        TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_FILM_BRANCH_STATE, (BaseType)data, outBuf -> {
             outBuf.writeString(filmId);
             outBuf.writeString(branch == null ? "" : branch);
         });
@@ -993,7 +993,7 @@ public class TogetherServerNetwork {
                 boolean unchanged = clientVersion != 0L && clientVersion == version;
                 server.execute(() -> {
                     MapType payload = unchanged ? new MapType() : manifest;
-                    TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_ASSET_MANIFEST, (BaseType)payload, outBuf -> {
+                    TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_ASSET_MANIFEST, (BaseType)payload, outBuf -> {
                         outBuf.writeBoolean(unchanged);
                         outBuf.writeLong(version);
                     });
@@ -1322,7 +1322,7 @@ public class TogetherServerNetwork {
                             TogetherServerNetwork.enqueueAssetSend(server, other, new AssetSendTask((String)e.getKey(), legacy, legacy.length(), hintSha1, true));
                         }
                         if (!hintCapable || payload.keys().isEmpty()) continue;
-                        TogetherServerNetwork.crusherFor(other).send((PlayerEntity)other, CLIENT_ASSET_HINT, (BaseType)payload, null);
+                        TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity)other, CLIENT_ASSET_HINT, (BaseType)payload, null);
                     }
                 });
             }
@@ -1420,7 +1420,7 @@ public class TogetherServerNetwork {
                         if (slice == null) {
                             return;
                         }
-                        TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_ASSET_FILE, slice, outBuf -> {
+                        TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_ASSET_FILE, slice, outBuf -> {
                             outBuf.writeString(task.relativePath);
                             outBuf.writeBoolean(task.isPush);
                             outBuf.writeInt(fSeq);
@@ -1884,7 +1884,7 @@ public class TogetherServerNetwork {
     }
 
     public static void broadcastFilmSavedToAll(MinecraftServer server, ServerPlayerEntity recipient, String filmId, String branch, MapType filmData) {
-        TogetherServerNetwork.crusherFor(recipient).send((PlayerEntity)recipient, CLIENT_FILM_SAVED_SYNC, (BaseType)filmData, outBuf -> {
+        TogetherServerNetwork.crusherFor(recipient).sendGuarded((PlayerEntity)recipient, CLIENT_FILM_SAVED_SYNC, (BaseType)filmData, outBuf -> {
             outBuf.writeString(filmId);
             outBuf.writeString("[Server]");
             outBuf.writeString(branch == null ? "" : branch);
@@ -1993,7 +1993,7 @@ public class TogetherServerNetwork {
     }
 
     private static void handleCommitIndex(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        server.execute(() -> TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_COMMIT_INDEX, (BaseType)FilmCommitStore.index(), outBuf -> {}));
+        server.execute(() -> TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_COMMIT_INDEX, (BaseType)FilmCommitStore.index(), outBuf -> {}));
     }
 
     private static void handleCommitsQuery(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
@@ -2021,7 +2021,7 @@ public class TogetherServerNetwork {
             if (diff == null) {
                 return;
             }
-            TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_COMMIT_DIFF, (BaseType)diff, outBuf -> {
+            TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_COMMIT_DIFF, (BaseType)diff, outBuf -> {
                 outBuf.writeString(filmId);
                 outBuf.writeString(commitId);
             });
@@ -2040,7 +2040,7 @@ public class TogetherServerNetwork {
             if (data == null) {
                 data = new MapType();
             }
-            TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_COMMIT_HEAD, (BaseType)data, outBuf -> {
+            TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_COMMIT_HEAD, (BaseType)data, outBuf -> {
                 outBuf.writeString(filmId);
                 outBuf.writeString(headValue);
             });
@@ -2479,7 +2479,7 @@ public class TogetherServerNetwork {
         perPlayer.putString("current", branch == null ? "" : branch);
         String branchHead = FilmCommitStore.branchHead(filmId, branch);
         perPlayer.putString("head", branchHead == null ? "" : branchHead);
-        TogetherServerNetwork.crusherFor(recipient).send((PlayerEntity)recipient, CLIENT_COMMITS, (BaseType)perPlayer, outBuf -> {
+        TogetherServerNetwork.crusherFor(recipient).sendGuarded((PlayerEntity)recipient, CLIENT_COMMITS, (BaseType)perPlayer, outBuf -> {
             outBuf.writeString(filmId);
             outBuf.writeString(branch == null ? "" : branch);
         });
@@ -2487,7 +2487,7 @@ public class TogetherServerNetwork {
 
     private static void broadcastCommitAdded(MinecraftServer server, String filmId, FilmCommit commit) {
         for (ServerPlayerEntity recipient : server.getPlayerManager().getPlayerList()) {
-            TogetherServerNetwork.crusherFor(recipient).send((PlayerEntity)recipient, CLIENT_COMMIT_ADDED, (BaseType)commit.toData(), outBuf -> outBuf.writeString(filmId));
+            TogetherServerNetwork.crusherFor(recipient).sendGuarded((PlayerEntity)recipient, CLIENT_COMMIT_ADDED, (BaseType)commit.toData(), outBuf -> outBuf.writeString(filmId));
         }
     }
 
@@ -2721,7 +2721,7 @@ public class TogetherServerNetwork {
             try {
                 boolean isOp = BehaviorLogManager.isOperator(server, player);
                 MapType snapshot = BehaviorLogManager.query(server, player.getUuid(), afterId, clientVersion, isOp);
-                TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_BEHAVIOR_LIST, (BaseType)snapshot, null);
+                TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_BEHAVIOR_LIST, (BaseType)snapshot, null);
             }
             catch (Exception e) {
                 e.printStackTrace();
@@ -3389,7 +3389,7 @@ public class TogetherServerNetwork {
                 for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
                     ServerPlayerEntity other;
                     if (!entry.getValue().equals(filmId) || entry.getKey().equals(player.getUuid()) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
-                    TogetherServerNetwork.crusherFor(other).send((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, bytes, outBuf -> {
+                    TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, bytes, outBuf -> {
                         outBuf.writeString(filmId);
                         outBuf.writeString(branch);
                         outBuf.writeInt(path.size());
@@ -3501,7 +3501,7 @@ public class TogetherServerNetwork {
             for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
                 ServerPlayerEntity other;
                 if (!entry.getValue().equals(filmId) || entry.getKey().equals(player.getUuid()) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
-                TogetherServerNetwork.crusherFor(other).send((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, c.data, outBuf -> {
+                TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, c.data, outBuf -> {
                     outBuf.writeString(filmId);
                     outBuf.writeString(branch);
                     outBuf.writeInt(c.path.size());
@@ -3550,7 +3550,7 @@ public class TogetherServerNetwork {
         }
         byte[] payload = new byte[out.readableBytes()];
         out.readBytes(payload);
-        TogetherServerNetwork.crusherFor(player).send((PlayerEntity)player, CLIENT_UNDO_REJECTED, payload, null);
+        TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_UNDO_REJECTED, payload, null);
         player.sendMessage(Text.translatable("bbs_together.commit.undo.rejected").formatted(Formatting.YELLOW), false);
     }
 
