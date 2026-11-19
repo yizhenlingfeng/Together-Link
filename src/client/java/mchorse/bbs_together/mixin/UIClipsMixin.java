@@ -89,8 +89,10 @@ public class UIClipsMixin {
     }
 
     /**
-     * Paints a padlock on the bar of every locked camera clip, so a player can tell which
-     * clips are off limits without opening a panel first.
+     * Paints a lock on every locked camera clip: the clip bar gets a soft grey wash that
+     * fades in from its leading edge (no hard box border) and a small padlock plate floats
+     * at the head of the bar. A player can therefore tell which clips are off limits just
+     * by glancing at the timeline.
      */
     @Inject(method={"render"}, at={@At("TAIL")}, remap=false)
     private void together$renderClipLocks(UIContext context, CallbackInfo ci)
@@ -125,14 +127,34 @@ public class UIClipsMixin {
                 int x = self.toGraphX(clip.tick.get());
                 int y = self.toLayerY(clip.layer.get());
                 int x2 = Math.max(x + 2, self.toGraphX(clip.tick.get() + clip.duration.get()));
+                int top = y + 1;
+                int bottom = y + h - 1;
 
                 if (x2 < self.area.x || x > self.area.ex())
                 {
                     continue;
                 }
 
-                context.batcher.box(x, y + 1, x + 16, y + h - 1, 0x88000000);
-                context.batcher.icon(Icons.LOCKED, Colors.WHITE, x + 8, y + h / 2F, 0.5F, 0.5F);
+                int right = Math.min(x2, self.area.ex());
+                int left = Math.max(x, self.area.x);
+
+                /* Grey wash that fades out along the bar: dense at the head, gone by the tail,
+                 * so the clip keeps its own colour and there is no hard-edged rectangle. */
+                float span = Math.max(1F, right - left);
+                float washEnd = Math.min(right, left + Math.min(span, 96F));
+                int washColor = 0xFFB4B4B4;
+
+                context.batcher.gradientHBox(left, top, washEnd, bottom,
+                    Colors.setA(washColor, 0.42F), Colors.setA(washColor, 0F));
+
+                /* Lock plate: a rounded dark chip with the padlock centred on it, so the icon
+                 * stays readable on top of any clip colour. */
+                int plateRight = (int) Math.min(washEnd, left + 18F);
+                int plateCx = (left + plateRight) / 2;
+
+                context.batcher.box(left + 1F, top + 1F, plateRight, bottom - 1F, 0x88101010);
+                context.batcher.outline(left + 1F, top + 1F, plateRight, bottom - 1F, 0x40FFFFFF);
+                context.batcher.icon(Icons.LOCKED, Colors.WHITE, plateCx, (top + bottom) / 2F, 0.5F, 0.5F);
             }
         }
         finally
