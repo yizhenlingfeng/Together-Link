@@ -31,12 +31,17 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import mchorse.bbs_mod.BBSMod;
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.BBSSettings;
@@ -168,7 +173,7 @@ public class TogetherClientNetwork {
     /** Vanilla OP <em>or</em> BBS level-2 admin: may see the player list and manage BBS levels. */
     public static volatile boolean isManager = false;
     public static final java.util.NavigableMap<Long, mchorse.bbs_together.behaviors.BehaviorEntry> behaviorEntries = new java.util.TreeMap<>();
-    public static final Map<UUID, mchorse.bbs_together.behaviors.PlayerRecord> behaviorPlayers = new java.util.concurrent.ConcurrentHashMap<>();
+    public static final Map<UUID, mchorse.bbs_together.behaviors.PlayerRecord> behaviorPlayers = new ConcurrentHashMap<>();
     public static volatile long behaviorVersion = 0;
     /** Bumped every time panel data changes, so the panel knows when to rebuild. */
     public static volatile long behaviorDataStamp = 0;
@@ -237,6 +242,59 @@ public class TogetherClientNetwork {
             hashCacheDirty = true;
         }
         catch (Exception ignored) {}
+    }
+
+    /* ---- Sync receipts (protocol 5) -----------------------------------------------
+     * Upload acks, inventory acks and asset-send rejections. The server tells us the terminal
+     * fate of an upload so a dropped file is retried instead of silently assumed done, and it
+     * acks our inventory reports so we only advance "already reported" state once the server
+     * actually ingested it. Older servers never send these: every wait is gated on protocol 5. */
+    private static final ConcurrentHashMap<String, UploadAck> uploadAcks = new ConcurrentHashMap<>();
+    private static final long UPLOAD_ACK_TIMEOUT_MS = 60_000L;
+    private static final int UPLOAD_MAX_ATTEMPTS = 3;
+    private static final ConcurrentHashMap<Long, PendingReport> pendingReports = new ConcurrentHashMap<>();
+    private static final AtomicLong nextReportId = new AtomicLong(1L);
+    private static final long REPORT_ACK_TIMEOUT_MS = 20_000L;
+    private static final ConcurrentHashMap<String, Integer> assetSendRetries = new ConcurrentHashMap<>();
+    private static final int ASSET_SEND_MAX_RETRIES = 2;
+
+    private static final class UploadAck {
+        final CountDownLatch latch = new CountDownLatch(1);
+        volatile boolean done;
+        volatile boolean ok;
+        volatile String code = "";
+
+        void complete(boolean ok, String code) {
+            if (done) return;
+            this.ok = ok;
+            this.code = code == null ? "" : code;
+            this.done = true;
+            latch.countDown();
+        }
+    }
+
+    private static final class PendingReport {
+        final CountDownLatch latch = new CountDownLatch(1);
+        volatile boolean done;
+        volatile boolean ok;
+        volatile int entries = -1;
+
+        void complete(boolean ok, int entries) {
+            if (done) return;
+            this.ok = ok;
+            this.entries = entries;
+            this.done = true;
+            latch.countDown();
+        }
+    }
+
+    public static class UploadRejectedException extends IOException {
+        public final String code;
+
+        public UploadRejectedException(String code, String message) {
+            super(message);
+            this.code = code;
+        }
     }
 
     /* ---- Persisted hash cache -------------------------------------------------------
@@ -320,10 +378,27 @@ public class TogetherClientNetwork {
     /* ---- B4: cached last server manifest + fingerprint -------------------------------- */
 
     /** Last received server manifest, kept across joins so unchanged manifests cost nothing. */
-    private static final HashMap<String, String> lastServerSha1Map = new HashMap();
-    private static final HashMap<String, Long> lastServerSizeMap = new HashMap();
-    private static final HashMap<String, Long> lastServerMtimeMap = new HashMap();
+    private static final int LAST_SERVER_MANIFEST_MAX = 60000;
+    private static final HashMap<String, String> lastServerSha1Map = new BoundedMap<>(LAST_SERVER_MANIFEST_MAX);
+    private static final HashMap<String, Long> lastServerSizeMap = new BoundedMap<>(LAST_SERVER_MANIFEST_MAX);
+    private static final HashMap<String, Long> lastServerMtimeMap = new BoundedMap<>(LAST_SERVER_MANIFEST_MAX);
     private static volatile long lastManifestVersion = 0L;
+
+    /** A HashMap that drops its least-recently-inserted entry past a cap, so a giant or hostile
+     *  manifest cannot grow the client's memory without bound. */
+    private static final class BoundedMap<K, V> extends java.util.LinkedHashMap<K, V> {
+        private final int max;
+
+        BoundedMap(int max) {
+            super(1024, 0.75f, false);
+            this.max = max;
+        }
+
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+            return this.size() > this.max;
+        }
+    }
 
     /**
      * Conflict arbitration slack for manifest mtimes, in millis. Copies whose edit times are
@@ -350,7 +425,7 @@ public class TogetherClientNetwork {
     /**
      * Flip-flop guard for auto sync. Some generators rewrite files inside a model folder
      * on every client without anyone editing; each rewrite uploads, the other side
-     * downloads, its generator rewrites again — an endless upload/download loop. When a
+     * downloads, its generator rewrites again 鈥?an endless upload/download loop. When a
      * file's auto direction keeps alternating, cool it down and say which file it is.
      *
      * @param relPath the asset-relative path
@@ -387,7 +462,7 @@ public class TogetherClientNetwork {
             if (flips >= AUTO_FLIP_LIMIT) {
                 autoCooldown.put(relPath, now + AUTO_COOLDOWN_MS);
                 autoFlips.remove(relPath);
-                System.out.println("[BBSTogether] Auto sync of \"" + relPath + "\" paused for 5 minutes — it keeps"
+                System.out.println("[BBSTogether] Auto sync of \"" + relPath + "\" paused for 5 minutes 鈥?it keeps"
                     + " flip-flopping between upload and download (something is rewriting this file without you editing it)");
                 return true;
             }
@@ -416,7 +491,11 @@ public class TogetherClientNetwork {
 
     /* ---- B3: film inventory pull debounce ---------------------------------------------- */
 
+    /** Last time the server acknowledged our film inventory (advances the debounce). */
     private static volatile long lastFilmInventorySent = 0L;
+    /** Last time we attempted a film inventory send (throttles retries even without an ack). */
+    private static volatile long lastFilmInventoryAttempt = 0L;
+    private static final AtomicBoolean filmInventoryInFlight = new AtomicBoolean(false);
 
     /* ---- Auto sync: react to server/local asset changes without manual resync ---------- */
 
@@ -443,6 +522,9 @@ public class TogetherClientNetwork {
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_MANIFEST, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetManifestPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSETS_CHANGED, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetsChangedPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_FILE, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetFilePacket(client, buf));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_UPLOAD_ACK, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleAssetUploadAck(packetByteBuf)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_INVENTORY_ACK, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleInventoryAck(packetByteBuf)));
+        TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.crusher.receive(buf, (bytes, packetByteBuf) -> TogetherClientNetwork.handleAssetRejected(packetByteBuf)));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_ASSET_HINT, (client, handler, buf, resp) -> TogetherClientNetwork.handleAssetHintPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_SCREENS, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmScreensPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_FILM_BRANCH_STATE, (client, handler, buf, resp) -> TogetherClientNetwork.handleFilmBranchStatePacket(client, buf));
@@ -540,6 +622,20 @@ public class TogetherClientNetwork {
         synchronized (lastReportedSha1) {
             lastReportedSha1.clear();
         }
+        /* Fail every waiter so upload/report threads blocked on an ack from the old session
+         * unblock instead of hanging for the full timeout after a disconnect. */
+        for (UploadAck pending : uploadAcks.values()) {
+            pending.complete(false, "disconnected");
+        }
+        uploadAcks.clear();
+        for (PendingReport pending : pendingReports.values()) {
+            pending.complete(false, -1);
+        }
+        pendingReports.clear();
+        assetSendRetries.clear();
+        filmInventoryInFlight.set(false);
+        lastFilmInventorySent = 0L;
+        lastFilmInventoryAttempt = 0L;
         inventoryDirty.set(false);
         TogetherClientNetwork.closeAllSinks();
         TogetherClientNetwork.saveHashCache();
@@ -1094,7 +1190,7 @@ public class TogetherClientNetwork {
     private static void handleAssetManifestPacket(MinecraftClient client, PacketByteBuf buf) {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
             /* An auto-triggered diff is settled once its answer lands (also settles on
-             * manual resync answers —those are rarer and never overlap for long). */
+             * manual resync answers 鈥攖hose are rarer and never overlap for long). */
             autoSyncInFlight.set(false);
             boolean dl = (Boolean)TogetherSettings.assetSyncDownload.get();
             boolean ul = ((Boolean)TogetherSettings.assetSyncUpload.get()).booleanValue();
@@ -1111,14 +1207,32 @@ public class TogetherClientNetwork {
              * manifest fingerprint still matches; reuse the cached copy in that case. */
             boolean unchanged = packetByteBuf.readableBytes() >= 9 && packetByteBuf.readBoolean();
             long manifestVersion = packetByteBuf.readableBytes() >= 8 ? packetByteBuf.readLong() : 0L;
-            BaseType data = bytes == null ? (BaseType)new MapType() : DataStorageUtils.readFromBytes((byte[])bytes);
-            if (!(data instanceof MapType)) {
-                return;
-            }
-            MapType manifest = (MapType)data;
-            boolean reuseCache = unchanged && !lastServerSha1Map.isEmpty();
+            final byte[] raw = (byte[])bytes;
             downloadRetries.clear();
             ignoredTransfers.clear();
+            /* Decode off the netty thread: a large manifest can be megabytes of NBT, and
+               parsing it on the read thread stalls every other packet behind it. */
+            FILM_PARSE_EXECUTOR.execute(() -> {
+                MapType manifest;
+                try {
+                    BaseType data = raw == null ? (BaseType)new MapType() : DataStorageUtils.readFromBytes(raw);
+                    if (!(data instanceof MapType)) {
+                        return;
+                    }
+                    manifest = (MapType)data;
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed asset manifest: " + e.getMessage());
+                    return;
+                }
+                MinecraftClient mc = MinecraftClient.getInstance();
+                applyAssetManifest(mc, manifest, unchanged, manifestVersion, doDownload, doUpload, manual);
+            });
+        });
+    }
+
+    private static void applyAssetManifest(MinecraftClient client, MapType manifest, boolean unchanged, long manifestVersion, boolean doDownload, boolean doUpload, boolean manual) {
+            boolean reuseCache = unchanged && !lastServerSha1Map.isEmpty();
             Thread thread = new Thread(() -> {
                 try {
                     File assetsFolder = BBSMod.getAssetsFolder();
@@ -1164,7 +1278,7 @@ public class TogetherClientNetwork {
                     /* Over-size assets are advertised but never transferred (a 700 MB video would
                      * hold the link for minutes and get us dropped). Remembering them lets every
                      * picker, grid and list paint the entry as "too large" instead of showing a
-                     * hole where a file should be —and the stubs below keep the name present. */
+                     * hole where a file should be 鈥攁nd the stubs below keep the name present. */
                     mchorse.bbs_together.sync.OversizedAssets.clear();
                     for (Map.Entry<String, Long> oversized : serverSizeMap.entrySet()) {
                         Long oversizedSize = oversized.getValue();
@@ -1236,7 +1350,7 @@ public class TogetherClientNetwork {
                                  * the entry (and the UI can label it), instead of leaving a hole.
                                  * Models are the exception: a model folder is discovered through
                                  * its config.json, so a stub for any *other* model file would
-                                 * resurrect a half-model (mesh without textures) —the exact
+                                 * resurrect a half-model (mesh without textures) 鈥攖he exact
                                  * bug behind "model synced but has no textures". For models only config.json
                                  * is stubbed, and the rest is left to the "model too large" cell. */
                                 if (relPath.startsWith("models/") && !relPath.endsWith("/config.json")) {
@@ -1250,7 +1364,7 @@ public class TogetherClientNetwork {
                             if (localFile.exists() && localFile.isFile()) {
                                 needsDownload = !((String)entry.getValue()).equalsIgnoreCase(TogetherClientNetwork.sha1OfLocalFileCached(localFile.toPath()));
                                 /* mtime arbitration: a strictly newer local copy must NOT be
-                                 * clobbered by the server's stale one —skip it here; the upload
+                                 * clobbered by the server's stale one 鈥攕kip it here; the upload
                                  * pass sends it up instead. One direction per file per diff pass,
                                  * otherwise download+upload race forever and never converge. */
                                 if (needsDownload) {
@@ -1336,7 +1450,7 @@ public class TogetherClientNetwork {
                                         }
                                     }
                                     /* A brand new local file (server has no copy) can never be
-                                     * flip-flopping either —always push it, otherwise freshly
+                                     * flip-flopping either 鈥攁lways push it, otherwise freshly
                                      * authored models never reach the server at all. */
                                     boolean serverMissing = serverSha1 == null;
                                     if (upload && AssetLockClient.canEditModelPath(relativePath) && (serverMissing || !TogetherClientNetwork.together$isAutoFlip(relativePath, 'U', manual))) {
@@ -1371,7 +1485,7 @@ public class TogetherClientNetwork {
                                         if (!f.exists() || !f.isFile() || f.length() == 0) continue;
                                         if (f.length() > upMaxBytes) continue;
                                         AssetSyncTracker.pending(relPath, AssetSyncTracker.Dir.UPLOAD);
-                                        TogetherClientNetwork.sendAssetUploadSliced(f, relPath, upBatch, upInterval);
+                                        TogetherClientNetwork.sendAssetUploadWithRetry(f, relPath, upBatch, upInterval);
                                     }
                                     catch (Exception e) {
                                         ++assetUploadErrors;
@@ -1396,7 +1510,6 @@ public class TogetherClientNetwork {
             }, "BBSTogether-AssetManifestCheck");
             thread.setDaemon(true);
             thread.start();
-        });
     }
 
     /* ---- Auto sync: trigger machinery --------------------------------------------------- */
@@ -1530,7 +1643,7 @@ public class TogetherClientNetwork {
             }
             /* One writer thread for the whole session: a 1 GB asset arrives as ~35k slices and
              * spawning a thread per slice (let alone a main-thread hop per slice) cost seconds
-             * of pure scheduling —and stalled the game while it happened. */
+             * of pure scheduling 鈥攁nd stalled the game while it happened. */
             TogetherClientNetwork.ASSET_WRITER.execute(() -> {
                     try {
                         AssetSyncTracker.active(relativePath, isPush ? AssetSyncTracker.Dir.PUSH : AssetSyncTracker.Dir.DOWNLOAD);
@@ -1576,7 +1689,7 @@ public class TogetherClientNetwork {
                             throw new IOException("sha1 mismatch");
                         }
                         Files.move(part, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                        /* D1: our own write, not a local edit —keep the watcher quiet. */
+                        /* D1: our own write, not a local edit 鈥攌eep the watcher quiet. */
                         mchorse.bbs_together.sync.SelfWriteGuard.record(dest.toPath());
                         /* A shared category arrived: re-read the palette once the burst settles. */
                         if (relativePath.startsWith(mchorse.bbs_together.sync.FormCategorySync.FOLDER + "/"))
@@ -1595,6 +1708,7 @@ public class TogetherClientNetwork {
                         System.out.println("[BBS Assets] " + (isPush ? "Received push" : "Downloaded") + ": " + relativePath);
                         TogetherClientNetwork.forgetDownload(relativePath);
                         AssetSyncTracker.done(relativePath);
+                        assetSendRetries.remove(relativePath);
                         if (isPush) {
                             TogetherClientNetwork.sendAssetInventory();
                         } else {
@@ -1628,22 +1742,22 @@ public class TogetherClientNetwork {
      *
      * The queue is BOUNDED on purpose. The link can hand us slices faster than the disk can
      * absorb them; with an unbounded queue that difference turns into gigabytes of pending
-     * byte[] and a VM that spends its life in GC —the client stops answering keepalives and
+     * byte[] and a VM that spends its life in GC 鈥攖he client stops answering keepalives and
      * the server times it out ("connection timed out"). CallerRunsPolicy instead lets the network thread
      * perform the write, which slows down reads and pushes back on the peer via TCP.
      */
     private static final int ASSET_WRITER_QUEUE = 32;
-    private static final ExecutorService ASSET_WRITER = new java.util.concurrent.ThreadPoolExecutor(
+    private static final ExecutorService ASSET_WRITER = new ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS,
-        new java.util.concurrent.ArrayBlockingQueue<>(ASSET_WRITER_QUEUE),
+        new ArrayBlockingQueue<>(ASSET_WRITER_QUEUE),
         r -> {
             Thread thread = new Thread(r, "BBSTogether-AssetWrite");
             thread.setDaemon(true);
             return thread;
         },
-        new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy() {
+        new ThreadPoolExecutor.CallerRunsPolicy() {
             @Override
-            public void rejectedExecution(Runnable r, java.util.concurrent.ThreadPoolExecutor executor) {
+            public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
                 /* Blocking the netty thread applies TCP backpressure and, unlike CallerRuns,
                  * keeps the single writer's slice order intact. */
                 try {
@@ -1656,7 +1770,19 @@ public class TogetherClientNetwork {
         });
 
     /** Open {@code .bbspart} sinks keyed by absolute path, so a transfer costs one open. */
-    private static final java.util.concurrent.ConcurrentHashMap<String, FileChannel> OPEN_SINKS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, FileChannel> OPEN_SINKS = new ConcurrentHashMap<>();
+
+    /** Off-loads film deserialization from the netty thread: a whole-film parse on the network
+     *  thread stalls every incoming/outgoing packet for its duration. */
+    private static final ExecutorService FILM_PARSE_EXECUTOR = new ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<>(256),
+        r -> {
+            Thread thread = new Thread(r, "BBSTogether-FilmParse");
+            thread.setDaemon(true);
+            return thread;
+        },
+        new ThreadPoolExecutor.DiscardPolicy());
 
     /* ---- Download completeness watchdog ------------------------------------
      * A requested file is only written once its last slice arrives. If a slice is
@@ -1669,7 +1795,7 @@ public class TogetherClientNetwork {
     private static final long DOWNLOAD_QUEUE_GRACE_MS = 180_000L;
     private static final int DOWNLOAD_STALL_RETRIES = 3;
     /** relative path -> {firstRequestMs, lastProgressMs (0 = not started), stalledRetries} */
-    private static final java.util.concurrent.ConcurrentHashMap<String, long[]> PENDING_DOWNLOADS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, long[]> PENDING_DOWNLOADS = new ConcurrentHashMap<>();
     private static volatile boolean downloadWatchdogStarted = false;
 
     private static void watchDownload(String relativePath) {
@@ -2036,7 +2162,7 @@ public class TogetherClientNetwork {
      * file is also missing from every picker: the user just sees a hole and cannot tell "not
      * synced yet" from "too big to sync at all". A stub with the right name and extension lets
      * BBS list the entry, while {@code OversizedAssets} makes the UI paint it dimmed with
-     * {@code File too large · 700 MB}. An existing real file is never touched.</p>
+     * {@code File too large 路 700 MB}. An existing real file is never touched.</p>
      */
     public static void ensureOversizedPlaceholder(Path assetsRoot, String relativePath) {
         if (assetsRoot == null || relativePath == null || relativePath.isEmpty()) {
@@ -2059,7 +2185,7 @@ public class TogetherClientNetwork {
             mchorse.bbs_together.sync.SelfWriteGuard.record(dest);
         }
         catch (Exception e) {
-            /* A stub is cosmetic —never let it break the sync diff. */
+            /* A stub is cosmetic 鈥攏ever let it break the sync diff. */
         }
     }
 
@@ -2173,54 +2299,138 @@ public class TogetherClientNetwork {
             Long known = lastServerMtimeMap.get(relPath);
             baseMtime = known == null ? 0L : known;
         }
-        try (FileChannel ch = FileChannel.open(f.toPath(), StandardOpenOption.READ)){
-            for (int seq = 0; seq < totalSlices; ++seq) {
-                long offset = (long)seq * batchBytes;
-                int len = (int)Math.min(batchBytes, size - offset);
-                ByteBuffer bb = ByteBuffer.allocate(len);
-                while (bb.hasRemaining()) {
-                    int r = ch.read(bb, offset + (long)bb.position());
-                    if (r < 0) break;
-                }
-                if (bb.hasRemaining()) {
-                    throw new IOException("short read while slicing " + relPath);
-                }
-                final byte[] slice = bb.array();
-                final int fSeq = seq;
-                final int fTotal = totalSlices;
-                final long fSize = size;
-                final String fSha = sha1;
-                final long fMtime = mtime;
-                AssetSyncTracker.active(relPath, AssetSyncTracker.Dir.UPLOAD);
-                /* B1: wait for budget before the bytes leave, so a 50 MB model cannot fill the
-                 * uplink in one go and starve our own keepalives. */
-                long budgetWaitNs = uploadBudget().reserve(slice.length);
-                if (budgetWaitNs > 0L) {
-                    Thread.sleep(budgetWaitNs / 1_000_000L);
-                }
-                sendCrusher(MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_ASSET_UPLOAD, slice, pbuf -> {
-                    pbuf.writeString(relPath);
-                    pbuf.writeInt(fSeq);
-                    pbuf.writeInt(fTotal);
-                    pbuf.writeLong(fSize);
-                    pbuf.writeString(fSha);
-                    pbuf.writeLong(fMtime);
-                    /* CAS token: the server mtime this content was based on. Old servers
-                     * ignore the trailing long; old clients send nothing and keep the
-                     * legacy last-writer-wins behaviour. */
-                    pbuf.writeLong(baseMtime);
-                });
-                /* The fixed sleep below is the pre-B1 pacing. When a byte budget is configured the
-                 * bucket above already meters the slice, so sleeping again only halves the speed. */
-                if (seq < totalSlices - 1 && interval > 0L && uploadBudgetKbps <= 0) {
-                    Thread.sleep(Math.min(interval, 50L));
+        /* Register the waiter before the first slice so an ack that races the last slice still
+         * lands; protocol < 5 servers never ack and keep the legacy fire-and-forget path. */
+        UploadAck ack = new UploadAck();
+        boolean awaitAck = serverProtocolVersion >= 5;
+        if (awaitAck) {
+            uploadAcks.put(relPath, ack);
+        }
+        try {
+            try (FileChannel ch = FileChannel.open(f.toPath(), StandardOpenOption.READ)){
+                for (int seq = 0; seq < totalSlices; ++seq) {
+                    long offset = (long)seq * batchBytes;
+                    int len = (int)Math.min(batchBytes, size - offset);
+                    ByteBuffer bb = ByteBuffer.allocate(len);
+                    while (bb.hasRemaining()) {
+                        int r = ch.read(bb, offset + (long)bb.position());
+                        if (r < 0) break;
+                    }
+                    if (bb.hasRemaining()) {
+                        throw new IOException("short read while slicing " + relPath);
+                    }
+                    final byte[] slice = bb.array();
+                    final int fSeq = seq;
+                    final int fTotal = totalSlices;
+                    final long fSize = size;
+                    final String fSha = sha1;
+                    final long fMtime = mtime;
+                    AssetSyncTracker.active(relPath, AssetSyncTracker.Dir.UPLOAD);
+                    /* B1: wait for budget before the bytes leave, so a 50 MB model cannot fill the
+                     * uplink in one go and starve our own keepalives. */
+                    long budgetWaitNs = uploadBudget().reserve(slice.length);
+                    if (budgetWaitNs > 0L) {
+                        Thread.sleep(budgetWaitNs / 1_000_000L);
+                    }
+                    sendCrusher(MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_ASSET_UPLOAD, slice, pbuf -> {
+                        pbuf.writeString(relPath);
+                        pbuf.writeInt(fSeq);
+                        pbuf.writeInt(fTotal);
+                        pbuf.writeLong(fSize);
+                        pbuf.writeString(fSha);
+                        pbuf.writeLong(fMtime);
+                        /* CAS token: the server mtime this content was based on. Old servers
+                         * ignore the trailing long; old clients send nothing and keep the
+                         * legacy last-writer-wins behaviour. */
+                        pbuf.writeLong(baseMtime);
+                    });
+                    /* An early rejection (bad path, lock, stale base) fails the whole upload; stop
+                     * slicing instead of pushing the remaining bytes into the void. */
+                    if (awaitAck && ack.done && !ack.ok) {
+                        break;
+                    }
+                    /* The fixed sleep below is the pre-B1 pacing. When a byte budget is configured the
+                     * bucket above already meters the slice, so sleeping again only halves the speed. */
+                    if (seq < totalSlices - 1 && interval > 0L && uploadBudgetKbps <= 0) {
+                        Thread.sleep(Math.min(interval, 50L));
+                    }
                 }
             }
+            if (awaitAck) {
+                awaitUploadAck(relPath, ack);
+            }
+            AssetSyncTracker.done(relPath);
+            synchronized (lastServerMtimeMap) {
+                lastServerMtimeMap.put(relPath, mtime);
+            }
+            synchronized (lastServerSha1Map) {
+                lastServerSha1Map.put(relPath, sha1);
+            }
+            if (++assetUploadDone >= assetUploadTotal && assetUploadTotal > 0) {
+                assetUploadFinishedAt = System.currentTimeMillis();
+            }
         }
-        AssetSyncTracker.done(relPath);
-        if (++assetUploadDone >= assetUploadTotal && assetUploadTotal > 0) {
-            assetUploadFinishedAt = System.currentTimeMillis();
+        finally {
+            if (awaitAck) {
+                uploadAcks.remove(relPath, ack);
+            }
         }
+    }
+
+    /** Block until the server acks (or rejects) this upload. Times out as a transient failure so
+     *  the retry wrapper resends instead of pretending a dropped file succeeded. */
+    private static void awaitUploadAck(String relPath, UploadAck ack) throws UploadRejectedException {
+        long deadline = System.currentTimeMillis() + UPLOAD_ACK_TIMEOUT_MS;
+        while (!ack.done) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0L) {
+                throw new UploadRejectedException("ack_timeout", "server did not acknowledge " + relPath);
+            }
+            try {
+                if (ack.latch.await(Math.min(remaining, 15_000L), TimeUnit.MILLISECONDS)) {
+                    break;
+                }
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new UploadRejectedException("interrupted", "interrupted waiting for ack " + relPath);
+            }
+            AssetSyncTracker.active(relPath, AssetSyncTracker.Dir.UPLOAD);
+        }
+        if (!ack.ok) {
+            throw new UploadRejectedException(ack.code, "server rejected " + relPath + " (" + ack.code + ")");
+        }
+    }
+
+    /** Slice, upload and retry with backoff. A definitive rejection fails immediately; a timeout
+     *  or transport error is retried, because the server may simply have dropped the receipt. */
+    public static void sendAssetUploadWithRetry(File f, String relPath, long batchBytes, long interval) throws Exception {
+        Exception last = null;
+        for (int attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; ++attempt) {
+            try {
+                sendAssetUploadSliced(f, relPath, batchBytes, interval);
+                return;
+            }
+            catch (UploadRejectedException e) {
+                last = e;
+                if (!isTransientUploadCode(e.code)) {
+                    throw e;
+                }
+            }
+            catch (Exception e) {
+                last = e;
+            }
+            if (attempt < UPLOAD_MAX_ATTEMPTS) {
+                System.out.println("[BBS Assets] Upload attempt " + attempt + " failed for " + relPath + " (" + last.getMessage() + "), retrying");
+                Thread.sleep(2000L * attempt);
+            }
+        }
+        throw last != null ? last : new IOException("upload failed");
+    }
+
+    private static boolean isTransientUploadCode(String code) {
+        return "ack_timeout".equals(code) || "io_error".equals(code) || "interrupted".equals(code)
+            || "missing_part".equals(code) || "stale_base".equals(code);
     }
 
     /** Ask the server to resend the manifest, then download only files that differ from local. */
@@ -2236,11 +2446,11 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer) return;
         resyncMode = 2;
         AssetSyncTracker.beginScan();
-        System.out.println("[BBS Assets] Manual upload requested — waiting for the server's asset manifest");
+        System.out.println("[BBS Assets] Manual upload requested 鈥?waiting for the server's asset manifest");
         sendManifestVersionQuery();
     }
 
-    /** B4: request the manifest, riding our cached manifest fingerprint along —an unchanged
+    /** B4: request the manifest, riding our cached manifest fingerprint along 鈥攁n unchanged
      * server answers with a cheap stub instead of the full manifest. */
     private static void sendManifestVersionQuery() {
         if (!isBBSTogetherOnServer) return;
@@ -2264,7 +2474,7 @@ public class TogetherClientNetwork {
      *
      * <p>A1/A2: this only sends what changed since the last report (and nothing at all when
      * nothing changed), because a full inventory of a few thousand assets is 100+ KB of upload
-     * per call and the diff pass used to call it unconditionally —twice.</p> */
+     * per call and the diff pass used to call it unconditionally 鈥攖wice.</p> */
     private static boolean isLocalTransferTemp(String relativePath) {
         return TogetherClientNetwork.isTransferTemp(relativePath);
     }
@@ -2371,6 +2581,7 @@ public class TogetherClientNetwork {
             });
             MapType changed = new MapType();
             int changes = 0;
+            HashMap<String, String> localSnapshot = new HashMap<>(local);
             synchronized (lastReportedSha1) {
                 for (Map.Entry<String, String> e : local.entrySet()) {
                     String was = lastReportedSha1.get(e.getKey());
@@ -2387,12 +2598,10 @@ public class TogetherClientNetwork {
                         ++changes;
                     }
                 }
+                /* Do NOT advance lastReportedSha1 here: only a server ack proves it ingested the
+                 * report. If the send is dropped the next pass re-reports instead of going silent. */
                 if (changes == 0) {
                     return;
-                }
-                if (deltaSupported) {
-                    lastReportedSha1.clear();
-                    lastReportedSha1.putAll(local);
                 }
             }
             MapType payload = changed;
@@ -2404,14 +2613,40 @@ public class TogetherClientNetwork {
                 }
             }
             final MapType report = payload;
+            final HashMap<String, String> snapshot = localSnapshot;
             final Identifier channel = deltaSupported ? TogetherServerNetwork.SERVER_ASSET_REPORT_DELTA : TogetherServerNetwork.SERVER_ASSET_REPORT;
+            final long reportId = supportsInventoryAck() ? nextReportId.getAndIncrement() : 0L;
+            PendingReport pending = null;
+            if (reportId != 0L) {
+                pending = new PendingReport();
+                pendingReports.put(reportId, pending);
+            }
+            final PendingReport waiter = pending;
+            final long fReportId = reportId;
             MinecraftClient.getInstance().execute(() -> {
                 PlayerEntity player = MinecraftClient.getInstance().player;
                 if (!isBBSTogetherOnServer || player == null) {
+                    if (waiter != null) {
+                        waiter.complete(false, -1);
+                    }
                     return;
                 }
-                sendCrusher(player, channel, (BaseType)report, null);
+                sendCrusher(player, channel, (BaseType)report, pbuf -> pbuf.writeLong(fReportId));
             });
+            boolean acked = waiter == null || awaitReportAck(waiter);
+            if (waiter != null) {
+                pendingReports.remove(reportId, waiter);
+            }
+            if (!acked) {
+                /* No ack: leave lastReportedSha1 untouched so the next inventory pass re-sends. */
+                return;
+            }
+            if (deltaSupported) {
+                synchronized (lastReportedSha1) {
+                    lastReportedSha1.clear();
+                    lastReportedSha1.putAll(snapshot);
+                }
+            }
         }
         catch (Exception e) {
             e.printStackTrace();
@@ -2428,7 +2663,10 @@ public class TogetherClientNetwork {
         if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
             return;
         }
-        lastFilmInventorySent = System.currentTimeMillis();
+        if (!filmInventoryInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        lastFilmInventoryAttempt = System.currentTimeMillis();
         Thread thread = new Thread(() -> {
             try {
                 MapType report = new MapType();
@@ -2440,19 +2678,150 @@ public class TogetherClientNetwork {
                     }
                     catch (Exception ignored) {}
                 }
-                MinecraftClient.getInstance().execute(() -> {
-                    if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
-                        return;
-                    }
-                    sendCrusher(MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_INVENTORY, (BaseType)report, null);
-                });
+                boolean acked = true;
+                if (supportsInventoryAck()) {
+                    long reportId = nextReportId.getAndIncrement();
+                    PendingReport pending = new PendingReport();
+                    pendingReports.put(reportId, pending);
+                    MinecraftClient.getInstance().execute(() -> {
+                        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+                            pending.complete(false, -1);
+                            return;
+                        }
+                        sendCrusher(MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_INVENTORY, (BaseType)report, pbuf -> pbuf.writeLong(reportId));
+                    });
+                    acked = awaitReportAck(pending);
+                    pendingReports.remove(reportId, pending);
+                }
+                else {
+                    MinecraftClient.getInstance().execute(() -> {
+                        if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+                            return;
+                        }
+                        sendCrusher(MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_FILM_INVENTORY, (BaseType)report, null);
+                    });
+                }
+                if (acked) {
+                    lastFilmInventorySent = System.currentTimeMillis();
+                }
+                else {
+                    /* Retry shortly without touching lastFilmInventorySent (debounce stays armed). */
+                    lastFilmInventoryAttempt = 0L;
+                    AUTO_SYNC_SCHEDULER.schedule(TogetherClientNetwork::sendFilmInventory, 5L, TimeUnit.SECONDS);
+                }
             }
             catch (Exception e) {
                 e.printStackTrace();
             }
+            finally {
+                filmInventoryInFlight.set(false);
+            }
         }, "BBSTogether-FilmInventory");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private static boolean supportsInventoryAck() {
+        return serverProtocolVersion >= 5;
+    }
+
+    /** Wait for an inventory ack in 15 s slices up to 20 s; a timeout just means re-report. */
+    private static boolean awaitReportAck(PendingReport pending) {
+        long deadline = System.currentTimeMillis() + REPORT_ACK_TIMEOUT_MS;
+        while (!pending.done) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0L) {
+                return false;
+            }
+            try {
+                if (pending.latch.await(Math.min(remaining, 15_000L), TimeUnit.MILLISECONDS)) {
+                    break;
+                }
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return pending.ok;
+    }
+
+    /** Terminal fate of one uploaded file. An empty path rejects every pending upload (the server
+     *  refuses at account level before it knows the file), so waiters fail fast. */
+    private static void handleAssetUploadAck(PacketByteBuf buf) {
+        if (buf == null) {
+            return;
+        }
+        String path = buf.readString(512);
+        String sha1 = buf.readString(64);
+        boolean ok = buf.readBoolean();
+        String code = buf.readString(64);
+        if (path.isEmpty()) {
+            for (UploadAck pending : uploadAcks.values()) {
+                pending.complete(false, code);
+            }
+            return;
+        }
+        UploadAck pending = uploadAcks.get(path);
+        if (pending != null) {
+            pending.complete(ok, code);
+            return;
+        }
+        /* Late ack after the waiter timed out: still settle the tracker + ownership so a retry
+         * that in fact succeeded does not re-upload forever. */
+        if (ok) {
+            MinecraftClient.getInstance().execute(() -> {
+                AssetSyncTracker.done(path);
+                synchronized (lastServerSha1Map) {
+                    if (!sha1.isEmpty()) {
+                        lastServerSha1Map.put(path, sha1);
+                    }
+                }
+            });
+        }
+    }
+
+    private static void handleInventoryAck(PacketByteBuf buf) {
+        if (buf == null || buf.readableBytes() < 13) {
+            return;
+        }
+        long reportId = buf.readLong();
+        int kind = buf.readByte();
+        int entries = buf.readInt();
+        PendingReport pending = pendingReports.get(reportId);
+        if (pending != null) {
+            pending.complete(true, entries);
+            return;
+        }
+        /* Late ack: the waiter already timed out. If it was a film inventory, still advance the
+         * debounce so the retry does not fire needlessly. */
+        if (kind == 1) {
+            lastFilmInventorySent = System.currentTimeMillis();
+        }
+    }
+
+    private static void handleAssetRejected(PacketByteBuf buf) {
+        if (buf == null) {
+            return;
+        }
+        String path = buf.readString(512);
+        String code = buf.readString(32);
+        int attempt = assetSendRetries.merge(path, 1, Integer::sum);
+        if (attempt > ASSET_SEND_MAX_RETRIES) {
+            assetSendRetries.remove(path);
+            AssetSyncTracker.error(path);
+            ++assetDownloadErrors;
+            System.out.println("[BBS Assets] Server kept deferring " + path + " (" + code + "), giving up after " + ASSET_SEND_MAX_RETRIES + " retries");
+            return;
+        }
+        long delayMs = 2000L * attempt;
+        System.out.println("[BBS Assets] Server deferred " + path + " (" + code + "), retry " + attempt + " in " + delayMs + " ms");
+        AUTO_SYNC_SCHEDULER.schedule(() -> {
+            if (!isBBSTogetherOnServer || MinecraftClient.getInstance().player == null) {
+                return;
+            }
+            MinecraftClient.getInstance().execute(() -> sendAssetRequestChunks(Collections.singletonList(path)));
+        }, delayMs, TimeUnit.MILLISECONDS);
     }
 
     public static void stripRecordingCommands(Replay replay) {
@@ -2562,7 +2931,7 @@ public class TogetherClientNetwork {
         });
     }
 
-    /** Path sync with an arbitrary payload —used by the undo guard to flush a still-queued
+    /** Path sync with an arbitrary payload 鈥攗sed by the undo guard to flush a still-queued
      * edit's recorded post-edit state (the value's current data is already rolled back at
      * that point, so it cannot be re-serialized). */
     public static void sendSyncDataPayload(String filmId, List<String> pathStrings, BaseType payload) {
@@ -2643,13 +3012,23 @@ public class TogetherClientNetwork {
         crusher.receive(buf, (bytes, packetByteBuf) -> {
             String filmId = packetByteBuf.readString();
             String branch = packetByteBuf.readString(FilmCommit.MAX_BRANCH * 2);
-            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+            final byte[] raw = (byte[])bytes;
+            FILM_PARSE_EXECUTOR.execute(() -> {
+                BaseType data;
+                try {
+                    data = DataStorageUtils.readFromBytes(raw);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed film branch state for " + filmId + ": " + e.getMessage());
+                    return;
+                }
 
-            if (data == null || !data.isMap()) {
-                return;
-            }
+                if (data == null || !data.isMap()) {
+                    return;
+                }
 
-            client.execute(() -> TogetherClientNetwork.applyFilmBranchState(filmId, branch, data));
+                client.execute(() -> TogetherClientNetwork.applyFilmBranchState(filmId, branch, data));
+            });
         });
     }
 
@@ -2680,11 +3059,21 @@ public class TogetherClientNetwork {
             String filmId = packetByteBuf.readString();
             String saverName = packetByteBuf.readString();
             String branch = packetByteBuf.isReadable() ? packetByteBuf.readString(FilmCommit.MAX_BRANCH * 2) : "";
-            BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
-            if (!data.isMap()) {
-                return;
-            }
-            client.execute(() -> lambda$handleFilmSavedSyncPacket$42(filmId, data, saverName, branch));
+            final byte[] raw = (byte[])bytes;
+            FILM_PARSE_EXECUTOR.execute(() -> {
+                BaseType data;
+                try {
+                    data = DataStorageUtils.readFromBytes(raw);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed film save sync for " + filmId + ": " + e.getMessage());
+                    return;
+                }
+                if (!data.isMap()) {
+                    return;
+                }
+                client.execute(() -> lambda$handleFilmSavedSyncPacket$42(filmId, data, saverName, branch));
+            });
         });
     }
 
@@ -2885,10 +3274,10 @@ public class TogetherClientNetwork {
                 panel.requestNames();
             }
         });
-        /* B3: someone else saved/renamed/created a film —pull the changed ones on demand,
+        /* B3: someone else saved/renamed/created a film 鈥攑ull the changed ones on demand,
          * debounced so a burst of saves during editing doesn't trigger a pull per save. */
         long now = System.currentTimeMillis();
-        if (now - lastFilmInventorySent > 3000L) {
+        if (now - lastFilmInventoryAttempt > 3000L) {
             TogetherClientNetwork.sendFilmInventory();
         }
     }
@@ -3156,7 +3545,7 @@ public class TogetherClientNetwork {
                 isManager = map.getBool("manager");
                 long version = map.getLong("version");
                 /* A version mismatch means entries were removed, merged or evicted since
-                 * our last pull —replace everything, don't merge increments on top */
+                 * our last pull 鈥攔eplace everything, don't merge increments on top */
                 boolean full = version != behaviorVersion;
                 behaviorVersion = version;
                 if (full) {
@@ -3579,7 +3968,7 @@ public class TogetherClientNetwork {
     }
 
     /** The server refused our undo/redo (someone edited the same subtree after us): apply
-     * the server's current data for every touched path —which reverts the local rollback —     * and tell the player why. */
+     * the server's current data for every touched path 鈥攚hich reverts the local rollback 鈥?    * and tell the player why. */
     private static void handleUndoRejectedPacket(MinecraftClient client, byte[] payload) {
         if (payload == null) {
             return;
@@ -3624,27 +4013,38 @@ public class TogetherClientNetwork {
         String filmId = buf.readString();
         String branch = buf.readString(FilmCommit.MAX_BRANCH * 2);
         int pathSize = buf.readInt();
-        ArrayList<String> path = new ArrayList<String>();
+        final ArrayList<String> path = new ArrayList<String>();
         for (int i = 0; i < pathSize; ++i) {
             path.add(buf.readString());
         }
-        BaseType data = DataStorageUtils.readFromBytes(payload);
-        if (data == null) {
-            return;
-        }
-        client.execute(() -> {
-            String known = TogetherClientNetwork.filmBranch(filmId);
-            if (known.isEmpty()) {
-                /* Wait for the branch's full film: a delta before it would be applied to
-                 * whatever film happens to be loaded locally. */
+        /* Live edit deltas arrive far more often than full saves 鈥?parse them off the netty
+           thread so a burst of keyframe edits cannot stall other packets. */
+        FILM_PARSE_EXECUTOR.execute(() -> {
+            BaseType data;
+            try {
+                data = DataStorageUtils.readFromBytes(payload);
+            }
+            catch (Exception e) {
+                System.out.println("[BBSTogether] Malformed film data sync for " + filmId + ": " + e.getMessage());
                 return;
             }
-            if (!known.equals(branch)) {
-                /* In-flight delta from the branch we just left (or the new one arriving
-                 * before its full film). */
+            if (data == null) {
                 return;
             }
-            TogetherClientNetwork.together_applyIncomingFilmDataSync(filmId, path, data);
+            client.execute(() -> {
+                String known = TogetherClientNetwork.filmBranch(filmId);
+                if (known.isEmpty()) {
+                    /* Wait for the branch's full film: a delta before it would be applied to
+                     * whatever film happens to be loaded locally. */
+                    return;
+                }
+                if (!known.equals(branch)) {
+                    /* In-flight delta from the branch we just left (or the new one arriving
+                     * before its full film). */
+                    return;
+                }
+                TogetherClientNetwork.together_applyIncomingFilmDataSync(filmId, path, data);
+            });
         });
     }
 

@@ -35,13 +35,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 import mchorse.bbs_mod.BBSMod;
@@ -110,6 +113,9 @@ public class TogetherServerNetwork {
     public static final Identifier CLIENT_ASSET_MANIFEST = Identifier.of("bbs_together", "c_asset_manifest");
     public static final Identifier CLIENT_ASSET_HINT = Identifier.of("bbs_together", "c_asset_hint");
     public static final Identifier CLIENT_ASSET_FILE = Identifier.of("bbs_together", "c_asset_file");
+    public static final Identifier CLIENT_ASSET_UPLOAD_ACK = Identifier.of("bbs_together", "c_asset_upload_ack");
+    public static final Identifier CLIENT_ASSET_INVENTORY_ACK = Identifier.of("bbs_together", "c_asset_inventory_ack");
+    public static final Identifier CLIENT_ASSET_REJECTED = Identifier.of("bbs_together", "c_asset_rejected");
     public static final Identifier CLIENT_FILM_SCREENS = Identifier.of("bbs_together", "c_film_screens");
     public static final Identifier CLIENT_MERGE_REPLAYS = Identifier.of("bbs_together", "c_merge_replays");
     public static final Identifier CLIENT_FILM_BRANCH_STATE = Identifier.of("bbs_together", "c_film_branch_state");
@@ -137,7 +143,9 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_HELLO = Identifier.of("bbs_together", "s_hello");
     public static final Identifier CLIENT_HELLO = Identifier.of("bbs_together", "c_hello");
     public static final Identifier CLIENT_SERVER_LIMITS = Identifier.of("bbs_together", "c_server_limits");
-    public static final int PROTOCOL_VERSION = 3;
+    /** Bumped to 4 when upload ACKs landed, 5 when inventory ACKs and asset-send reject
+     *  receipts landed. Clients gate their receipt handling on this value. */
+    public static final int PROTOCOL_VERSION = 5;
 
     public static final Identifier SERVER_ASSET_RESYNC = Identifier.of("bbs_together", "s_asset_resync");
     public static final Identifier SERVER_FILM_SCREEN = Identifier.of("bbs_together", "s_film_screen");
@@ -202,7 +210,18 @@ public class TogetherServerNetwork {
     private static final ConcurrentHashMap<UUID, String> playerInFilmScreen = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Integer> playerColors = new ConcurrentHashMap();
     private static final Set<String> deletedFilmIds = Collections.synchronizedSet(new HashSet());
-    private static final ConcurrentHashMap<String, MapType> lastSavedFilmSnapshots = new ConcurrentHashMap();
+    /** Upper bounds for the two server caches that used to grow for the whole uptime. Film
+     *  snapshots hold a full serialized film per film+branch, so keep the bound small. */
+    private static final int FILM_SNAPSHOT_CACHE_MAX = 32;
+    private static final int ASSET_HASH_CACHE_MAX = 20000;
+    /** Access-order LRU: a snapshot that is asked for stays, the least recently used is evicted. */
+    private static final Map<String, MapType> lastSavedFilmSnapshots = Collections.synchronizedMap(
+        new LinkedHashMap<String, MapType>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, MapType> eldest) {
+                return size() > FILM_SNAPSHOT_CACHE_MAX;
+            }
+        });
     private static final ConcurrentHashMap<UUID, CursorData> playerCursors = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, CommitSelection> playerCommitSelections = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, FormLockData> playerFormLocks = new ConcurrentHashMap();
@@ -215,6 +234,9 @@ public class TogetherServerNetwork {
     private static final ConcurrentHashMap<UUID, AtomicBoolean> assetDrainActive = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Boolean> playerReceivePush = new ConcurrentHashMap();
     private static final ConcurrentHashMap<UUID, Map<String, String>> playerOwnedAssets = new ConcurrentHashMap();
+    /** Protocol version each player announced in its hello, used to gate new receipts. */
+    private static final ConcurrentHashMap<UUID, Integer> playerProtocols = new ConcurrentHashMap();
+    private static final ConcurrentHashMap<String, Object> filmMergeLocks = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, AtomicBoolean> filmSaveDirty = new ConcurrentHashMap();
     private static final ConcurrentHashMap<String, ScheduledFuture<?>> filmSaveTasks = new ConcurrentHashMap();
     private static final ConcurrentHashMap<String, Long> filmSaveFirstDirty = new ConcurrentHashMap();
@@ -233,7 +255,14 @@ public class TogetherServerNetwork {
      * re-enter later still resynchronizes from disk.
      */
     private static final long BRANCH_DATA_FRESH_MS = 3000L;
-    private static final ConcurrentHashMap<String, HashCacheEntry> assetHashCache = new ConcurrentHashMap();
+    /** Access-order LRU so hashed paths of deleted assets do not pin memory forever. */
+    private static final Map<String, HashCacheEntry> assetHashCache = Collections.synchronizedMap(
+        new LinkedHashMap<String, HashCacheEntry>(1024, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, HashCacheEntry> eldest) {
+                return size() > ASSET_HASH_CACHE_MAX;
+            }
+        });
     private static final AtomicLong assetBytesSent = new AtomicLong();
     private static final AtomicLong assetTasksSent = new AtomicLong();
     private static final AtomicLong assetRequestsSeen = new AtomicLong();
@@ -247,27 +276,40 @@ public class TogetherServerNetwork {
     });
     /** Shared I/O pool for manifest/inventory/request work. These used to create one
      *  unbounded thread per packet, so a client spamming resync could exhaust the JVM. */
-    private static final java.util.concurrent.ThreadPoolExecutor ASSET_IO_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+    private static final ThreadPoolExecutor ASSET_IO_EXECUTOR = new ThreadPoolExecutor(
         3, 3, 0L, TimeUnit.MILLISECONDS,
-        new java.util.concurrent.ArrayBlockingQueue<>(128),
+        new ArrayBlockingQueue<>(128),
         r -> {
             Thread t = new Thread(r, "BBSTogether-AssetIO");
             t.setDaemon(true);
             return t;
         },
-        new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy()
+        new ThreadPoolExecutor.DiscardPolicy()
     );
     /** Upload slices must hit the disk in packet order; one writer also keeps the
      *  server thread free of large file writes. */
-    private static final java.util.concurrent.ThreadPoolExecutor ASSET_WRITE_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
+    private static final ThreadPoolExecutor ASSET_WRITE_EXECUTOR = new ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS,
-        new java.util.concurrent.LinkedBlockingQueue<>(2048),
+        new LinkedBlockingQueue<>(2048),
         r -> {
             Thread t = new Thread(r, "BBSTogether-AssetWrite");
             t.setDaemon(true);
             return t;
         },
-        new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy()
+        new ThreadPoolExecutor.DiscardPolicy()
+    );
+    /** Film parse/merge/save work runs here so the server thread only swaps references and
+     *  broadcasts. Single-threaded: two saves of the same film+branch must not interleave
+     *  (filmMergeLocks is the per-key refinement, this pool keeps disk writes ordered). */
+    private static final ThreadPoolExecutor FILM_IO_EXECUTOR = new ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<>(256),
+        r -> {
+            Thread t = new Thread(r, "BBSTogether-FilmIO");
+            t.setDaemon(true);
+            return t;
+        },
+        new ThreadPoolExecutor.DiscardPolicy()
     );
     private static final AtomicBoolean assetChangePingPending = new AtomicBoolean(false);
     private static final ConcurrentHashMap<UUID, Long> uploadRejectNoticeAt = new ConcurrentHashMap();
@@ -647,6 +689,7 @@ public class TogetherServerNetwork {
             String goneScreenFilm = playerInFilmScreen.remove(uuid);
             playerReceivePush.remove(uuid);
             playerOwnedAssets.remove(uuid);
+            playerProtocols.remove(uuid);
             LinkedBlockingQueue<AssetSendTask> pendingAssets = assetSendQueues.remove(uuid);
             if (pendingAssets != null) {
                 pendingAssets.clear();
@@ -1091,12 +1134,101 @@ public class TogetherServerNetwork {
     }
 
     private static void noticeUploadRejected(MinecraftServer server, ServerPlayerEntity player) {        long now = System.currentTimeMillis();
+        /* Account-level rejection: no path is known yet, so ack with an empty path. Clients
+         * waiting on any upload ack fail fast instead of timing out after 60 s. */
+        TogetherServerNetwork.ackAssetUpload(server, player, "", "", false, "no_permission");
         Long last = uploadRejectNoticeAt.get(player.getUuid());
         if (last != null && now - last < 30000L) {
             return;
         }
         uploadRejectNoticeAt.put(player.getUuid(), now);
         server.execute(() -> player.sendMessage(Text.translatable("bbs_together.sync.upload.rejected"), false));
+    }
+
+    /** The protocol version a player announced, or 0 if it has not said hello yet. */
+    private static int clientProtocol(ServerPlayerEntity player) {
+        Integer version = playerProtocols.get(player.getUuid());
+        return version == null ? 0 : version;
+    }
+
+    /** True when the player's client understands the phase-1 receipts (protocol 5+). */
+    private static boolean supportsSyncReceipts(ServerPlayerEntity player) {
+        return TogetherServerNetwork.clientProtocol(player) >= 5;
+    }
+
+    /** Tell an uploader the terminal fate of one uploaded file. Sent after the bytes are on
+     *  disk (ok) or after a rejection that will never succeed on retry (not ok). Best-effort:
+     *  a dropped receipt only costs the client a timeout, never a corrupted file. */
+    private static void ackAssetUpload(MinecraftServer server, ServerPlayerEntity uploader, String relativePath, String sha1, boolean ok, String code) {
+        if (uploader == null) {
+            return;
+        }
+        String path = relativePath == null ? "" : relativePath;
+        String hash = sha1 == null ? "" : sha1;
+        String reason = code == null ? "" : code;
+        server.execute(() -> {
+            if (server.getPlayerManager().getPlayer(uploader.getUuid()) == null) {
+                return;
+            }
+            try {
+                TogetherServerNetwork.crusherFor(uploader).sendGuarded((PlayerEntity)uploader, CLIENT_ASSET_UPLOAD_ACK, new byte[0], out -> {
+                    out.writeString(path, 512);
+                    out.writeString(hash, 64);
+                    out.writeBoolean(ok);
+                    out.writeString(reason, 64);
+                });
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** Acknowledge an inventory/report packet so the client knows the server ingested it and
+     *  can advance its "already reported" state. kind 0 = asset report, 1 = film inventory. */
+    private static void ackInventoryReport(MinecraftServer server, ServerPlayerEntity player, long reportId, int kind, int entries) {
+        if (reportId == 0L || player == null || !TogetherServerNetwork.supportsSyncReceipts(player)) {
+            return;
+        }
+        server.execute(() -> {
+            if (server.getPlayerManager().getPlayer(player.getUuid()) == null) {
+                return;
+            }
+            try {
+                TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_ASSET_INVENTORY_ACK, new byte[0], out -> {
+                    out.writeLong(reportId);
+                    out.writeByte(kind);
+                    out.writeInt(entries);
+                });
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    /** Tell a client that one requested asset push was dropped (e.g. queue full) so it can back
+     *  off instead of assuming the file is on its way. */
+    private static void rejectAssetSend(MinecraftServer server, ServerPlayerEntity player, String relativePath, String reason) {
+        if (player == null || !TogetherServerNetwork.supportsSyncReceipts(player)) {
+            return;
+        }
+        String path = relativePath == null ? "" : relativePath;
+        String code = reason == null ? "" : reason;
+        server.execute(() -> {
+            if (server.getPlayerManager().getPlayer(player.getUuid()) == null) {
+                return;
+            }
+            try {
+                TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_ASSET_REJECTED, new byte[0], out -> {
+                    out.writeString(path, 512);
+                    out.writeString(code, 32);
+                });
+            }
+            catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
     }
 
     private static void handleAssetUpload(MinecraftServer server, ServerPlayerEntity uploader, PacketByteBuf buf) {
@@ -1122,6 +1254,7 @@ public class TogetherServerNetwork {
                 BbsOpDomain contentDomain = assetContentDomain(relativePath);
 
                 if (contentDomain != null && !BbsOpManager.isAllowed(uploader, contentDomain)) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, "", false, "no_permission");
                     return;
                 }
                 int seq = packetByteBuf.readableBytes() >= 4 ? packetByteBuf.readInt() : 0;
@@ -1137,37 +1270,46 @@ public class TogetherServerNetwork {
                     uploadMtime = receivedAt;
                 }
                 if (relativePath.contains("..") || relativePath.startsWith("/")) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, "", false, "bad_path");
                     return;
                 }
                 if (seqTotal < 1 || seqTotal > 4096 || seq < 0 || seq >= seqTotal) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, "", false, "bad_seq");
                     return;
                 }
                 if (bytes == null || totalSize > TogetherServerNetwork.maxAssetBytes()) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "too_large");
                     return;
                 }
                 long uploadSyncMax = TogetherServerNetwork.syncMaxBytes();
                 if (uploadSyncMax > 0L && totalSize > uploadSyncMax) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "too_large");
                     return;
                 }
                 File assetsFolder = BBSMod.getAssetsFolder();
                 if (assetsFolder == null) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "no_assets");
                     return;
                 }
                 String uploadModelId = ModelPathUtils.extractModelId(relativePath);
                 if (uploadModelId != null && TogetherServerNetwork.isModelTombstoned(uploadModelId)) {
                     System.out.println("[BBSTogether] Ignored upload of recently deleted model " + uploadModelId + " from " + PlayerCompat.name(uploader.getGameProfile()));
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "deleted");
                     return;
                 }
                 if (uploadModelId != null && !AssetLockManager.canEdit(uploader.getUuid(), AssetLockType.MODEL, uploadModelId)) {
                     AssetLockManager.notifyLocked(server, uploader, AssetLockType.MODEL);
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "locked");
                     return;
                 }
                 Path target = AssetPaths.resolveSafe(assetsFolder, relativePath);
                 if (target == null || target.getParent() == null) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "bad_path");
                     return;
                 }
                 if (!TogetherServerNetwork.uploadBaseMatches(target, baseMtime)) {
                     System.out.println("[BBS Assets] Upload rejected (stale base): " + relativePath);
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "stale_base");
                     TogetherServerNetwork.sendAssetManifest(server, uploader);
                     return;
                 }
@@ -1182,6 +1324,7 @@ public class TogetherServerNetwork {
                         }
                         catch (InterruptedException interrupted) {
                             Thread.currentThread().interrupt();
+                            TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "interrupted");
                             return;
                         }
                     }
@@ -1193,6 +1336,7 @@ public class TogetherServerNetwork {
                             Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
                         } else {
                             if (!Files.isRegularFile(tmp)) {
+                                TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "missing_part");
                                 return;
                             }
                             Files.write(tmp, bytes, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
@@ -1200,6 +1344,7 @@ public class TogetherServerNetwork {
                         long received = Files.size(tmp);
                         if ((totalSize > 0 && received > totalSize) || (uploadSyncMax > 0 && received > uploadSyncMax)) {
                             Files.deleteIfExists(tmp);
+                            TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "too_large");
                             return;
                         }
                         if (seq < seqTotal - 1) {
@@ -1207,17 +1352,20 @@ public class TogetherServerNetwork {
                         }
                         if (totalSize > 0 && received != totalSize) {
                             Files.deleteIfExists(tmp);
+                            TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "incomplete");
                             return;
                         }
                         String actual = TogetherServerNetwork.sha1OfPath(tmp);
                         if (!sha1.isEmpty() && !actual.equalsIgnoreCase(sha1)) {
                             Files.deleteIfExists(tmp);
                             System.out.println("[BBS Assets] Upload rejected (sha1 mismatch): " + relativePath);
+                            TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "sha_mismatch");
                             return;
                         }
                         if (!TogetherServerNetwork.uploadBaseMatches(target, baseMtime)) {
                             Files.deleteIfExists(tmp);
                             System.out.println("[BBS Assets] Upload rejected (stale base at final slice): " + relativePath);
+                            TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "stale_base");
                             TogetherServerNetwork.sendAssetManifest(server, uploader);
                             return;
                         }
@@ -1234,6 +1382,7 @@ public class TogetherServerNetwork {
                     String actual = TogetherServerNetwork.sha1OfBytes(bytes);
                     if (!sha1.isEmpty() && !actual.equalsIgnoreCase(sha1)) {
                         System.out.println("[BBS Assets] Upload rejected (sha1 mismatch): " + relativePath);
+                        TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "sha_mismatch");
                         return;
                     }
                     String string = existingSha1 = Files.exists(target, new LinkOption[0]) ? TogetherServerNetwork.sha1OfPathCached(target, target.toFile()) : null;
@@ -1241,6 +1390,7 @@ public class TogetherServerNetwork {
                     if (changed) {
                         if (!TogetherServerNetwork.uploadBaseMatches(target, baseMtime)) {
                             System.out.println("[BBS Assets] Upload rejected (stale base): " + relativePath);
+                            TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "stale_base");
                             TogetherServerNetwork.sendAssetManifest(server, uploader);
                             return;
                         }
@@ -1259,6 +1409,7 @@ public class TogetherServerNetwork {
                     TogetherServerNetwork.finalizeUpload(server, uploader, relativePath, target, totalSize, actual, false);
                 }
                 catch (Exception e) {
+                    TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, false, "io_error");
                     e.printStackTrace();
                 }
             }
@@ -1274,6 +1425,9 @@ public class TogetherServerNetwork {
             // empty catch block
         }
         TransferLog.ingress(uploader.getUuid(), relativePath, size, changed);
+        /* The bytes are on disk either way; an unchanged re-upload is still a success from the
+         * client's point of view (idempotent retry after a lost ack). */
+        TogetherServerNetwork.ackAssetUpload(server, uploader, relativePath, sha1, true, "");
         if (changed) {
             TogetherServerNetwork.recordUploadBehavior(uploader, relativePath, size);
         }
@@ -1364,6 +1518,7 @@ public class TogetherServerNetwork {
         LinkedBlockingQueue queue = assetSendQueues.computeIfAbsent(uuid, k -> new LinkedBlockingQueue());
         if (queue.size() >= 4096) {
             assetPendingDropped.incrementAndGet();
+            TogetherServerNetwork.rejectAssetSend(server, player, task.relativePath, "queue_full");
             return;
         }
         queue.add(task);
@@ -1406,69 +1561,98 @@ public class TogetherServerNetwork {
         }
         AssetEgressBudget.sync();
         int totalSlices = (int)Math.max(1L, (size + batchBytes - 1L) / batchBytes);
+        int fTotal = totalSlices;
         long transferStartNs = TransferLog.begin("egress", player.getUuid(), task.relativePath, size);
         long transferBudgetWaitNs = 0L;
+        /* Count what actually reached a socket. TransferLog.complete used to run even when every
+         * slice was discarded, which hid dead transfers from the ops tooling. */
+        AtomicInteger finishedSlices = new AtomicInteger(0);
+        AtomicInteger sentSlices = new AtomicInteger(0);
+        AtomicBoolean settled = new AtomicBoolean(false);
+        AtomicLong budgetWaitTotal = new AtomicLong(0L);
         try {
             for (int seq = 0; seq < totalSlices; ++seq) {
                 int fSeq = seq;
-                int fTotal = totalSlices;
                 long budgetWaitNs = AssetEgressBudget.reserve((int)Math.min(batchBytes, size - (long)seq * batchBytes));
                 transferBudgetWaitNs += Math.max(0L, budgetWaitNs);
+                budgetWaitTotal.addAndGet(Math.max(0L, budgetWaitNs));
                 if (budgetWaitNs > 0L) {
                     Thread.sleep(budgetWaitNs / 1000000L);
                 }
+                /* Read the slice on this (drain) thread: a 1 MiB file read on the server thread
+                 * stalls every player for the duration of the read. */
+                byte[] slice = TogetherServerNetwork.readSlice(task.file, (long)fSeq * batchBytes, (int)Math.min(batchBytes, size - (long)fSeq * batchBytes));
+                long modified = task.file.lastModified();
                 server.execute(() -> {
+                    boolean sent = false;
                     try {
-                        if (!server.getPlayerManager().getPlayerList().contains(player)) {
-                            return;
+                        if (server.getPlayerManager().getPlayerList().contains(player) && slice != null) {
+                            TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_ASSET_FILE, slice, outBuf -> {
+                                outBuf.writeString(task.relativePath);
+                                outBuf.writeBoolean(task.isPush);
+                                outBuf.writeInt(fSeq);
+                                outBuf.writeInt(fTotal);
+                                outBuf.writeLong(task.size);
+                                outBuf.writeString(task.sha1 == null ? "" : task.sha1);
+                                outBuf.writeLong(modified);
+                            });
+                            assetBytesSent.addAndGet(slice.length);
+                            sent = true;
                         }
-                        byte[] slice = TogetherServerNetwork.readSlice(task.file, (long)fSeq * batchBytes, (int)Math.min(batchBytes, size - (long)fSeq * batchBytes));
-                        if (slice == null) {
-                            return;
-                        }
-                        TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_ASSET_FILE, slice, outBuf -> {
-                            outBuf.writeString(task.relativePath);
-                            outBuf.writeBoolean(task.isPush);
-                            outBuf.writeInt(fSeq);
-                            outBuf.writeInt(fTotal);
-                            outBuf.writeLong(task.size);
-                            outBuf.writeString(task.sha1 == null ? "" : task.sha1);
-                            outBuf.writeLong(task.file.lastModified());
-                        });
-                        assetBytesSent.addAndGet(slice.length);
                     }
                     catch (Exception e) {
                         e.printStackTrace();
+                    }
+                    finally {
+                        if (sent) {
+                            sentSlices.incrementAndGet();
+                        }
+                        if (finishedSlices.incrementAndGet() >= fTotal && settled.compareAndSet(false, true)) {
+                            if (sentSlices.get() >= fTotal) {
+                                TransferLog.complete("egress", player.getUuid(), task.relativePath, size, transferStartNs, budgetWaitTotal.get());
+                            }
+                            else {
+                                TransferLog.failed("egress", player.getUuid(), task.relativePath, size, transferStartNs, budgetWaitTotal.get(), new RuntimeException("sent " + sentSlices.get() + "/" + fTotal + " slices"));
+                                TogetherServerNetwork.rejectAssetSend(server, player, task.relativePath, "send_failed");
+                            }
+                        }
                     }
                 });
                 if (seq >= totalSlices - 1 || interval <= 0L) continue;
                 Thread.sleep(interval);
             }
-            TransferLog.complete("egress", player.getUuid(), task.relativePath, size, transferStartNs, transferBudgetWaitNs);
         }
         catch (InterruptedException e) {
-            TransferLog.failed("egress", player.getUuid(), task.relativePath, size, transferStartNs, transferBudgetWaitNs, e);
+            if (settled.compareAndSet(false, true)) {
+                TransferLog.failed("egress", player.getUuid(), task.relativePath, size, transferStartNs, transferBudgetWaitNs, e);
+            }
             Thread.currentThread().interrupt();
         }
     }
 
-    /*
-     * Enabled aggressive block sorting
-     * Enabled unnecessary exception pruning
-     * Enabled aggressive exception aggregation
-     */
     private static byte[] readSlice(File file, long offset, int length) {
         try (FileChannel ch = FileChannel.open(file.toPath(), StandardOpenOption.READ);){
-            int read;
             ByteBuffer buffer = ByteBuffer.allocate(length);
-            while (buffer.hasRemaining() && (read = ch.read(buffer, offset + (long)buffer.position())) >= 0) {
+            int zeroReads = 0;
+            while (buffer.hasRemaining()) {
+                int read = ch.read(buffer, offset + (long)buffer.position());
+                if (read < 0) {
+                    break;
+                }
+                if (read == 0) {
+                    /* Bounded spin guard: a channel that keeps returning 0 would otherwise hang
+                     * the drain thread forever. */
+                    if (++zeroReads > 3) {
+                        return null;
+                    }
+                    continue;
+                }
+                zeroReads = 0;
             }
             if (buffer.hasRemaining()) {
-                byte[] byArray2 = null;
-                return byArray2;
+                return null;
             }
-            byte[] byArray = buffer.array();
-            return byArray;
+            return buffer.array();
         }
         catch (Exception e) {
             return null;
@@ -1545,6 +1729,7 @@ public class TogetherServerNetwork {
 
     private static void handleHello(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         int protocol = buf.isReadable(4) ? buf.readInt() : 0;
+        playerProtocols.put(player.getUuid(), protocol);
         PacketByteBuf limits = PacketByteBufs.create();
         limits.writeInt(TogetherSettings.getAssetSyncMaxMb());
         limits.writeInt(TogetherSettings.getCoopInviteSeconds());
@@ -1559,109 +1744,156 @@ public class TogetherServerNetwork {
     }
 
     private static void handleAssetReport(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        UUID playerId = player.getUuid();
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            long reportId = packetByteBuf != null && packetByteBuf.isReadable(8) ? packetByteBuf.readLong() : 0L;
             if (bytes == null) {
                 return;
             }
-            try {
-                BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
-                if (!data.isMap()) {
-                    return;
-                }
-                MapType report = data.asMap();
-                HashMap<String, String> owned = new HashMap<String, String>();
-                for (String key : report.keys()) {
-                    owned.put(key, report.getString(key));
-                }
-                server.execute(() -> playerOwnedAssets.put(player.getUuid(), owned));
-            }
-            catch (Exception e) {
-                e.printStackTrace();
-            }
-        });
-    }
-
-    private static void handleAssetReportDelta(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
-            if (bytes == null) {
-                return;
-            }
-            try {
-                BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
-                if (!data.isMap()) {
-                    return;
-                }
-                MapType report = data.asMap();
-                HashMap<String, String> updates = new HashMap<String, String>();
-                ArrayList<String> removals = new ArrayList<String>();
-                for (String key : report.keys()) {
-                    String sha1 = report.getString(key);
-                    if (sha1 == null || sha1.isEmpty()) {
-                        removals.add(key);
-                        continue;
-                    }
-                    updates.put(key, sha1);
-                }
-                server.execute(() -> {
-                    Map owned = playerOwnedAssets.computeIfAbsent(player.getUuid(), k -> new HashMap());
-                    owned.putAll(updates);
-                    for (String key : removals) {
-                        owned.remove(key);
-                    }
-                });
-            }
-            catch (Exception e) {
-                e.printStackTrace();
-            }
-        });
-    }
-
-    private static void handleFilmInventory(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
-        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
-            if (bytes == null) {
-                return;
-            }
+            /* Deserializing on the netty thread blocks every player's networking for the
+             * duration of the parse; hand it to the asset-io pool. */
             ASSET_IO_EXECUTOR.execute(() -> {
+                HashMap<String, String> owned = null;
                 try {
                     BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
                     if (!data.isMap()) {
                         return;
                     }
-                    MapType inventory = data.asMap();
-                    Collection keys = BBSMod.getFilms().getKeys();
-                    for (String filmId : new ArrayList<String>(keys)) {
-                        server.execute(() -> {
-                            String clientSha1;
-                            String serverSha1;
-                            String branch = FilmBranchStore.branchOf(filmId, player.getUuid());
-                            if (!FilmBranchStore.isDefault(filmId, branch)) {
-                                return;
-                            }
-                            File file = BBSMod.getFilms().getFile(filmId);
-                            if (file == null || !file.isFile()) {
-                                return;
-                            }
-                            try {
-                                serverSha1 = TogetherServerNetwork.sha1OfPathCached(file.toPath(), file);
-                            }
-                            catch (IOException e) {
-                                return;
-                            }
-                            String string = clientSha1 = inventory.has(filmId) ? inventory.getString(filmId) : "";
-                            if (!clientSha1.isEmpty() && clientSha1.equalsIgnoreCase(serverSha1)) {
-                                return;
-                            }
-                            MapType filmData = FilmBranchStore.workingData(filmId, branch);
-                            if (filmData == null) {
-                                return;
-                            }
-                            TogetherServerNetwork.broadcastFilmSavedToAll(server, player, filmId, branch, filmData);
-                        });
+                    MapType report = data.asMap();
+                    owned = new HashMap<String, String>();
+                    for (String key : report.keys()) {
+                        owned.put(key, report.getString(key));
                     }
                 }
                 catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed asset report player=" + playerId);
                     e.printStackTrace();
+                    return;
                 }
+                HashMap<String, String> snapshot = owned;
+                ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                if (online == null) {
+                    return;
+                }
+                server.execute(() -> playerOwnedAssets.put(playerId, snapshot));
+                TogetherServerNetwork.ackInventoryReport(server, online, reportId, 0, snapshot.size());
+            });
+        });
+    }
+
+    private static void handleAssetReportDelta(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        UUID playerId = player.getUuid();
+        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            long reportId = packetByteBuf != null && packetByteBuf.isReadable(8) ? packetByteBuf.readLong() : 0L;
+            if (bytes == null) {
+                return;
+            }
+            ASSET_IO_EXECUTOR.execute(() -> {
+                HashMap<String, String> updates;
+                ArrayList<String> removals;
+                try {
+                    BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+                    if (!data.isMap()) {
+                        return;
+                    }
+                    MapType report = data.asMap();
+                    updates = new HashMap<String, String>();
+                    removals = new ArrayList<String>();
+                    for (String key : report.keys()) {
+                        String sha1 = report.getString(key);
+                        if (sha1 == null || sha1.isEmpty()) {
+                            removals.add(key);
+                            continue;
+                        }
+                        updates.put(key, sha1);
+                    }
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed asset delta player=" + playerId);
+                    e.printStackTrace();
+                    return;
+                }
+                HashMap<String, String> u = updates;
+                ArrayList<String> r = removals;
+                ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                if (online == null) {
+                    return;
+                }
+                server.execute(() -> {
+                    Map owned = playerOwnedAssets.computeIfAbsent(playerId, k -> new HashMap());
+                    owned.putAll(u);
+                    for (String key : r) {
+                        owned.remove(key);
+                    }
+                });
+                TogetherServerNetwork.ackInventoryReport(server, online, reportId, 0, u.size());
+            });
+        });
+    }
+
+    private static void handleFilmInventory(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        UUID playerId = player.getUuid();
+        TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
+            long reportId = packetByteBuf != null && packetByteBuf.isReadable(8) ? packetByteBuf.readLong() : 0L;
+            if (bytes == null) {
+                return;
+            }
+            ASSET_IO_EXECUTOR.execute(() -> {
+                ArrayList<Object[]> pending = new ArrayList<Object[]>();
+                MapType inventory;
+                int filmCount;
+                try {
+                    BaseType data = DataStorageUtils.readFromBytes((byte[])bytes);
+                    if (!data.isMap()) {
+                        return;
+                    }
+                    inventory = data.asMap();
+                    Collection keys = BBSMod.getFilms().getKeys();
+                    filmCount = keys.size();
+                    /* Do the whole scan (branch check, file stat, sha1, workingData) here on the
+                     * asset-io thread and collect what needs pushing; one server task per film
+                     * flooded the server thread when the library was large. */
+                    for (String filmId : new ArrayList<String>(keys)) {
+                        try {
+                            String branch = FilmBranchStore.branchOf(filmId, playerId);
+                            if (!FilmBranchStore.isDefault(filmId, branch)) {
+                                continue;
+                            }
+                            File file = BBSMod.getFilms().getFile(filmId);
+                            if (file == null || !file.isFile()) {
+                                continue;
+                            }
+                            String serverSha1 = TogetherServerNetwork.sha1OfPathCached(file.toPath(), file);
+                            String clientSha1 = inventory.has(filmId) ? inventory.getString(filmId) : "";
+                            if (!clientSha1.isEmpty() && clientSha1.equalsIgnoreCase(serverSha1)) {
+                                continue;
+                            }
+                            MapType filmData = FilmBranchStore.workingData(filmId, branch);
+                            if (filmData == null) {
+                                continue;
+                            }
+                            pending.add(new Object[]{filmId, branch, filmData});
+                        }
+                        catch (Exception e) {
+                            System.out.println("[BBSTogether] Film inventory skipped film=" + filmId);
+                        }
+                    }
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed film inventory player=" + playerId);
+                    e.printStackTrace();
+                    return;
+                }
+                ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                if (online == null) {
+                    return;
+                }
+                server.execute(() -> {
+                    for (Object[] row : pending) {
+                        TogetherServerNetwork.broadcastFilmSavedToAll(server, online, (String)row[0], (String)row[1], (MapType)row[2]);
+                    }
+                });
+                TogetherServerNetwork.ackInventoryReport(server, online, reportId, 1, filmCount);
             });
         });
     }
@@ -1831,29 +2063,44 @@ public class TogetherServerNetwork {
             String filmId = packetByteBuf.readString();
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
             int replayIndex = packetByteBuf.readInt();
-            BaseType replayData = DataStorageUtils.readFromBytes((byte[])bytes);
-            if (!replayData.isMap()) {
-                return;
-            }
-            server.execute(() -> {
-                String branch = TogetherServerNetwork.playerBranch(filmId, player);
-                if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+            UUID playerId = player.getUuid();
+            FILM_IO_EXECUTOR.execute(() -> {
+                BaseType replayData;
+                try {
+                    replayData = DataStorageUtils.readFromBytes((byte[])bytes);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed replay finished player=" + playerId + " film=" + filmId);
+                    e.printStackTrace();
                     return;
                 }
-                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+                if (!replayData.isMap()) {
                     return;
                 }
-                if (CoopSessionManager.onRecordingFinished(server, player, filmId, replayIndex, replayData.asMap())) {
-                    return;
-                }
-                BBSTogetherFix18.mergeRecordingFinished(filmId, replayIndex, replayData, server, branch);
-                recordingPlayers.remove(player.getUuid());
-                pendingStopPlayers.remove(player.getUuid());
-                if (pendingStopPlayers.isEmpty()) {
-                    pendingReplayData.clear();
-                    pendingFilmId = null;
-                    masterPlayerUUID = null;
-                }
+                server.execute(() -> {
+                    ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                    if (online == null) {
+                        return;
+                    }
+                    String branch = TogetherServerNetwork.playerBranch(filmId, online);
+                    if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+                        return;
+                    }
+                    if (TogetherServerNetwork.denyLockedFilm(server, online, filmId)) {
+                        return;
+                    }
+                    if (CoopSessionManager.onRecordingFinished(server, online, filmId, replayIndex, replayData.asMap())) {
+                        return;
+                    }
+                    BBSTogetherFix18.mergeRecordingFinished(filmId, replayIndex, replayData, server, branch);
+                    recordingPlayers.remove(playerId);
+                    pendingStopPlayers.remove(playerId);
+                    if (pendingStopPlayers.isEmpty()) {
+                        pendingReplayData.clear();
+                        pendingFilmId = null;
+                        masterPlayerUUID = null;
+                    }
+                });
             });
         });
     }
@@ -1865,28 +2112,47 @@ public class TogetherServerNetwork {
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
             String filmId = packetByteBuf.readString();
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
-            BaseType incoming = DataStorageUtils.readFromBytes((byte[])bytes);
-            if (!incoming.isMap()) {
-                return;
-            }
-            server.execute(() -> {
-                String branch = TogetherServerNetwork.playerBranch(filmId, player);
+            UUID playerId = player.getUuid();
+            boolean canManage = BbsOpManager.canManage(player);
+            FILM_IO_EXECUTOR.execute(() -> {
+                BaseType incoming;
+                try {
+                    incoming = DataStorageUtils.readFromBytes((byte[])bytes);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed master recording player=" + playerId + " film=" + filmId);
+                    e.printStackTrace();
+                    return;
+                }
+                if (!incoming.isMap()) {
+                    return;
+                }
+                String branch = TogetherServerNetwork.playerBranch(filmId, playerId);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
                     return;
                 }
-                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
-                    return;
+                String key = TogetherServerNetwork.branchKey(filmId, branch);
+                MapType merged;
+                synchronized (filmMergeLocks.computeIfAbsent(key, k -> new Object())) {
+                    Film stored = FilmBranchStore.working(filmId, branch);
+                    Film incomingFilm = new Film();
+                    incomingFilm.fromData((BaseType)incoming.asMap());
+                    TogetherServerNetwork.mergeFilms(stored, incomingFilm, playerId, canManage);
+                    merged = (MapType)stored.toData();
+                    TogetherServerNetwork.saveBranchNow(filmId, branch, merged);
+                    lastSavedFilmSnapshots.put(key, merged);
                 }
-                Film stored = FilmBranchStore.working(filmId, branch);
-                Film incomingFilm = new Film();
-                incomingFilm.fromData((BaseType)incoming.asMap());
-                UUID playerId = player.getUuid();
-                boolean canManage = BbsOpManager.canManage(player);
-                TogetherServerNetwork.mergeFilms(stored, incomingFilm, playerId, canManage);
-                MapType merged = (MapType)stored.toData();
-                TogetherServerNetwork.saveBranchNow(filmId, branch, merged);
-                lastSavedFilmSnapshots.put(TogetherServerNetwork.branchKey(filmId, branch), merged);
-                TogetherServerNetwork.broadcastFilmSaved(server, filmId, branch, merged);
+                MapType finalMerged = merged;
+                server.execute(() -> {
+                    ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                    if (online == null) {
+                        return;
+                    }
+                    if (TogetherServerNetwork.denyLockedFilm(server, online, filmId)) {
+                        return;
+                    }
+                    TogetherServerNetwork.broadcastFilmSaved(server, filmId, branch, finalMerged);
+                });
             });
         });
     }
@@ -1936,58 +2202,89 @@ public class TogetherServerNetwork {
             UUID playerId = player.getUuid();
             boolean canManage = BbsOpManager.canManage(player);
             boolean commitOnSave = packetByteBuf.isReadable() && packetByteBuf.readBoolean();
-            BaseType incoming = DataStorageUtils.readFromBytes((byte[])bytes);
-            if (!incoming.isMap()) {
-                return;
-            }
-            server.execute(() -> {
+            /* Parse, merge and persist on the film-io thread: a whole-film deserialize plus a
+             * disk write on the server thread froze every player for the save duration. */
+            FILM_IO_EXECUTOR.execute(() -> {
+                BaseType incoming;
+                try {
+                    incoming = DataStorageUtils.readFromBytes((byte[])bytes);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed film save player=" + playerId + " film=" + filmId);
+                    e.printStackTrace();
+                    return;
+                }
+                if (!incoming.isMap()) {
+                    return;
+                }
                 if (deletedFilmIds.contains(filmId)) {
                     return;
                 }
-                String branch = TogetherServerNetwork.playerBranch(filmId, player);
+                String branch = TogetherServerNetwork.playerBranch(filmId, playerId);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
-                    System.out.println("[BBSTogether] Drop save from stale branch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
+                    System.out.println("[BBSTogether] Drop save from stale branch player=" + playerId + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
                     return;
                 }
                 if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
                     return;
                 }
-                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
-                    return;
-                }
                 String key = TogetherServerNetwork.branchKey(filmId, branch);
-                Film stored = FilmBranchStore.working(filmId, branch);
-                Film incomingFilm = new Film();
-                incomingFilm.fromData((BaseType)incoming.asMap());
-                MapType before = lastSavedFilmSnapshots.containsKey(key) ? lastSavedFilmSnapshots.get(key) : (MapType)stored.toData();
-                TogetherServerNetwork.mergeFilms(stored, incomingFilm, playerId, canManage);
-                MapType merged = (MapType)stored.toData();
-                ArrayList<String> changedClips = TogetherServerNetwork.collectChangedClips(before, merged);
-                /* A save never removes replays, so an empty result means the sender already had none. */
-                if (TogetherServerNetwork.mergedFilmReplays(merged) == 0) {
-                    System.out.println("[BBSTogether] Saved film=" + filmId + " branch=" + branch + " with no replays (incoming=" + incomingFilm.replays.getList().size() + ") player=" + player.getUuid());
+                MapType merged;
+                ArrayList<String> changedClips;
+                MapType before;
+                int incomingReplays;
+                /* Serialize per film+branch so two concurrent saves cannot interleave their
+                 * read-merge-write and lose one side. */
+                synchronized (filmMergeLocks.computeIfAbsent(key, k -> new Object())) {
+                    Film stored = FilmBranchStore.working(filmId, branch);
+                    Film incomingFilm = new Film();
+                    incomingFilm.fromData((BaseType)incoming.asMap());
+                    incomingReplays = incomingFilm.replays.getList().size();
+                    MapType cached = lastSavedFilmSnapshots.get(key);
+                    before = cached != null ? cached : (MapType)stored.toData();
+                    TogetherServerNetwork.mergeFilms(stored, incomingFilm, playerId, canManage);
+                    merged = (MapType)stored.toData();
+                    changedClips = TogetherServerNetwork.collectChangedClips(before, merged);
+                    TogetherServerNetwork.saveBranchNow(filmId, branch, merged);
+                    lastSavedFilmSnapshots.put(key, merged);
                 }
-                playerEditingFilm.put(player.getUuid(), filmId);
-                TogetherServerNetwork.saveBranchNow(filmId, branch, merged);
-                lastSavedFilmSnapshots.put(key, merged);
-                AtomicBoolean pending = filmSaveDirty.get(key);
-                if (pending != null) {
-                    pending.set(false);
-                }
-                ScheduledFuture<?> pendingTask = filmSaveTasks.remove(key);
-                if (pendingTask != null) {
-                    pendingTask.cancel(false);
-                }
-                filmSaveFirstDirty.remove(key);
-                if (!BaseType.equals((BaseType)before, (BaseType)merged)) {
-                    BehaviorLogManager.record(player, BehaviorType.EDIT.id, 1, filmId, changedClips, Map.of("replays", String.valueOf(TogetherServerNetwork.mergedFilmReplays(merged)), "branch", branch));
-                }
-                TogetherServerNetwork.broadcastFilmSaved(server, filmId, branch, merged);
-                TogetherServerNetwork.broadcastFilmSelections(server);
-                TogetherServerNetwork.broadcastReplaySelections(server, filmId);
-                if (commitOnSave) {
-                    TogetherServerNetwork.commitAfterSave(server, player, filmId, branch, merged);
-                }
+                ArrayList<String> clips = changedClips;
+                MapType finalMerged = merged;
+                MapType finalBefore = before;
+                int finalIncoming = incomingReplays;
+                /* Publish only after the bytes are on disk: a viewer must never see a state the
+                 * server has not stored. */
+                server.execute(() -> {
+                    ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                    if (online == null) {
+                        return;
+                    }
+                    if (TogetherServerNetwork.denyLockedFilm(server, online, filmId)) {
+                        return;
+                    }
+                    if (TogetherServerNetwork.mergedFilmReplays(finalMerged) == 0) {
+                        System.out.println("[BBSTogether] Saved film=" + filmId + " branch=" + branch + " with no replays (incoming=" + finalIncoming + ") player=" + playerId);
+                    }
+                    playerEditingFilm.put(playerId, filmId);
+                    AtomicBoolean pending = filmSaveDirty.get(key);
+                    if (pending != null) {
+                        pending.set(false);
+                    }
+                    ScheduledFuture<?> pendingTask = filmSaveTasks.remove(key);
+                    if (pendingTask != null) {
+                        pendingTask.cancel(false);
+                    }
+                    filmSaveFirstDirty.remove(key);
+                    if (!BaseType.equals((BaseType)finalBefore, (BaseType)finalMerged)) {
+                        BehaviorLogManager.record(online, BehaviorType.EDIT.id, 1, filmId, clips, Map.of("replays", String.valueOf(TogetherServerNetwork.mergedFilmReplays(finalMerged)), "branch", branch));
+                    }
+                    TogetherServerNetwork.broadcastFilmSaved(server, filmId, branch, finalMerged);
+                    TogetherServerNetwork.broadcastFilmSelections(server);
+                    TogetherServerNetwork.broadcastReplaySelections(server, filmId);
+                    if (commitOnSave) {
+                        TogetherServerNetwork.commitAfterSave(server, online, filmId, branch, finalMerged);
+                    }
+                });
             });
         });
     }
@@ -2285,41 +2582,57 @@ public class TogetherServerNetwork {
             String filmId = packetByteBuf.readString();
             String message = packetByteBuf.readString(240);
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
-            MapType payload = TogetherServerNetwork.readFilmPayload(bytes);
-            server.execute(() -> {
-                MapType data;
-                if (deletedFilmIds.contains(filmId)) {
-                    TogetherServerNetwork.rejectCommit(player, 1);
+            UUID playerId = player.getUuid();
+            boolean canManage = BbsOpManager.canManage(player);
+            ASSET_IO_EXECUTOR.execute(() -> {
+                MapType payload;
+                try {
+                    payload = TogetherServerNetwork.readFilmPayload(bytes);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed commit payload player=" + playerId + " film=" + filmId);
+                    e.printStackTrace();
                     return;
                 }
-                String branch = TogetherServerNetwork.playerBranch(filmId, player);
-                if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
-                    return;
-                }
-                if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
-                    return;
-                }
-                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
-                    return;
-                }
-                MapType mapType = data = payload != null ? payload : FilmBranchStore.workingData(filmId, branch);
-                if (data == null) {
-                    TogetherServerNetwork.rejectCommit(player, 1);
-                    return;
-                }
-                if (TogetherServerNetwork.mergedFilmReplays(data) == 0) {
-                    System.out.println("[BBSTogether] Committing film=" + filmId + " branch=" + branch + " with no replays (from " + (payload != null ? "client payload" : "server working copy") + ") player=" + player.getUuid());
-                }
-                FilmCommit commit = FilmCommitStore.commit(filmId, data, player.getUuid().toString(), PlayerCompat.name(player.getGameProfile()), System.currentTimeMillis(), message, branch);
-                if (commit == null) {
-                    TogetherServerNetwork.rejectCommit(player, 0);
-                    return;
-                }
-                TogetherServerNetwork.saveBranchNow(filmId, branch, data);
-                lastSavedFilmSnapshots.put(TogetherServerNetwork.branchKey(filmId, branch), data);
-                BehaviorLogManager.record(player, BehaviorType.EDIT.id, 1, filmId, new ArrayList<String>(), Map.of("commit", commit.id, "branch", branch));
-                TogetherServerNetwork.broadcastCommitAdded(server, filmId, commit);
-                TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
+                server.execute(() -> {
+                    ServerPlayerEntity online = server.getPlayerManager().getPlayer(playerId);
+                    if (online == null) {
+                        return;
+                    }
+                    MapType data;
+                    if (deletedFilmIds.contains(filmId)) {
+                        TogetherServerNetwork.rejectCommit(online, 1);
+                        return;
+                    }
+                    String branch = TogetherServerNetwork.playerBranch(filmId, online);
+                    if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+                        return;
+                    }
+                    if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
+                        return;
+                    }
+                    if (TogetherServerNetwork.denyLockedFilm(server, online, filmId)) {
+                        return;
+                    }
+                    MapType mapType = data = payload != null ? payload : FilmBranchStore.workingData(filmId, branch);
+                    if (data == null) {
+                        TogetherServerNetwork.rejectCommit(online, 1);
+                        return;
+                    }
+                    if (TogetherServerNetwork.mergedFilmReplays(data) == 0) {
+                        System.out.println("[BBSTogether] Committing film=" + filmId + " branch=" + branch + " with no replays (from " + (payload != null ? "client payload" : "server working copy") + ") player=" + playerId);
+                    }
+                    FilmCommit commit = FilmCommitStore.commit(filmId, data, playerId.toString(), PlayerCompat.name(online.getGameProfile()), System.currentTimeMillis(), message, branch);
+                    if (commit == null) {
+                        TogetherServerNetwork.rejectCommit(online, 0);
+                        return;
+                    }
+                    TogetherServerNetwork.saveBranchNow(filmId, branch, data);
+                    lastSavedFilmSnapshots.put(TogetherServerNetwork.branchKey(filmId, branch), data);
+                    BehaviorLogManager.record(online, BehaviorType.EDIT.id, 1, filmId, new ArrayList<String>(), Map.of("commit", commit.id, "branch", branch));
+                    TogetherServerNetwork.broadcastCommitAdded(server, filmId, commit);
+                    TogetherServerNetwork.broadcastPlayerCommitPositions(server, filmId);
+                });
             });
         });
     }
@@ -3133,7 +3446,9 @@ public class TogetherServerNetwork {
         }
 
         deletedFilmIds.add(filmId);
-        lastSavedFilmSnapshots.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
+        synchronized (lastSavedFilmSnapshots) {
+            lastSavedFilmSnapshots.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
+        }
         filmSaveDirty.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
         filmSaveFirstDirty.keySet().removeIf(key -> key.startsWith(filmId + "\t"));
 
@@ -3258,16 +3573,18 @@ public class TogetherServerNetwork {
     }
 
     private static <T> void renameBranchKeys(Map<String, T> map, String oldId, String newId) {
-        String prefix = oldId + "\t";
-        ArrayList<String> keys = new ArrayList<String>();
-        for (String key : map.keySet()) {
-            if (!key.startsWith(prefix)) continue;
-            keys.add(key);
-        }
-        for (String key : keys) {
-            T value = map.remove(key);
-            if (value == null) continue;
-            map.put(newId + key.substring(oldId.length()), value);
+        synchronized (map) {
+            String prefix = oldId + "\t";
+            ArrayList<String> keys = new ArrayList<String>();
+            for (String key : map.keySet()) {
+                if (!key.startsWith(prefix)) continue;
+                keys.add(key);
+            }
+            for (String key : keys) {
+                T value = map.remove(key);
+                if (value == null) continue;
+                map.put(newId + key.substring(oldId.length()), value);
+            }
         }
     }
 
@@ -3416,68 +3733,79 @@ public class TogetherServerNetwork {
                 path.add(packetByteBuf.readString());
             }
             String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
-            BaseType payload;
-            try {
-                payload = DataStorageUtils.readFromBytes((byte[])bytes);
-            }
-            catch (Exception e) {
-                System.out.println("[BBSTogether] Malformed film delta film=" + filmId + ": " + e);
-                return;
-            }
-            server.execute(() -> {
-                Film film;
-                if (deletedFilmIds.contains(filmId)) {
+            UUID playerId = player.getUuid();
+            /* Real-time edit deltas arrive far more often than saves; parsing them on the netty
+             * thread would stall networking for every edit keystroke. */
+            ASSET_IO_EXECUTOR.execute(() -> {
+                BaseType payload;
+                try {
+                    payload = DataStorageUtils.readFromBytes((byte[])bytes);
+                }
+                catch (Exception e) {
+                    System.out.println("[BBSTogether] Malformed film delta film=" + filmId + ": " + e);
                     return;
                 }
-                String branch = TogetherServerNetwork.playerBranch(filmId, player);
-                if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
-                    System.out.println("[BBSTogether] Drop delta from stale branch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
-                    return;
-                }
-                if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
-                    return;
-                }
-                if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
-                    return;
-                }
-                /* A clip lock is enforced on the clip the server already holds: a path into a
-                 * locked camera clip is refused before it can reach the other editors. */
-                if (!ClipLockGuard.canSyncCamera(player, filmId, branch, path, payload)) {
-                    return;
-                }
-                /* Keyframe locks are compared against the branch copy the server holds, so an
-                 * edit inside a locked range never reaches the other editors. */
-                if (!KeyframeLockGuard.canSync(player, filmId, branch, path, payload)) {
-                    return;
-                }
-                playerEditingFilm.put(player.getUuid(), filmId);
-                for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
-                    ServerPlayerEntity other;
-                    if (!entry.getValue().equals(filmId) || entry.getKey().equals(player.getUuid()) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
-                    TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, bytes, outBuf -> {
-                        outBuf.writeString(filmId);
-                        outBuf.writeString(branch);
-                        outBuf.writeInt(path.size());
-                        for (String s : path) {
-                            outBuf.writeString(s);
-                        }
-                    });
-                }
-                if (payload != null && TogetherServerNetwork.isServerTracked(path) && (film = FilmBranchStore.working(filmId, branch)) != null) {
-                    lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)film.toData());
-                    BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, path);
-                    if (target != null) {
-                        try {
-                            target.fromData(payload);
-                        }
-                        catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
-                    TogetherServerNetwork.scheduleFilmSave(server, filmId, branch);
-                }
+                server.execute(() -> TogetherServerNetwork.applyFilmDataSync(server, playerId, (byte[])bytes, filmId, path, sentBranch, payload));
             });
         });
+    }
+
+    private static void applyFilmDataSync(MinecraftServer server, UUID playerId, byte[] bytes, String filmId, ArrayList<String> path, String sentBranch, BaseType payload) {
+        ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
+        if (player == null) {
+            return;
+        }
+        Film film;
+        if (deletedFilmIds.contains(filmId)) {
+            return;
+        }
+        String branch = TogetherServerNetwork.playerBranch(filmId, player);
+        if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
+            System.out.println("[BBSTogether] Drop delta from stale branch player=" + PlayerCompat.name(player.getGameProfile()) + " film=" + filmId + " sent=" + sentBranch + " current=" + branch);
+            return;
+        }
+        if (CoopSessionManager.isFilmLockedForEditing(filmId, branch)) {
+            return;
+        }
+        if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
+            return;
+        }
+        /* A clip lock is enforced on the clip the server already holds: a path into a
+         * locked camera clip is refused before it can reach the other editors. */
+        if (!ClipLockGuard.canSyncCamera(player, filmId, branch, path, payload)) {
+            return;
+        }
+        /* Keyframe locks are compared against the branch copy the server holds, so an
+         * edit inside a locked range never reaches the other editors. */
+        if (!KeyframeLockGuard.canSync(player, filmId, branch, path, payload)) {
+            return;
+        }
+        playerEditingFilm.put(playerId, filmId);
+        for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
+            ServerPlayerEntity other;
+            if (!entry.getValue().equals(filmId) || entry.getKey().equals(playerId) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
+            TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, bytes, outBuf -> {
+                outBuf.writeString(filmId);
+                outBuf.writeString(branch);
+                outBuf.writeInt(path.size());
+                for (String s : path) {
+                    outBuf.writeString(s);
+                }
+            });
+        }
+        if (payload != null && TogetherServerNetwork.isServerTracked(path) && (film = FilmBranchStore.working(filmId, branch)) != null) {
+            lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)film.toData());
+            BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, path);
+            if (target != null) {
+                try {
+                    target.fromData(payload);
+                }
+                catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            TogetherServerNetwork.scheduleFilmSave(server, filmId, branch);
+        }
     }
 
     private static void handleUndoSync(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {

@@ -1,6 +1,5 @@
 package mchorse.bbs_together.network;
 
-import mchorse.bbs_mod.data.DataStorageUtils;
 import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.network.IBufferReceiver;
 import net.minecraft.entity.player.PlayerEntity;
@@ -30,35 +29,20 @@ public class CompressedServerPacketCrusher extends SafeServerPacketCrusher
         TogetherServerNetworking.send((ServerPlayerEntity) entity, identifier, buf);
     }
 
-    /** {@link #send} with a size check up front, so an oversized payload is dropped and logged
-     * instead of being handed to the encoder, which would disconnect the receiving client. */
+    /**
+     * Hands the whole payload to the crusher, which splits it into chunks of at most 30,000 bytes
+     * plus a 16-byte header. The per-chunk check in {@link #sendBuffer} covers the actual encoder
+     * limit, so there is no whole-payload check here — doing it before the split rejected every
+     * large transfer (asset slices, films, manifests) while the split already made it safe.
+     */
     public void sendGuarded(PlayerEntity target, Identifier identifier, byte[] bytes, Consumer<PacketByteBuf> consumer)
     {
-        if (bytes != null && !PacketSizeGuard.fits(bytes.length))
-        {
-            PacketSizeGuard.warn(identifier, bytes.length);
-
-            return;
-        }
-
         this.send(target, identifier, bytes, consumer);
     }
 
-    /** Same as above for a structured payload. */
+    /** Same as above for a structured payload; it is serialized once, by the crusher. */
     public void sendGuarded(PlayerEntity target, Identifier identifier, BaseType data, Consumer<PacketByteBuf> consumer)
     {
-        if (data != null)
-        {
-            int length = DataStorageUtils.writeToBytes(data).length;
-
-            if (!PacketSizeGuard.fits(length))
-            {
-                PacketSizeGuard.warn(identifier, length);
-
-                return;
-            }
-        }
-
         this.send(target, identifier, data, consumer);
     }
 
