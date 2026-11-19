@@ -96,6 +96,14 @@ public class UICommitGraph extends UIElement
 
     public SelectionListener listener;
 
+    public UICommitGraph()
+    {
+        /* This widget is a bare canvas: it paints its own rows and handles clicks itself, with
+         * no child elements. Marking it a container stops clicks from bubbling to the parent
+         * (which would otherwise re-layout the whole panel mid-click and scramble the view). */
+        this.container = true;
+    }
+
     /** Whether at least one commit of {@code filmId} is displayed. */
     public boolean isShown(String filmId)
     {

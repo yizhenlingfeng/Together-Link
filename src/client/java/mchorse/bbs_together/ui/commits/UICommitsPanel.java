@@ -145,10 +145,25 @@ public class UICommitsPanel extends UIDashboardPanel
         this.graph.relative(this).xy(left, BAR_HEIGHT).w(1F, -left).h(1F, -BAR_HEIGHT - bottom);
         this.info.relative(this).x(0).y(1F, -bottom).w(1F).h(bottom);
 
-        if (this.area.w > 0)
+        this.relayout();
+    }
+
+    /**
+     * Apply the sizes above with a real resize, but only once the panel actually has an area.
+     *
+     * The graph's viewport is carved out of its area, and a single-pixel height (or zero width)
+     * before the tab is measured would leave every row clamped against nothing. Re-applying the
+     * resize on each frame until the panel is properly sized (and afterwards whenever a splitter
+     * moved) is what keeps the very first open correct instead of needing a manual drag.
+     */
+    private void relayout()
+    {
+        if (this.area.w <= 0 || this.area.h <= 0)
         {
-            this.resize();
+            return;
         }
+
+        this.resize();
     }
 
     @Override
@@ -173,6 +188,11 @@ public class UICommitsPanel extends UIDashboardPanel
             this.info.film(this.graph.actionFilm());
             this.info.refresh();
         }
+
+        /* Make sure the children carry the current area: the panel can be opened before the tab
+         * has been measured, in which case the layout never ran and the graph would be a
+         * zero-sized strip until a splitter is touched. This is cheap once the sizes match. */
+        this.layout();
 
         int chrome = BBSSettings.color(BBSSettings.chromeSurface(), Colors.A50);
 
