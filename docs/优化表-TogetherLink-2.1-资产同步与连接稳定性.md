@@ -144,7 +144,7 @@ sendGuarded(整包 1,048,576 B)
 
 ---
 
-## 4. 修复路线（阶段 0、1、2 主体已实施，阶段 3 待排期）
+## 4. 修复路线（阶段 0、1、2、3 第 1–3 条已实施）
 
 ### 阶段 0：恢复同步（P0）——**已实施 2026-11-19**
 
@@ -173,12 +173,12 @@ sendGuarded(整包 1,048,576 B)
 6. ✅ netty 线程只读 header：服务端 7 处 `readFromBytes` 中 6 处（资产报表、增量报表、影片保存、录制结束、master done、commit 创建、实时编辑 delta）移到 `ASSET_IO_EXECUTOR` 并 try/catch 记日志；客户端新增 `FILM_PARSE_EXECUTOR`（单线程 `BBSTogether-FilmParse`），影片分支状态、saved-sync、data-sync、资产 manifest 的解码全部移到该池。`ASSET_IO_EXECUTOR` 满时仍静默丢弃（未做）。
 7. ⏳ 下载完成回执（补齐 C4 最后一块）——未做，下载仍靠 20 s stall watchdog + 3 次重试兜底。
 
-### 阶段 3：协议与直发（P2，随版本）
+### 阶段 3：协议与直发（P2，随版本）——**第 1–3 条已实施 2026-11-19**
 
-1. 协议版本比较 + 1.21.11 独立协议号。
-2. 29 处直发统一走 crusher/分页。
-3. `PacketCrusher` 整数分片、校验、超时；`SafeServerPacketCrusher` 定时 `expire`。
-4. 上传临时文件清理、非原子文件系统降级安全。
+1. ✅ **协议版本双向比较**：新增 `MIN_SUPPORTED_PROTOCOL = 3`（`TogetherServerNetwork.java` 常量区）。`handleHello` 现在把客户端协议存入 `playerProtocols` 后与 `PROTOCOL_VERSION` 双向比较：客户端更新时记日志「running in the common subset」，更旧时记「sync receipts are disabled for this player」，并继续按旧行为降级而不主动断开（Fabric 对未注册 channel 的容错未实测，硬踢的风险大于降级）。协议号仍为 5：3→4 上传 ACK、4→5 清单/拒绝回执，本阶段未再改报文结构，只补齐了版本比较与日志。
+2. ✅ **增长型直发统一走 crusher**：新增 `sendChunked(player, channel, buf)`（把已构建的 `PacketByteBuf` 转 `byte[]` 交给 `crusherFor(player).sendGuarded`，可被分片）。已替换所有「随玩家数/锁数/选择项增长」的直发：`CLIENT_PLAYER_COLORS`、`CLIENT_CURSOR_POSITIONS`（3 处：光标快照、光标移除、聚合广播）、`CLIENT_FILM_SELECTIONS`、`CLIENT_REPLAY_SELECTIONS`、`CLIENT_REPLAY_FORM_LOCKS`、`CLIENT_FILM_SCREENS`、`CLIENT_ASSET_LOCKS`、`CLIENT_COMMIT_SELECTIONS`、`CLIENT_PLAYER_COMMIT_POSITIONS`。剩余直发均为定长小包（单/双字符串、布尔、若干 int，或空包 `CLIENT_ASSETS_CHANGED`/`CLIENT_FILM_LIST_CHANGED`/`CLIENT_SERVER_LIMITS`/`CLIENT_HELLO`），不会随规模增长，保持直发以避免无谓分片开销。
+3. ✅ **接收端整数分片 / 校验 / 超时**：`CompressedClientPacketCrusher.receive` 改为与服务端 `SafeServerPacketCrusher` 同构的加固实现——校验 `id/total/index/size/readableBytes`、`MAX_CHUNKS=8192`、`MAX_OPEN_TRANSFERS=32`（超限淘汰最旧）、`MAX_TOTAL_BYTES=64 MiB`、初始缓冲按 `min(total*30_000, 1 MiB)` 封顶、`TRANSFER_TIMEOUT_MS=60 s` 定时 `expire`、`{69}`→null 哨兵；`reset` 清空三张表。此前基类 `PacketCrusher.receive` 直接信任头部（`new byte[size]`、`ByteArrayOutputStream(total*30_000)`），恶意/损坏的服务器数据可请求超大分配。发送侧 `PacketCrusher` 的浮点 `total` 精度问题位于外部 BBS jar，不可改；但本项目两层每片检查（`sendBuffer` 的 `PacketSizeGuard.fits`）与接收端校验已把实际风险压到最低。
+4. ⏳ 上传临时文件清理、非原子文件系统降级安全——未做（`handleAssetUpload` 失败路径仍可能残留 `.bbsup`/`.bbsuptmp`，见 §7）。
 
 ---
 
@@ -273,13 +273,21 @@ sendGuarded(整包 1,048,576 B)
 3. **`asset_sync_max_mb=0` 的语义**：代码按「不限」处理（`syncMaxBytes()` 返回 0，上传处 `>0` 才检查），但 UI/文档未明确，需要产品确认。
 4. **上传片数上限与整包上限不对齐**：`handleAssetUpload` 的 `seqTotal≤4096` 按默认 4 MiB/片名义可达 16 GiB，但客户端→服务端单次传输实际先被 `MAX_TOTAL_BYTES=64 MiB` 截断（C3）；`asset_sync_max_mb=256` 与 64 MiB / 256 MiB 两个硬上限也不一致，需要产品层面拍一个数（建议入站上限与出站一致，或改流式传输）。这一条与阶段 1 第 2 条（应用层分页）是同一件事，已并入阶段 2。
 5. **CDN 路径未展开**：旧表已指出 CDN 只作只读分发、不能当权威源；当前配置是否仍有两套（`bbs.json` vs `bbs_together.json`）需单独审计。
-6. **`DiscardPolicy` 是取舍还是缺陷**：本表按「不能静默丢资产」处理；若产品接受丢弃，也必须给客户端回执——阶段 1 后队列满与发片失败都已回 `CLIENT_ASSET_REJECTED`，但 `ASSET_IO_EXECUTOR`（manifest/影片清单构建，128 队列 + DiscardPolicy）与新增的 `FILM_IO_EXECUTOR`（256 队列 + DiscardPolicy）满时仍然静默丢弃，留给阶段 3。
+6. **`DiscardPolicy` 是取舍还是缺陷**：本表按「不能静默丢资产」处理；若产品接受丢弃，也必须给客户端回执——阶段 1 后队列满与发片失败都已回 `CLIENT_ASSET_REJECTED`；阶段 3 已把接收端 `CompressedClientPacketCrusher` 的丢弃改为可观测（校验失败/超时直接丢弃分片，不再尝试超大分配）。仍存：`ASSET_IO_EXECUTOR`（manifest/影片清单构建，128 队列 + DiscardPolicy）与 `FILM_IO_EXECUTOR`（256 队列 + DiscardPolicy）满时仍静默丢弃，见第 10 条。
 7. 目前共改 5 个源文件（阶段 0：`PacketSizeGuard.java`、`CompressedServerPacketCrusher.java`、`TogetherClientNetwork.java`；阶段 1/2：`TogetherServerNetwork.java` 及 `TogetherClientNetwork.java` 的增量），未改配置与构建脚本；构建按 `build`、`build12111`、`build1204` 分开逐条跑（串在一条命令里会触发 included build 路径冲突），三条均 BUILD SUCCESSFUL。本机沙箱下 `Files.isWritable` 恒为 false 会让 Loom 拆包失败，构建需在完整权限下运行。
-8. **协议号 3→4→5 只用于回执特性门**（4=上传 ACK，5=清单 ACK + 资产拒绝回执），服务端仍不比较协议（P1）。旧客户端（协议 3/4）连新服务端：4 的客户端不会收到 `c_asset_inventory_ack`，但也不会等它；新客户端连旧服务端则按 `serverProtocolVersion()` 走旧逻辑。Fabric 对未注册 channel 的具体行为（忽略/告警/断开）仍需实测，严格混版本支持仍属阶段 3 的双向版本比较。
+8. **协议号 3→4→5，阶段 3 已补双向比较**：`handleHello` 现在读客户端协议后与 `PROTOCOL_VERSION` 双向比较并记日志（更新/更旧的客户端各一条），`MIN_SUPPORTED_PROTOCOL=3`；仍不主动断开，因为 Fabric 对未注册 channel 的具体行为（忽略/告警/断开）尚未实测，硬踢的风险大于降级。新客户端连旧服务端仍按 `serverProtocolVersion()` 走旧逻辑（<5 不等回执）。严格的混版本双向保证仍需实测。
 9. **回执链路的时序假设需实测验证**：清单回执等待发生在后台线程（`BBSTogether-AssetInventory`，最长 20 s），上传回执等待发生在上传工作线程（最长 60 s），两者都不占用客户端主线程；阶段 2 已把长任务移出服务端主线程，回执延迟风险随之下降，但仍需实测。
-10. **阶段 2 新增的池同样是 DiscardPolicy**：`FILM_IO_EXECUTOR`（1 线程、256 队列）满时直接丢弃影片保存/录制任务，表现为「保存无声丢失」。默认并发下（每部影片的保存去抖 5 s、最多 256 排队）几乎不可达，但极端刷屏保存时需要改成「拒绝并回执」或「阻塞调用方」。同 `ASSET_IO_EXECUTOR` 一起在阶段 3 处理。
+10. **`ASSET_IO_EXECUTOR` / `FILM_IO_EXECUTOR` 仍是 DiscardPolicy**：`FILM_IO_EXECUTOR`（1 线程、256 队列）满时直接丢弃影片保存/录制任务，表现为「保存无声丢失」。默认并发下（每部影片的保存去抖 5 s、最多 256 排队）几乎不可达，但极端刷屏保存时需要改成「拒绝并回执」或「阻塞调用方」。阶段 3 未改这一点，留作后续。
 11. **合并锁的粒度是 film+branch**：同一影片的不同分支可并行保存，同一分支严格串行且顺序为「解析→合并→写盘→广播」。若未来引入多分支同时写同一 `Film` 实例的路径，需要重新检查 `FilmBranchStore.working` 的引用语义。
 12. **⚠️ 客户端改动丢失事件（2026-11-19 20:50:41）**：`src/client/java/mchorse/bbs_together/network/TogetherClientNetwork.java` 被回退为 HEAD 原始内容（205,309 B / 4271 行 / 全 CRLF，SHA-256 `9BC05C27DEC1C19FBE03156747F602B89B53CB2F7587DAA7FE1188986D73999C`），**阶段 0 的 `sendCrusher` 修复、阶段 1 的上传/清单 ACK 与重试、阶段 2 的 `FILM_PARSE_EXECUTOR`/`BoundedMap`/manifest 后台化全部丢失**。服务端 `TogetherServerNetwork.java`（212,349 B）与阶段 0 的 `PacketSizeGuard.java`/`CompressedServerPacketCrusher.java` 完好。发生时间与同时段的关键帧锁编辑重合，判断是编辑器按旧缓冲区覆盖保存所致。
     影响：该时间点之后的三次 `BUILD SUCCESSFUL` 复用了 20:49:43 的残留 class，**不能作为源码正确性的证据**；服务端此时会向不识别 `c_asset_upload_ack`/`c_asset_inventory_ack` 的客户端发包，功能上退化为「服务端单方面升级」。
     恢复判据：`scripts/check-client-restore.ps1` 应输出 `RESULT = PASS`，即 19 个符号（`uploadAcks`、`UploadAck`、`UploadRejectedException`、`handleAssetUploadAck`、`sendAssetUploadWithRetry`、`isTransientUploadCode`、`pendingReports`、`PendingReport`、`awaitReportAck`、`handleInventoryAck`、`handleAssetRejected`、`assetSendRetries`、`supportsInventoryAck`、`lastFilmInventoryAttempt`、`filmInventoryInFlight`、`FILM_PARSE_EXECUTOR`、`BoundedMap`、`LAST_SERVER_MANIFEST_MAX`、`applyAssetManifest`）全部存在，且 `PacketSizeGuard\.fits` 出现次数为 0。恢复后**必须重跑三个构建**并在干净构建上验证（先 `--stop`，必要时删除 `build*/classes` 对应目录），否则又会读到残留 class。
     **处置（2026-11-19 23:08）**：用户选择「重新实现阶段 1+2」，已按本表设计在新树上重写客户端全部改动；服务端阶段 1/2 亦为同批重写。三个目标 `build` / `build12111` / `build1204` 分开重跑均 BUILD SUCCESSFUL，且已核对产物 class 时间戳（`TogetherClientNetwork$UploadAck.class` 等生成于源码 mtime 之后）与 jar 内容，确认非残留 class 复用。`scripts/check-client-restore.ps1` 已在验证后删除。
+13. **「Dropped oversized chunk for s_film_save_sync (32903/33091 bytes)」根因（2026-11-19 23:15）**：该日志来自用户 22:11 的旧客户端。数值恰好略高于 32,767 而非远超，说明它不是分片后的单片，而是**整包前置检查**在分片前对 `film.toData()` 的整包长度做判定后整体丢弃（约 33 KB 的影片）。这正是阶段 0 本应删除、但在「阶段 1+2 重写」时客户端漏删的两处 `sendCrusher` 整包检查（`TogetherClientNetwork.java` 原 `:2201`/`:2213`）。**已补删**：两个 `sendCrusher` 重载现在只保留 `synchronized (crusher)`，不再做整包判定；整包大小由 `Compressed*PacketCrusher.sendBuffer` 对**分片后的单片**把关（单片 = 16 字节头 + ≤30,000 数据 = ≤30,016，远低于 32,767）。
+14. **「尾部元数据撑爆末片」这一同源隐患（2026-11-19 23:15）**：`PacketCrusher.send` 把 consumer 写的尾部元数据**整段追加到最后一帧**，因此当某通道把变长数据放在尾部时，末片 = 16 头 + 单片数据 + 尾部，可能超过 32,767 被丢弃。排查后：
+    - `s_undo_sync`（原 `TogetherClientNetwork.java:2967`）把整个撤销增量（多个 clip、含 `data`/`expected` 序列化）放在尾部、payload 为空 → **高概率触发**。**已修**：客户端把撤销布局序列化进**被分片的 payload**（`PacketByteBufs` 拼装后取 `byte[]`），尾部为空；服务端 `handleUndoSync` 改为从 `bytes`（payload）读取布局，`bytes == null` 直接返回。
+    - `s_commit_create`（原 `:3775`）尾部写用户提交信息，无长度上限。**已修**：客户端把 message 截断到服务端实际只读的 240 字符，避免与满片 payload 叠加越界。
+    - `s_film_data_sync` / `s_film_save_sync` / `s_master_done` / `s_recording_finished` / `s_coop_respond` / 资产上传：尾部只有 filmId/branch/path/若干 int（≤~200 B），数据体本身在 payload 中分片，安全。
+    结论：修复后不存在「单片 + 尾部 > 32,767」的可达路径；如需进一步兜底，可在 `send()` 前把任意变长数据一律走 payload，但当前各通道已满足。
+    上述修复后 `build`/`build12111`/`build1204` 均 BUILD SUCCESSFUL（产物 `together-link-2.1-1.20.1-1.20.4.jar` 871,406 B / `-1.21.11.jar` 876,248 B / `-1.20.4-verify.jar` 871,293 B，23:16）。
+15. **阶段 3 实施（2026-11-19 23:48）**：① 协议双向比较：`handleHello` 读客户端协议后与 `PROTOCOL_VERSION` 比较并记录日志（`MIN_SUPPORTED_PROTOCOL=3`，不硬踢）；② 增长型直发改走 `sendChunked`：`CLIENT_PLAYER_COLORS`、`CLIENT_CURSOR_POSITIONS`（3 处）、`CLIENT_FILM_SELECTIONS`、`CLIENT_REPLAY_SELECTIONS`、`CLIENT_REPLAY_FORM_LOCKS`、`CLIENT_FILM_SCREENS`、`CLIENT_ASSET_LOCKS`、`CLIENT_COMMIT_SELECTIONS`、`CLIENT_PLAYER_COMMIT_POSITIONS`，其余定长小包保持直发；③ `CompressedClientPacketCrusher.receive` 加固为与服务端同构（头部校验、`MAX_CHUNKS=8192`、`MAX_OPEN_TRANSFERS=32`、`MAX_TOTAL_BYTES=64 MiB`、初始缓冲封顶、60 s 超时、`{69}` 哨兵），`reset` 清表。三个目标 `build`/`build12111`/`build1204` 分开重跑均 BUILD SUCCESSFUL（`together-link-2.1-1.20.1-1.20.4.jar` 873,365 B / `-1.21.11.jar` 878,203 B / `-1.20.4-verify.jar` 873,250 B）。README（中/英）已同步本轮修复与 v2.1 更新日志。阶段 3 第 4 条（上传临时文件清理 / 非原子文件系统降级）仍未做。

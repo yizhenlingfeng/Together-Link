@@ -146,6 +146,10 @@ public class TogetherServerNetwork {
     /** Bumped to 4 when upload ACKs landed, 5 when inventory ACKs and asset-send reject
      *  receipts landed. Clients gate their receipt handling on this value. */
     public static final int PROTOCOL_VERSION = 5;
+    /** Oldest client protocol this server talks to. Below this the client predates basic
+     *  sync and the connection would only produce confusing partial behaviour; a warning is
+     *  logged at hello rather than a kick. */
+    public static final int MIN_SUPPORTED_PROTOCOL = 3;
 
     public static final Identifier SERVER_ASSET_RESYNC = Identifier.of("bbs_together", "s_asset_resync");
     public static final Identifier SERVER_FILM_SCREEN = Identifier.of("bbs_together", "s_film_screen");
@@ -478,6 +482,24 @@ public class TogetherServerNetwork {
         return playerCrushers.computeIfAbsent(player.getUuid(), k -> new CompressedServerPacketCrusher());
     }
 
+    /**
+     * Send a fully built payload through the crusher so it is chunked like every other sync
+     * packet. Direct {@link TogetherServerNetworking#send} goes straight to the encoder, so a
+     * packet whose size grows with the number of locks, selections or players (asset lock list,
+     * film/replay/commit selections, player colors, cursor snapshot) could exceed the encoder
+     * limit and drop the connection. Building a {@link PacketByteBuf} then handing its bytes to
+     * the crusher keeps those paths bounded. The caller keeps ownership of {@code buf} and must
+     * release it after this returns.
+     */
+    private static void sendChunked(ServerPlayerEntity player, Identifier channel, PacketByteBuf buf) {
+        if (player == null || buf == null) {
+            return;
+        }
+        byte[] payload = new byte[buf.readableBytes()];
+        buf.getBytes(buf.readerIndex(), payload);
+        TogetherServerNetwork.crusherFor(player).sendGuarded(player, channel, payload, null);
+    }
+
     public static void receiveCrusher(ServerPlayerEntity player, PacketByteBuf buf, IBufferReceiver receiver) {
         TogetherServerNetwork.crusherFor(player).receive(buf, receiver);
     }
@@ -734,7 +756,8 @@ public class TogetherServerNetwork {
                         outBuf.writeInt(entry.getValue().intValue());
                     }
                 }
-                TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_PLAYER_COLORS, (PacketByteBuf)outBuf);
+                TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_PLAYER_COLORS, outBuf);
+                outBuf.release();
             }
         });
     }
@@ -806,7 +829,8 @@ public class TogetherServerNetwork {
                     outBuf.writeInt(idx);
                 }
                 outBuf.writeInt(playheadTick);
-                TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
+                TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_CURSOR_POSITIONS, outBuf);
+                outBuf.release();
             }
         });
     }
@@ -824,7 +848,8 @@ public class TogetherServerNetwork {
             outBuf.writeFloat(0.0f);
             outBuf.writeInt(0);
             outBuf.writeInt(0);
-            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)outBuf);
+            TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_CURSOR_POSITIONS, outBuf);
+            outBuf.release();
         }
     }
 
@@ -863,7 +888,8 @@ public class TogetherServerNetwork {
                 buf.writeUuid(entry.getKey());
                 buf.writeString(entry.getValue());
             }
-            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_FILM_SELECTIONS, (PacketByteBuf)buf);
+            TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_FILM_SELECTIONS, buf);
+            buf.release();
         }
     }
 
@@ -937,7 +963,8 @@ public class TogetherServerNetwork {
                     buf.writeInt(entry.getValue().intValue());
                 }
             }
-            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_SELECTIONS, (PacketByteBuf)buf);
+            TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_REPLAY_SELECTIONS, buf);
+            buf.release();
         }
     }
 
@@ -974,7 +1001,8 @@ public class TogetherServerNetwork {
                 outBuf.writeUuid((UUID)entry.getKey());
                 outBuf.writeInt(((FormLockData)entry.getValue()).replayIndex);
             }
-            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_REPLAY_FORM_LOCKS, (PacketByteBuf)outBuf);
+            TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_REPLAY_FORM_LOCKS, outBuf);
+            outBuf.release();
         }
     }
 
@@ -1730,6 +1758,22 @@ public class TogetherServerNetwork {
     private static void handleHello(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
         int protocol = buf.isReadable(4) ? buf.readInt() : 0;
         playerProtocols.put(player.getUuid(), protocol);
+        /* Both ends now know each other's protocol. A client older than 2.1 speaks protocol 0-2
+         * and has no receipts at all; a client newer than this server depends on features this
+         * server cannot provide. Either way the connection still runs in the common subset, but
+         * we say so once so an admin can spot a mismatched deployment instead of chasing
+         * silently missing sync. We do NOT disconnect: mod clients are lenient about unknown
+         * channels, and a hard kick on every join is a worse failure than degraded receipts. */
+        if (protocol > PROTOCOL_VERSION) {
+            System.out.println("[BBSTogether] Player " + player.getName().getString()
+                + " speaks protocol " + protocol + ", newer than this server's " + PROTOCOL_VERSION
+                + "; running in the common subset (some sync features may be unavailable).");
+        }
+        else if (protocol < MIN_SUPPORTED_PROTOCOL) {
+            System.out.println("[BBSTogether] Player " + player.getName().getString()
+                + " speaks protocol " + protocol + ", older than the supported " + MIN_SUPPORTED_PROTOCOL
+                + "; sync receipts are disabled for this player.");
+        }
         PacketByteBuf limits = PacketByteBufs.create();
         limits.writeInt(TogetherSettings.getAssetSyncMaxMb());
         limits.writeInt(TogetherSettings.getCoopInviteSeconds());
@@ -2010,7 +2054,8 @@ public class TogetherServerNetwork {
                 buf.writeUuid(entry.getKey());
                 buf.writeString(entry.getValue());
             }
-            TogetherServerNetworking.send((ServerPlayerEntity)p, (Identifier)CLIENT_FILM_SCREENS, (PacketByteBuf)buf);
+            TogetherServerNetwork.sendChunked((ServerPlayerEntity)p, CLIENT_FILM_SCREENS, buf);
+            buf.release();
         }
     }
 
@@ -2403,7 +2448,8 @@ public class TogetherServerNetwork {
             outBuf.writeUuid((UUID)entry.getKey());
             outBuf.writeString(((CommitSelection)entry.getValue()).commitId);
         }
-        TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_COMMIT_SELECTIONS, (PacketByteBuf)outBuf);
+        TogetherServerNetwork.sendChunked((ServerPlayerEntity)recipient, CLIENT_COMMIT_SELECTIONS, outBuf);
+        outBuf.release();
     }
 
     private static void sendAllCommitSelections(MinecraftServer server, ServerPlayerEntity player) {
@@ -2441,7 +2487,8 @@ public class TogetherServerNetwork {
             outBuf.writeUuid((UUID)entry.getKey());
             outBuf.writeString((String)entry.getValue());
         }
-        TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_PLAYER_COMMIT_POSITIONS, (PacketByteBuf)outBuf);
+        TogetherServerNetwork.sendChunked((ServerPlayerEntity)recipient, CLIENT_PLAYER_COMMIT_POSITIONS, outBuf);
+        outBuf.release();
     }
 
     private static void sendAllPlayerCommitPositions(MinecraftServer server, ServerPlayerEntity recipient) {
@@ -3183,7 +3230,8 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.writeLockMembers(out, lock.whitelist);
             TogetherServerNetwork.writeLockMembers(out, lock.blacklist);
         }
-        TogetherServerNetworking.send(player, CLIENT_ASSET_LOCKS, out);
+        TogetherServerNetwork.sendChunked(player, CLIENT_ASSET_LOCKS, out);
+        out.release();
     }
 
     private static void writeLockMembers(PacketByteBuf out, Map<UUID, String> members) {
@@ -3813,26 +3861,32 @@ public class TogetherServerNetwork {
             return;
         }
         TogetherServerNetwork.crusherFor(player).receive(buf, (bytes, packetByteBuf) -> {
-            /* An empty crusher payload travels as a one-byte sentinel and arrives as null; the
-             * undo data lives in the trailing metadata, so a null payload is expected here. */
-            String filmId = packetByteBuf.readString();
-            int count = packetByteBuf.readInt();
+            /* The undo delta rides in the chunked payload (not the consumer tail) so it can be
+             * arbitrarily large without overflowing a single chunk. */
+            if (bytes == null) {
+                return;
+            }
+            PacketByteBuf data = PacketByteBufs.create();
+            data.writeBytes(bytes);
+            String filmId = data.readString();
+            int count = data.readInt();
             ArrayList<UndoChange> changes = new ArrayList<UndoChange>();
             for (int i = 0; i < count && i < 64; ++i) {
-                int pathSize = packetByteBuf.readInt();
+                int pathSize = data.readInt();
                 ArrayList<String> path = new ArrayList<String>();
                 for (int j = 0; j < pathSize; ++j) {
-                    path.add(packetByteBuf.readString());
+                    path.add(data.readString());
                 }
-                int dataLen = packetByteBuf.readInt();
-                byte[] data = new byte[dataLen];
-                packetByteBuf.readBytes(data);
-                int expectedLen = packetByteBuf.readInt();
+                int dataLen = data.readInt();
+                byte[] change = new byte[dataLen];
+                data.readBytes(change);
+                int expectedLen = data.readInt();
                 byte[] expected = new byte[expectedLen];
-                packetByteBuf.readBytes(expected);
-                changes.add(new UndoChange(path, data, expected));
+                data.readBytes(expected);
+                changes.add(new UndoChange(path, change, expected));
             }
-            String sentBranch = packetByteBuf.isReadable() ? packetByteBuf.readString(80) : "";
+            String sentBranch = data.isReadable() ? data.readString(80) : "";
+            data.release();
             server.execute(() -> {
                 String branch = TogetherServerNetwork.playerBranch(filmId, player);
                 if (!sentBranch.isEmpty() && !sentBranch.equals(branch)) {
@@ -4010,7 +4064,8 @@ public class TogetherServerNetwork {
                 }
                 out.writeInt(cursor.playheadTick);
             }
-            TogetherServerNetworking.send((ServerPlayerEntity)recipient, (Identifier)CLIENT_CURSOR_POSITIONS, (PacketByteBuf)out);
+            TogetherServerNetwork.sendChunked((ServerPlayerEntity)recipient, CLIENT_CURSOR_POSITIONS, out);
+            out.release();
         }
     }
 

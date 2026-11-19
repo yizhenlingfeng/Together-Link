@@ -77,6 +77,9 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Conflict arbitration | Uploads carry the server mtime as a CAS token to avoid overwriting someone else's changes |
 | Atomic writes | The server verifies SHA-1 locally and replaces files atomically via temp files |
 | Chunk isolation | Multi-chunk temp files are isolated per player, with their cumulative size verified |
+| Upload receipt | The server answers "ok" only after verifying and writing the file; a refusal carries a reason code, and the client retries transient codes or gives up on permanent ones |
+| Inventory receipt | Asset reports and film inventories carry an id and the server acknowledges them once applied; the client advances its snapshot only after the receipt, so a dropped report is sent again |
+| Send-rejection receipt | When the send queue is full or a transfer did not finish, the server answers with a reason instead of counting the file as delivered; the client retries a bounded number of times |
 | Size ceiling | Server and client share `asset_sync_max_mb` |
 | CDN (optional) | Read-only download fallback: CDN first, falling back to the server when verification fails |
 | Form categories | BBS user categories live in `assets/form_categories/` and are shared through the asset sync; an existing `settings/forms` folder is migrated on first launch |
@@ -219,7 +222,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The commit graph now has aligned captions and date separators: Commit, Message, Changes, Author, and Time columns line up, while Time, Author, and Changes collapse in that order as a column narrows. Commit hashes have higher contrast, HEAD can be located in one click, and long histories support ↑/↓ selection, Enter to open, and Ctrl+C to copy the short hash (Shift for the full hash).
 - The bottom details pane is now a resizable two-column view: the left side shows the full commit message, author and time, clip/keyframe stats, and changes grouped by section; the right side summarizes change counts. Right-clicking a node can copy the short/full hash or message, rename, reset, squash, check out its branch, hide the film, or set its color.
 - The clip context menu validates the clipboard first: non-BBS data counts as "nothing to paste" and the paste button is disabled (arbitrary text used to throw and crash the client).
-- A packet size check before sending: packets over 32767 bytes are skipped and logged instead of dropping the connection (a few channels could trigger "connection lost").
+- Asset sync now counts as complete only once the server confirms it: uploads, asset reports, film inventories and server sends all carry receipts, and the client advances its local state only after one arrives — no more "shown as done but the server never had it".
 
 #### Fixed
 
@@ -228,6 +231,16 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The coop recording end notice no longer shows raw keys (now resolved through the BBS language table).
 - Closing chat or inventory while recording no longer makes the coop room panel cover the world again.
 - The Film nodes tab no longer stacks nodes at the top and refuses to scroll on the first open after each launch; it lays out again as soon as the size is known and re-checks every frame.
+- Undo could rewrite locked keyframes: the rollback recorded the values from before the lock, so only the server's delta re-check noticed while the client still drew the rollback. The client now compares the locked ranges before undoing or redoing and refuses with "the undo would change locked keyframes"; the server judges undos more strictly and rejects and re-pushes the mirrored values if a lock record, keyframe or loop block would be rolled back.
+- Asset and film sync failed wholesale: the packet size check measured the whole payload, while an outgoing payload is split into 30,000-byte chunks before it hits the wire, so everything larger than 32,767 bytes (a whole film, an asset manifest, the commit graph, the behaviour list) was dropped before chunking and the sync failed silently. Only the individual chunk is checked now, so any size goes out correctly.
+- Empty-payload channels were rejected: undo sync, declining a coop invite and creating a commit for a film you are not viewing all send empty data, which the old check treated as invalid. Zero bytes now travel as the protocol's one-byte sentinel again.
+- Undo sync was lost with larger deltas: the undo data used to ride in the chunk tail, and the tail is appended whole to the last chunk, so a large delta pushed that chunk over the limit and the whole undo was dropped. The undo data now goes into the chunked payload and can be any size.
+- Oversized commit messages overflowed the last chunk: the message was written to the tail with no length limit and could push a nearly full payload over the limit. It is now capped to the length the server actually reads.
+- Saving a film stalled the server and viewers missed it: parsing, merging, serializing and writing to disk all move to a dedicated thread while the main thread only swaps references and broadcasts, and the save is persisted before it is broadcast, so a viewer never sees state the server has not stored.
+- The server lost ticks while transferring large files: asset slice reads moved to the sending thread and the payload parses for live editing and film saves moved off the network thread, so one big packet no longer occupies the event loop and delays or times out other players.
+- Joining with many films stuttered in proportion to the film count: the film inventory used to submit one main-thread task per film; it now collects everything in the background and broadcasts once.
+- Memory grew over long sessions: the server's film snapshot cache, asset hash cache and the client's server manifest snapshot all became bounded LRUs, so opening more films or rejoining repeatedly no longer grows the heap linearly.
+- The keyframe lock context menu in the clip editor showed a white block: the caption row used the coloured menu item overload, which paints a 22-pixel swatch into the icon column. It now uses the plain item and shows text only.
 
 #### Verified
 
@@ -235,10 +248,11 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 #### Compatibility
 
-- The network protocol stays at version 3. The coop room state packet only appends fields, so old and new versions can still connect.
+- The network protocol is now at version 5 (4: upload and inventory receipts; 5: asset report receipts and send-rejection receipts). The server still accepts older clients but only sends the new receipts to protocol 5, so an older client never waits for one and degrades to "sent means done". Neither direction mis-parses packets.
 - Category sync rides the normal asset channel and needs the `upload` permission to push.
 - Clip locks live in the clip's namespaced key; old data without it is treated as unlocked, no migration needed.
-- The commits graph, clipboard check and packet size check are client-only or send-side only; the protocol stays at version 3.
+- Keyframe locks live in the namespaced key of the replay or camera clip they belong to (`bbs_together:keyframe_lock`) and are saved with the film; old data is treated as unlocked, no migration needed.
+- The packet size check now inspects a single chunk (16-byte header plus at most 30,000 bytes of data) instead of the whole payload, so the protocol no longer depends on payload size.
 
 ### v2.0.4
 

@@ -8,7 +8,6 @@ import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
 import mchorse.bbs_mod.ui.utils.context.MenuIcon;
 import mchorse.bbs_mod.ui.utils.context.MenuVerb;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
-import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.locks.KeyframeLockClient;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -86,13 +85,16 @@ public final class KeyframeLockUi
         {
             /* BBS owns the menu width: without a row of its own the bar is as wide as its
              * buttons and a label would stick out past the right edge. One row is always
-             * written, so it reads as the menu's caption and not as a button that lies. */
+             * written, so it reads as the menu's caption and not as a button that lies.
+             * Plain action (no colour overload): the colour overload builds a
+             * ColorfulContextAction whose renderBackground paints a 22px swatch into the
+             * icon column, which showed up as a stray white block next to the caption. */
             KeyframeLockClient.Selection selection = KeyframeLockClient.selection(view);
             IKey status = selection.problem() == null
                 ? key("bbs_together.keyframe_lock.status.ready").format(selection.keys().size())
                 : key("bbs_together.keyframe_lock.status." + selection.problem());
 
-            menu.action(Icons.NONE, status, Colors.setA(Colors.WHITE, 0.65F), () ->
+            menu.action(Icons.NONE, status, () ->
             {
                 if (selection.ok())
                 {

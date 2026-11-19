@@ -2195,27 +2195,18 @@ public class TogetherClientNetwork {
     }
 
     /** crusher.send isn't thread-safe; every send goes through here so background upload
-     * threads can't interleave chunk streams with main-thread sends. A payload the server would
-     * refuse to decode is dropped here instead of taking the connection down. */
+     * threads can't interleave chunk streams with main-thread sends. There is no whole-payload
+     * size check on purpose: the crusher splits it into chunks of at most 30,000 bytes plus a
+     * 16-byte header, and {@link CompressedClientPacketCrusher#sendBuffer} screens each chunk
+     * against the encoder limit. Checking the whole payload here rejected every film or asset
+     * larger than 32,767 bytes even though the split already made it safe. */
     private static void sendCrusher(PlayerEntity player, Identifier id, byte[] payload, java.util.function.Consumer<PacketByteBuf> consumer) {
-        if (payload != null && !PacketSizeGuard.fits(payload.length)) {
-            PacketSizeGuard.warn(id, payload.length);
-
-            return;
-        }
-
         synchronized (crusher) {
             crusher.send(player, id, payload, consumer);
         }
     }
 
     private static void sendCrusher(PlayerEntity player, Identifier id, BaseType data, java.util.function.Consumer<PacketByteBuf> consumer) {
-        if (data != null && !PacketSizeGuard.fits(mchorse.bbs_mod.data.DataStorageUtils.writeToBytes(data).length)) {
-            PacketSizeGuard.warn(id, mchorse.bbs_mod.data.DataStorageUtils.writeToBytes(data).length);
-
-            return;
-        }
-
         synchronized (crusher) {
             crusher.send(player, id, data, consumer);
         }
@@ -2973,23 +2964,30 @@ public class TogetherClientNetwork {
         if (MinecraftClient.getInstance().player == null) {
             return;
         }
-        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_UNDO_SYNC, new byte[0], buf -> {
-            buf.writeString(filmId);
-            buf.writeInt(changes.size());
-            for (UndoChangePayload c : changes) {
-                buf.writeInt(c.path.size());
-                for (String s : c.path) {
-                    buf.writeString(s);
-                }
-                byte[] data = DataStorageUtils.writeToBytes(c.data);
-                buf.writeInt(data.length);
-                buf.writeBytes(data);
-                byte[] expected = DataStorageUtils.writeToBytes(c.expected);
-                buf.writeInt(expected.length);
-                buf.writeBytes(expected);
+        /* The undo delta can be far larger than one crusher chunk (many clips, big keyframe
+         * payloads). Serialize it into the chunked payload instead of the consumer tail: the
+         * crusher splits the payload across chunks, whereas the tail is appended whole to the
+         * last chunk and would push it over the encoder limit and drop the whole undo. */
+        PacketByteBuf layout = PacketByteBufs.create();
+        layout.writeString(filmId);
+        layout.writeInt(changes.size());
+        for (UndoChangePayload c : changes) {
+            layout.writeInt(c.path.size());
+            for (String s : c.path) {
+                layout.writeString(s);
             }
-            buf.writeString(filmBranch(filmId));
-        });
+            byte[] data = DataStorageUtils.writeToBytes(c.data);
+            layout.writeInt(data.length);
+            layout.writeBytes(data);
+            byte[] expected = DataStorageUtils.writeToBytes(c.expected);
+            layout.writeInt(expected.length);
+            layout.writeBytes(expected);
+        }
+        layout.writeString(filmBranch(filmId));
+        byte[] payload = new byte[layout.readableBytes()];
+        layout.getBytes(layout.readerIndex(), payload);
+        layout.release();
+        sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_UNDO_SYNC, payload, null);
     }
 
     public static boolean isReplayFormLocked(String filmId, int replayIndex) {
@@ -3776,7 +3774,10 @@ public class TogetherClientNetwork {
         byte[] payload = live ? DataStorageUtils.writeToBytes(film.toData()) : new byte[0];
         sendCrusher((PlayerEntity)MinecraftClient.getInstance().player, TogetherServerNetwork.SERVER_COMMIT_CREATE, payload, buf -> {
             buf.writeString(filmId);
-            buf.writeString(message == null ? "" : message);
+            /* Cap the message to what the server reads (240); an unbounded tail could otherwise
+             * overflow the last chunk together with a full payload. */
+            String msg = message == null ? "" : message;
+            buf.writeString(msg.length() > 240 ? msg.substring(0, 240) : msg);
             buf.writeString(branch == null ? "" : branch);
         });
     }
