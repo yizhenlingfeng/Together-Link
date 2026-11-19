@@ -495,6 +495,32 @@ public class UICommitGraph extends UIElement
         this.updateScroll();
     }
 
+    /**
+     * Recompute the body rect and the content height only when the size actually changed.
+     *
+     * The graph is normally laid out once when the panel is built, but the first render of a
+     * freshly opened viewer can happen before the dock has given the element its final size.
+     * Calling resize() there would hand the Scroll an empty body, so every row would be clamped
+     * into the wrong place until the user drags a splitter. Syncing the body from the live area
+     * each frame keeps the first frame correct; the scroll clamp only follows when the geometry
+     * really moved, so it cannot undo the user's scroll position.
+     */
+    private void syncGeometry()
+    {
+        int x = this.area.x;
+        int y = this.area.y + HEADER;
+        int w = this.area.w;
+        int h = Math.max(0, this.area.h - HEADER);
+
+        if (x == this.body.x && y == this.body.y && w == this.body.w && h == this.body.h)
+        {
+            return;
+        }
+
+        this.body.set(x, y, w, h);
+        this.updateScroll();
+    }
+
     private int columnWidth()
     {
         int columns = Math.max(1, this.columnOrder.size());
@@ -572,9 +598,12 @@ public class UICommitGraph extends UIElement
             this.rebuild();
         }
 
+        /* Follow the live area before placing rows: the first frame may arrive before the dock
+         * applied its final size, and a stale body would push every row into the wrong spot */
+        this.syncGeometry();
+
         /* Smooth scrolling and scrollbar dragging are advanced here, like every FS view */
         this.scroll.drag(context.mouseX, context.mouseY);
-        this.updateScroll();
         this.layoutNodes();
 
         int header = BBSSettings.color(BBSSettings.chromeSurface(), Colors.A50);
