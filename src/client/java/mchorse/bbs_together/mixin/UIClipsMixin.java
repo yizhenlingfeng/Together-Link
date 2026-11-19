@@ -3,11 +3,14 @@ package mchorse.bbs_together.mixin;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import mchorse.bbs_mod.data.DataToString;
 import mchorse.bbs_mod.data.types.MapType;
+import mchorse.bbs_mod.graphics.window.Window;
 import mchorse.bbs_mod.resources.Link;
 import mchorse.bbs_mod.ui.film.IUIClipsDelegate;
 import mchorse.bbs_mod.ui.film.UIClips;
 import mchorse.bbs_mod.ui.framework.UIContext;
+import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.utils.Area;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.clips.Clip;
@@ -86,6 +89,33 @@ public class UIClipsMixin {
             }
         }
         context.batcher.unclip(context);
+    }
+
+    /**
+     * Guards the clipboard used by the copy/paste icon bar. Right-clicking the timeline
+     * builds that bar through {@code UICopyPasteController.install()}, whose paste button
+     * asks the clipboard whether it holds a BBS clip ({@code Window.getClipboardMap()}).
+     * When the OS clipboard holds anything that is not BBS data syntax — a link, a crash
+     * report, plain prose — that call ends in {@code IllegalStateException} and the whole
+     * context menu (and the game) dies. BBS logs the error itself, so the exception never
+     * reaches us; instead we sniff the clipboard here and, if it is not a map, blank it for
+     * this menu build — paste is simply greyed out, everything else works.
+     */
+    @Inject(method={"createContextMenu"}, at={@At("HEAD")}, remap=false)
+    private void together$guardClipboardBeforeMenu(UIContext context, CallbackInfoReturnable<UIElement> cir)
+    {
+        String raw = Window.getClipboard();
+
+        if (raw == null || raw.trim().isEmpty())
+        {
+            return;
+        }
+
+        if (!(DataToString.fromString(raw) instanceof MapType))
+        {
+            /* Not BBS data — hide it from the paste probe for this menu build. */
+            Window.setClipboard("");
+        }
     }
 
     /**
