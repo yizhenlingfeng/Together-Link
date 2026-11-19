@@ -1,11 +1,13 @@
 package mchorse.bbs_together.ui.commits;
 
+import mchorse.bbs_mod.BBSSettings;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.buttons.UIButton;
 import mchorse.bbs_mod.ui.framework.elements.input.text.UITextbox;
+import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.network.TogetherEditSyncQueue;
@@ -42,12 +44,12 @@ public class UICommitActions extends UIElement
         this.branchCheckout = new UIButton(L10n.lang("bbs_together.commits.branch_checkout"), (b) -> this.checkout());
         this.revert = new UIButton(L10n.lang("bbs_together.commits.revert_selected"), (b) -> this.revert());
 
-        this.message.relative(this).x(4).y(4).w(1F, -8).h(18);
-        this.commit.relative(this).x(4).y(26).w(1F, -8).h(18);
-        this.branch.relative(this).x(4).y(48).w(1F, -8).h(18);
-        this.branchCreate.relative(this).x(4).y(70).w(0.5F, -6).h(18);
-        this.branchCheckout.relative(this).x(0.5F).y(70).w(0.5F, -6).h(18);
-        this.revert.relative(this).x(4).y(92).w(1F, -8).h(18);
+        this.message.relative(this).x(8).y(8).w(1F, -16).h(18);
+        this.commit.relative(this).x(8).y(32).w(1F, -16).h(18);
+        this.branch.relative(this).x(8).y(60).w(1F, -16).h(18);
+        this.branchCreate.relative(this).x(8).y(84).w(0.5F, -12).h(18);
+        this.branchCheckout.relative(this).x(0.5F).y(84).w(0.5F, -12).h(18);
+        this.revert.relative(this).x(8).y(108).w(1F, -16).h(18);
 
         this.add(this.message, this.commit, this.branch, this.branchCreate, this.branchCheckout, this.revert);
 
@@ -70,6 +72,15 @@ public class UICommitActions extends UIElement
         }
 
         this.update();
+    }
+
+    @Override
+    public void render(UIContext context)
+    {
+        context.batcher.box(this.area.x, this.area.y, this.area.ex(), this.area.ey(), BBSSettings.color(BBSSettings.baseSurface(), Colors.A50));
+        context.batcher.box(this.area.x, this.area.y, this.area.ex(), this.area.y + 1, BBSSettings.dividerColor());
+
+        super.render(context);
     }
 
     public void update()

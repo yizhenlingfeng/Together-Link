@@ -1,6 +1,8 @@
 package mchorse.bbs_together.ui.commits;
 
 import mchorse.bbs_mod.BBSSettings;
+import mchorse.bbs_mod.data.types.MapType;
+import mchorse.bbs_mod.graphics.window.Window;
 import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
@@ -14,9 +16,12 @@ import mchorse.bbs_together.commits.FilmCommitStore;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.ui.UIPlayerFaceRenderer;
 import net.minecraft.client.MinecraftClient;
+import org.lwjgl.glfw.GLFW;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -36,12 +41,22 @@ import java.util.UUID;
  */
 public class UICommitGraph extends UIElement
 {
-    public static final int HEADER = 20;
-    public static final int ROW_H = 18;
+    public static final int HEADER = 32;
+    public static final int SUBHEADER = 18;
+    public static final int ROW_H = 22;
     public static final int NODE = 9;
     /** Horizontal distance between two branch lanes. */
     private static final int LANE = 14;
-    private static final int MIN_COLUMN = 220;
+    private static final int MIN_COLUMN = 240;
+    /** The fixed date gutter left of every film column. */
+    private static final int DATE_W = 52;
+    /** Fixed metadata columns, from left to right. */
+    private static final int HASH_W = 54;
+    private static final int STATS_W = 76;
+    private static final int AUTHOR_W = 64;
+    private static final int TIME_W = 40;
+    private static final SimpleDateFormat DAY_FORMAT = new SimpleDateFormat("MM-dd");
+    private static final SimpleDateFormat TIME_FORMAT = new SimpleDateFormat("HH:mm");
     /** Edges never take the colour of a commit: they stay a quiet dark gray underneath. */
     private static final int LINE_COLOR = 0xff4a4a4a;
     /** Edges of commits the film no longer sits on: quieter still. */
@@ -75,6 +90,8 @@ public class UICommitGraph extends UIElement
     private final Map<String, Long> requested = new HashMap<String, Long>();
     private final List<String> columnOrder = new ArrayList<String>();
     private final List<Node> nodes = new ArrayList<Node>();
+    /** Same nodes ordered by row, oldest first: used for date separators and keyboard navigation. */
+    private final List<Node> rows = new ArrayList<Node>();
     /** Widest lane offset (from the centered main lane) of each film, for layout/text offsets. */
     private final Map<String, Integer> maxAbsLanes = new HashMap<String, Integer>();
 
@@ -197,6 +214,68 @@ public class UICommitGraph extends UIElement
         }
     }
 
+    /** Jump to the commit the film is currently sitting at: the branch tip, centred if possible. */
+    public void scrollToHead()
+    {
+        String filmId = this.actionFilm();
+
+        if (filmId == null || filmId.isEmpty())
+        {
+            return;
+        }
+
+        String head = this.currentCommit(filmId);
+        Node target = null;
+
+        for (Node node : this.rows)
+        {
+            if (filmId.equals(node.filmId) && node.commit.id.equals(head))
+            {
+                target = node;
+
+                break;
+            }
+        }
+
+        if (target == null)
+        {
+            for (Node node : this.rows)
+            {
+                if (filmId.equals(node.filmId))
+                {
+                    target = node;
+                }
+            }
+        }
+
+        if (target != null)
+        {
+            this.select(target);
+            this.scroll.setScroll(target.row * ROW_H - (this.body.h - ROW_H) / 2);
+            this.scroll.clamp();
+            this.pinned = false;
+        }
+    }
+
+    /** Keep the selected row inside the viewport when moving with the keyboard. */
+    private void ensureVisible(Node node)
+    {
+        int top = node.row * ROW_H;
+        int bottom = top + ROW_H;
+        double scroll = this.scroll.getScroll();
+
+        if (top < scroll)
+        {
+            this.scroll.setScroll(top);
+        }
+        else if (bottom > scroll + this.body.h)
+        {
+            this.scroll.setScroll(bottom - this.body.h);
+        }
+
+        this.scroll.clamp();
+    }
+
     /** Rebuild the flattened node list from the cache; called when the cache version changed. */
     public void rebuild()
     {
@@ -208,6 +287,7 @@ public class UICommitGraph extends UIElement
         boolean hadSelection = this.selected != null;
 
         this.nodes.clear();
+        this.rows.clear();
         this.columnOrder.clear();
 
         if (this.solo != null)
@@ -305,6 +385,8 @@ public class UICommitGraph extends UIElement
         }
 
         this.nodes.addAll(all);
+        this.rows.addAll(all);
+        this.rows.sort((a, b) -> Integer.compare(a.row, b.row));
 
         this.maxAbsLanes.clear();
 
@@ -504,9 +586,9 @@ public class UICommitGraph extends UIElement
          * h(float, int) is (fraction, offset), so using it for the height would add the header
          * as an offset instead of subtracting it, and the body would spill past the panel. */
         int x = this.area.x;
-        int y = this.area.y + HEADER;
+        int y = this.area.y + HEADER + SUBHEADER;
         int w = this.area.w;
-        int h = Math.max(0, this.area.h - HEADER);
+        int h = Math.max(0, this.area.h - HEADER - SUBHEADER);
 
         boolean moved = x != this.body.x || y != this.body.y || w != this.body.w || h != this.body.h;
         int want = this.nodes.size() * ROW_H + 8;
@@ -541,13 +623,14 @@ public class UICommitGraph extends UIElement
     private int columnWidth()
     {
         int columns = Math.max(1, this.columnOrder.size());
+        int available = Math.max(MIN_COLUMN, this.area.w - DATE_W);
 
-        return Math.max(MIN_COLUMN, this.area.w / columns);
+        return Math.max(MIN_COLUMN, available / columns);
     }
 
     private int columnX(int column)
     {
-        return this.area.x + 10 + column * this.columnWidth();
+        return this.area.x + DATE_W + column * this.columnWidth();
     }
 
     /** X of lane 0 (the main branch): the centre of the lane band, not the centre of the page. */
@@ -573,10 +656,69 @@ public class UICommitGraph extends UIElement
         return lane == null ? 0 : lane;
     }
 
-    /** Where the commit text of a node starts: right of the film's widest lane use. */
+    /** Where the hash column of a film starts: right of the film's widest lane use. */
+    private int textX(int column, String filmId)
+    {
+        return this.laneBase(column, filmId) + (this.maxAbsLane(filmId) + 1) * LANE + 8;
+    }
+
     private int textX(Node node)
     {
-        return this.laneBase(node.column, node.filmId) + (this.maxAbsLane(node.filmId) + 1) * LANE + 10;
+        return this.textX(node.column, node.filmId);
+    }
+
+    /**
+     * X positions shared by a row and its header, in this order: hash, message, message limit,
+     * changes, author, time and watchers. A negative value means that column is hidden because
+     * the film column is too narrow: time first, then author, then changes.
+     */
+    private int[] columns(int column, String filmId, int avatarSpace)
+    {
+        int width = this.columnWidth();
+        int right = this.columnX(column) + width - 10;
+        int contentRight = right;
+        int watchersX = right;
+        int timeX = -1;
+        int authorX = -1;
+        int statsX = -1;
+
+        if (avatarSpace > 0 && width >= 300)
+        {
+            watchersX = right - avatarSpace + 6;
+            contentRight = watchersX - 8;
+        }
+
+        if (width >= 450)
+        {
+            timeX = contentRight - TIME_W;
+            contentRight = timeX;
+        }
+
+        if (width >= 400)
+        {
+            authorX = contentRight - AUTHOR_W;
+            contentRight = authorX;
+        }
+
+        if (width >= 330)
+        {
+            statsX = contentRight - STATS_W;
+            contentRight = statsX;
+        }
+
+        int hashX = this.textX(column, filmId);
+
+        return new int[] {hashX, hashX + HASH_W, Math.max(hashX + HASH_W + 12, contentRight - 8), statsX, authorX, timeX, watchersX};
+    }
+
+    private int[] rowColumns(Node node, int avatarSpace)
+    {
+        return this.columns(node.column, node.filmId, avatarSpace);
+    }
+
+    private int[] headerColumns(int column, String filmId)
+    {
+        return this.columns(column, filmId, 0);
     }
 
     private int rowTop(int row)
@@ -623,26 +765,14 @@ public class UICommitGraph extends UIElement
         this.scroll.drag(context.mouseX, context.mouseY);
         this.layoutNodes();
 
-        int header = BBSSettings.color(BBSSettings.chromeSurface(), Colors.A50);
+        int header = BBSSettings.chromeSurface();
 
         context.batcher.box(this.area.x, this.area.y, this.area.ex(), this.area.y + HEADER, header);
+        context.batcher.box(this.area.x, this.area.y + HEADER, this.area.ex(), this.area.y + HEADER + SUBHEADER, BBSSettings.deepSurface());
         context.batcher.box(this.area.x, this.area.y + HEADER - 1, this.area.ex(), this.area.y + HEADER, BBSSettings.dividerColor());
+        context.batcher.box(this.area.x + DATE_W - 1, this.area.y, this.area.x + DATE_W, this.area.ey(), BBSSettings.dividerColor());
 
-        for (int i = 0; i < this.columnOrder.size(); i++)
-        {
-            String filmId = this.columnOrder.get(i);
-            String branch = this.headBranch(filmId);
-            String name = this.shortName(filmId);
-            int x = this.columnX(i);
-            int y = this.area.y + (HEADER - context.batcher.getFont().getHeight()) / 2;
-
-            context.batcher.textShadow(name, x, y, RowStyle.textColor(true));
-
-            if (!branch.isEmpty())
-            {
-                context.batcher.textShadow("· " + branch, x + context.batcher.getFont().getWidth(name) + 5, y, Colors.GRAY);
-            }
-        }
+        this.renderHeaders(context);
 
         /* Rows are clipped to the body: the header carries the film labels, so a half drawn
          * node sitting on top of it would look like a bug */
@@ -668,18 +798,87 @@ public class UICommitGraph extends UIElement
         super.render(context);
     }
 
+    /** Film names and fixed column captions above the scrolling body. */
+    private void renderHeaders(UIContext context)
+    {
+        int fontHeight = context.batcher.getFont().getHeight();
+        String submitLabel = L10n.lang("bbs_together.commits.col_submit").get();
+        String messageLabel = L10n.lang("bbs_together.commits.col_message").get();
+        String changesLabel = L10n.lang("bbs_together.commits.col_changes").get();
+        String authorLabel = L10n.lang("bbs_together.commits.col_author").get();
+        String timeLabel = L10n.lang("bbs_together.commits.col_time").get();
+
+        for (int i = 0; i < this.columnOrder.size(); i++)
+        {
+            String filmId = this.columnOrder.get(i);
+            String branch = this.headBranch(filmId);
+            String name = this.shortName(filmId);
+            int x = this.columnX(i);
+            int width = this.columnWidth();
+            int titleY = this.area.y + (HEADER - fontHeight) / 2;
+            int captionY = this.area.y + HEADER + (SUBHEADER - fontHeight) / 2;
+            int nameX = x + 8;
+
+            if (i > 0)
+            {
+                context.batcher.box(x - 1, this.area.y, x, this.area.ey(), BBSSettings.dividerColor());
+            }
+
+            context.batcher.textShadow(name, nameX, titleY, RowStyle.textColor(true));
+
+            if (!branch.isEmpty())
+            {
+                int branchX = x + width - 10 - context.batcher.getFont().getWidth(branch);
+
+                if (branchX > nameX + context.batcher.getFont().getWidth(name) + 8)
+                {
+                    context.batcher.textShadow(branch, branchX, titleY, Colors.GRAY);
+                }
+            }
+
+            int[] columns = this.headerColumns(i, filmId);
+
+            this.headerLabel(context, submitLabel, columns[0], captionY, columns[2]);
+            this.headerLabel(context, messageLabel, columns[1], captionY, columns[2]);
+            this.headerLabel(context, changesLabel, columns[3], captionY, columns[2]);
+            this.headerLabel(context, authorLabel, columns[4], captionY, columns[2]);
+            this.headerLabel(context, timeLabel, columns[5], captionY, columns[2]);
+        }
+    }
+
+    private void headerLabel(UIContext context, String label, int x, int y, int limit)
+    {
+        if (x < 0 || x + context.batcher.getFont().getWidth(label) > limit + 8)
+        {
+            return;
+        }
+
+        context.batcher.text(label, x, y, Colors.GRAY);
+    }
+
     /** Row washes, the same mark FS puts under every list row: hover, pick and its bar. */
     private void renderRows(UIContext context)
     {
         int accent = BBSSettings.primaryColor();
+        int fontHeight = context.batcher.getFont().getHeight();
+        String lastDay = null;
 
-        for (Node node : this.nodes)
+        for (Node node : this.rows)
         {
             int top = this.rowTop(node.row);
 
             if (top + ROW_H <= this.body.y || top >= this.body.ey())
             {
                 continue;
+            }
+
+            String day = DAY_FORMAT.format(new Date(node.commit.time));
+
+            if (!day.equals(lastDay))
+            {
+                lastDay = day;
+                context.batcher.box(this.body.x, top, this.body.ex(), top + 1, BBSSettings.dividerColor());
+                context.batcher.text(day, this.body.x + 6, top + (ROW_H - fontHeight) / 2, Colors.GRAY);
             }
 
             int x = this.columnX(node.column) - 8;
@@ -805,6 +1004,7 @@ public class UICommitGraph extends UIElement
     private void renderNodes(UIContext context)
     {
         int accent = BBSSettings.primaryColor();
+        int fontHeight = context.batcher.getFont().getHeight();
 
         for (Node node : this.nodes)
         {
@@ -847,29 +1047,84 @@ public class UICommitGraph extends UIElement
 
             List<UUID> watchers = this.watchers(node);
             int avatarSpace = this.avatarSpace(watchers);
-            int rowRight = this.columnX(node.column) + this.columnWidth() - 12;
-            int textRight = rowRight - 4 - avatarSpace;
-            String text = this.fit(context, node.commit.shortId() + "  " + CommitText.display(node.commit.message), Math.max(24, textRight - this.textX(node)));
-            int textY = node.y - context.batcher.getFont().getHeight() / 2;
+            int[] columns = this.rowColumns(node, avatarSpace);
+            int hashX = columns[0];
+            int messageX = columns[1];
+            int messageRight = columns[2];
+            int statsX = columns[3];
+            int authorX = columns[4];
+            int timeX = columns[5];
+            int watchersX = columns[6];
+            int textY = node.y - fontHeight / 2;
+            int textColor = node.active ? RowStyle.textColor(lit) : RowStyle.textColor(lit, Colors.GRAY);
+            int hashColor = node.active ? RowStyle.textColor(lit, Colors.LIGHTEST_GRAY) : RowStyle.textColor(lit, Colors.GRAY);
 
-            context.batcher.textShadow(text, this.textX(node), textY, node.active ? RowStyle.textColor(lit) : RowStyle.textColor(lit, Colors.GRAY));
+            context.batcher.textShadow(node.commit.shortId(), hashX, textY, hashColor);
+
+            String message = this.fit(context, CommitText.display(node.commit.message), Math.max(24, messageRight - messageX));
+            context.batcher.textShadow(message, messageX, textY, textColor);
 
             /* Branch name next to the commit that is its head, like git's decoration */
             if (node.tip)
             {
                 String branch = node.commit.branch;
-                int tagX = this.textX(node) + context.batcher.getFont().getWidth(text) + 8;
+                int tagX = messageX + context.batcher.getFont().getWidth(message) + 8;
                 int tagWidth = 10 + context.batcher.getFont().getWidth(branch);
 
-                if (tagX + tagWidth <= rowRight - 4 - avatarSpace)
+                if (tagX + tagWidth <= messageRight + 8)
                 {
                     context.batcher.box(tagX, node.y - 1, tagX + 3, node.y + 2, node.active ? accent : Colors.GRAY);
                     context.batcher.textShadow(branch, tagX + 7, textY, node.active ? Colors.GRAY : RowStyle.textColor(false, Colors.GRAY));
                 }
             }
 
-            this.renderWatchers(context, node, rowTop, watchers);
+            this.renderStats(context, node, statsX, textY);
+
+            if (authorX >= 0)
+            {
+                String author = node.commit.authorName == null || node.commit.authorName.isEmpty() ? "?" : node.commit.authorName;
+                author = this.fit(context, author, AUTHOR_W - 6);
+
+                context.batcher.text(author, authorX, textY, RowStyle.textColor(lit, Colors.GRAY));
+            }
+
+            if (timeX >= 0)
+            {
+                context.batcher.text(TIME_FORMAT.format(new Date(node.commit.time)), timeX, textY, Colors.GRAY);
+            }
+
+            this.renderWatchers(context, watchers, rowTop, watchersX);
         }
+    }
+
+    /** +added -removed ~modified, the same language the info panel uses. */
+    private void renderStats(UIContext context, Node node, int x, int y)
+    {
+        if (x < 0)
+        {
+            return;
+        }
+
+        MapType stats = node.commit.stats;
+        MapType clips = stats == null ? null : stats.getMap("clips", null);
+
+        if (clips == null)
+        {
+            return;
+        }
+
+        int cursor = x;
+
+        cursor = this.statPart(context, "+" + clips.getInt("added"), cursor, y, Colors.POSITIVE);
+        cursor = this.statPart(context, "-" + clips.getInt("removed"), cursor + 4, y, Colors.NEGATIVE);
+        this.statPart(context, "~" + clips.getInt("modified"), cursor + 4, y, Colors.LIGHTER_GRAY);
+    }
+
+    private int statPart(UIContext context, String text, int x, int y, int color)
+    {
+        context.batcher.text(text, x, y, color);
+
+        return x + context.batcher.getFont().getWidth(text);
     }
 
     /** Commit avatars, like the server behavior list: everyone looking at this commit. */
@@ -948,7 +1203,7 @@ public class UICommitGraph extends UIElement
         return count == 0 ? 0 : count * WATCHER_SIZE + (count - 1) * WATCHER_GAP + 6;
     }
 
-    private void renderWatchers(UIContext context, Node node, int rowTop, List<UUID> watchers)
+    private void renderWatchers(UIContext context, List<UUID> watchers, int rowTop, int x)
     {
         int count = Math.min(watchers.size(), WATCHER_MAX);
 
@@ -957,10 +1212,6 @@ public class UICommitGraph extends UIElement
             return;
         }
 
-        int total = count * WATCHER_SIZE + (count - 1) * WATCHER_GAP;
-        /* Same right edge as the row background (see renderRows), so faces never sit on
-         * top of the scrollbar. */
-        int x = this.columnX(node.column) + this.columnWidth() - 12 - 4 - total;
         int y = rowTop + (ROW_H - WATCHER_SIZE) / 2;
 
         for (int i = 0; i < count; i ++)
@@ -1102,6 +1353,52 @@ public class UICommitGraph extends UIElement
         }
 
         return text + "...";
+    }
+
+    @Override
+    protected boolean subKeyPressed(UIContext context)
+    {
+        if (context.isPressed(GLFW.GLFW_KEY_UP) || context.isPressed(GLFW.GLFW_KEY_DOWN))
+        {
+            if (this.rows.isEmpty())
+            {
+                return true;
+            }
+
+            int index = this.selected == null ? this.rows.size() - 1 : this.rows.indexOf(this.selected);
+
+            if (context.isPressed(GLFW.GLFW_KEY_UP))
+            {
+                index --;
+            }
+            else
+            {
+                index ++;
+            }
+
+            index = Math.max(0, Math.min(this.rows.size() - 1, index));
+
+            this.select(this.rows.get(index));
+            this.ensureVisible(this.rows.get(index));
+
+            return true;
+        }
+
+        if (context.isPressed(GLFW.GLFW_KEY_C) && Window.isCtrlPressed() && this.selected != null)
+        {
+            Window.setClipboard(Window.isShiftPressed() ? this.selected.commit.id : this.selected.commit.shortId());
+
+            return true;
+        }
+
+        if (context.isPressed(GLFW.GLFW_KEY_ENTER) && this.selected != null)
+        {
+            this.select(this.selected);
+
+            return true;
+        }
+
+        return super.subKeyPressed(context);
     }
 
     @Override

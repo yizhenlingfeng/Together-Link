@@ -3,6 +3,9 @@ package mchorse.bbs_together.ui.commits;
 import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_together.commits.FilmCommit;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
 /**
  * Expands server-generated, language-neutral commit messages for display.
  *
@@ -60,6 +63,35 @@ public final class CommitText
         }
 
         return message;
+    }
+
+    /** A compact relative time for list rows: minutes and hours when fresh, a date after a week. */
+    public static String relativeTime(long time)
+    {
+        long now = System.currentTimeMillis();
+        long diff = Math.max(0L, now - time);
+
+        if (diff < 60_000L)
+        {
+            return L10n.lang("bbs_together.commits.time_now").get();
+        }
+
+        if (diff < 3_600_000L)
+        {
+            return L10n.lang("bbs_together.commits.time_minutes").format(diff / 60_000L).get();
+        }
+
+        if (diff < 86_400_000L)
+        {
+            return L10n.lang("bbs_together.commits.time_hours").format(diff / 3_600_000L).get();
+        }
+
+        if (diff < 7L * 86_400_000L)
+        {
+            return L10n.lang("bbs_together.commits.time_days").format(diff / 86_400_000L).get();
+        }
+
+        return new SimpleDateFormat("MM-dd").format(new Date(time));
     }
 
     private static void append(StringBuilder builder, String key, String count)

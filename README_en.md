@@ -43,12 +43,14 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 |---|---|
 | Film sync | Film selection, screen state, and keyframe/track edits are pushed in real time |
 | List sync | Every client refreshes after a film is added, renamed, or deleted |
+| Film list | The left column shows each film's commit count, current branch, and latest commit time, with search, All/Shown/Current filters, and sorting by name, latest commit, or commit count |
 | Commits | Each film keeps a commit graph, snapshots, and diffs, up to 300 entries by default |
 | Save as commit | Saving appends the current edits as a commit on the player's current branch; periodic saves only refresh the working copy |
 | Branch isolation | Each player can work on a separate branch without overwriting others |
 | Reset / squash | Reset that either keeps or deletes later commits, plus squashing consecutive commits |
-| Commit details | Shows the commit message, author, time, clip/keyframe stats, and the diff |
-| Commit graph | One column per film, ordered by time, with connections clipped outside the viewport |
+| Commit details | The bottom pane shows the full message, author and time, clip/keyframe stats, and a change summary; drag its top edge to resize |
+| Commit graph | One column per film, ordered by time, with aligned Commit, Message, Changes, Author, and Time captions; rows are grouped by date, secondary columns collapse in narrow layouts, and connections outside the viewport are clipped |
+| Node actions | Right-click a commit to copy its short or full hash or message, rename, reset, squash, check out its branch, locate HEAD, hide the film, or set its color; use ↑/↓ to move, Enter to open, and Ctrl+C to copy the short hash (Shift for the full hash) |
 | Commit colors | Stored and broadcast by the server, so every player sees the same colors |
 
 ### Permissions and asset locks
@@ -213,7 +215,9 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Form category folders are now synced as server assets (stored under `form_categories/`, reusing the existing chunked transfer and permissions).
 - Camera clips can be locked individually: a lock icon appears after ≡ in the clip context menu, setting the clip to nobody / whitelist / blacklist, or removing the lock. The lock lives in the clip's own data (`bbs_together:clip_lock`), travels with the film and through copy, paste and undo; the server matches clips by the lock's random ID.
 - The lock is drawn on the timeline: a lock badge on the bar; without permission the panel greys out, "Keyframes → Edit" shows as a lock button and cannot be clicked, and dragging, cutting, removing, shifting to cursor and double-click-to-open all stop working. The lock is broadcast to same-branch editors and written to the server copy; the server re-checks the full snapshot and the camera sync and reverts unauthorized changes. Creating or removing a lock requires level 2.
-- New film commits graph tab (`影片节点`): a scrollable branch/commit node graph; click a node to view, rename, revert, squash or switch branch; auto-refreshes and follows the bottom.
+- Reworked the "Film nodes" tab layout and palette: the top bar, film list, commit graph, and details pane now sit on distinct surface levels. The wider film list shows commit count, current branch, and latest commit time, with search, All/Shown/Current filters, and sorting by name, latest commit, or commit count.
+- The commit graph now has aligned captions and date separators: Commit, Message, Changes, Author, and Time columns line up, while Time, Author, and Changes collapse in that order as a column narrows. Commit hashes have higher contrast, HEAD can be located in one click, and long histories support ↑/↓ selection, Enter to open, and Ctrl+C to copy the short hash (Shift for the full hash).
+- The bottom details pane is now a resizable two-column view: the left side shows the full commit message, author and time, clip/keyframe stats, and changes grouped by section; the right side summarizes change counts. Right-clicking a node can copy the short/full hash or message, rename, reset, squash, check out its branch, hide the film, or set its color.
 - The clip context menu validates the clipboard first: non-BBS data counts as "nothing to paste" and the paste button is disabled (arbitrary text used to throw and crash the client).
 - A packet size check before sending: packets over 32767 bytes are skipped and logged instead of dropping the connection (a few channels could trigger "connection lost").
 
@@ -223,7 +227,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Changing the replay count then committing no longer desyncs or wipes replays: the throwing `ValueStableList.sync()` call is removed and replays are rebuilt by payload id; a payload check skips mismatched lists instead of clearing the whole table.
 - The coop recording end notice no longer shows raw keys (now resolved through the BBS language table).
 - Closing chat or inventory while recording no longer makes the coop room panel cover the world again.
-- The `影片节点` tab no longer stacks nodes at the top and refuses to scroll on the first open after each launch; it re-lays out as soon as the size is known and re-checks every frame.
+- The Film nodes tab no longer stacks nodes at the top and refuses to scroll on the first open after each launch; it lays out again as soon as the size is known and re-checks every frame.
 
 #### Verified
 
