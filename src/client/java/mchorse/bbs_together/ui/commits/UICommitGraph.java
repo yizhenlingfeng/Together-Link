@@ -488,30 +488,28 @@ public class UICommitGraph extends UIElement
     {
         super.resize();
 
-        /* The body doubles as the scroll view's area (Scroll took this same instance in its
-         * constructor), so Scroll.clamp() and the scrollbar always measure against it. Any
-         * value written here before the first layout is empty and simply keeps the view at
-         * zero, which is safe. */
-        this.body.set(this.area.x, this.area.y + HEADER, this.area.w, Math.max(0, this.area.h - HEADER));
-
-        this.syncGeometry();
+        /* Lay out the body straight away so the very first render already has a real viewport
+         * to measure rows against (the dock may call resize() before the first frame). */
+        this.layoutViewport();
     }
 
     /**
-     * Recompute the body rect and the content height only when something actually changed.
+     * Lay out the body rect and the row content height, by count, before placing rows.
      *
-     * Two things can go stale while the viewer is open:
-     * <ul>
-     *   <li>the body rect, if the first frame is drawn before the dock applied the final size,
-     *       which used to clamp every row into the wrong place until a splitter was dragged;</li>
-     *   <li>the content height, if the node list grew (a new commit/clip arrived) without the
-     *       area moving, which left the last rows past the scroll range and cut off by the clip.</li>
-     * </ul>
-     * Syncing both from the live state each frame keeps the first frame correct and cannot undo
-     * the user's scroll position, because the scroll is only re-clamped when one of them moved.
+     * This has to run unconditionally on every render: the first frame can arrive before the
+     * dock hands the element its final size, and a commit index that arrives a frame later
+     * grows the node list without resizing the area. Both used to leave the scroll view with a
+     * zero body and a stale content height, which pinned every row to the top and made the
+     * graph impossible to scroll until the user dragged a splitter. It is cheap (two compares
+     * and a multiply), so recomputing rather than caching is the safe choice. The scroll is
+     * only re-clamped when the body or the content height really changed, so it cannot undo a
+     * scroll position the user set.
      */
-    private void syncGeometry()
+    private void layoutViewport()
     {
+        /* Take the height out on the width line, not the height line: the two-argument form
+         * h(float, int) is (fraction, offset), so using it for the height would add the header
+         * as an offset instead of subtracting it, and the body would spill past the panel. */
         int x = this.area.x;
         int y = this.area.y + HEADER;
         int w = this.area.w;
@@ -520,14 +518,17 @@ public class UICommitGraph extends UIElement
         boolean moved = x != this.body.x || y != this.body.y || w != this.body.w || h != this.body.h;
         int want = this.nodes.size() * ROW_H + 8;
 
-        if (!moved && want == this.scroll.scrollSize)
-        {
-            return;
-        }
-
+        /* Body first, then the content height. Scroll shares this same body instance, so it
+         * measures h whenever it clamps; writing the body after the clamp would leave the last
+         * frame's height in effect and strand rows outside the scroll range. */
         if (moved)
         {
             this.body.set(x, y, w, h);
+        }
+
+        if (!moved && want == this.scroll.scrollSize)
+        {
+            return;
         }
 
         this.scroll.scrollSize = want;
@@ -623,7 +624,7 @@ public class UICommitGraph extends UIElement
 
         /* Follow the live area before placing rows: the first frame may arrive before the dock
          * applied its final size, and a stale body would push every row into the wrong spot */
-        this.syncGeometry();
+        this.layoutViewport();
 
         /* Smooth scrolling and scrollbar dragging are advanced here, like every FS view */
         this.scroll.drag(context.mouseX, context.mouseY);
