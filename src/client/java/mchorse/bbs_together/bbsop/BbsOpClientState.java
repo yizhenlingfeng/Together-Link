@@ -111,6 +111,17 @@ public final class BbsOpClientState
         return level >= 2;
     }
 
+    /**
+     * Whether the local player may create or change lock records (clip, keyframe and asset
+     * locks): BBS level 1 and up. Level 1 may lock a free clip but cannot open, rewrite or
+     * remove a lock somebody else holds, which stays a level-2 privilege; the server
+     * re-checks every write (see {@code BbsOpManager.canOperateLocks}).
+     */
+    public static boolean canOperateLocks()
+    {
+        return level >= 1;
+    }
+
     /** Reset on disconnect, so singleplayer / local worlds never stay locked. */
     public static void reset()
     {

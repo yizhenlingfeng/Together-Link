@@ -3199,7 +3199,7 @@ public class TogetherServerNetwork {
         }
         server.execute(() -> {
             try {
-                if (!BbsOpManager.canManage(player)) {
+                if (!BbsOpManager.canOperateLocks(player)) {
                     System.out.println("[BBSTogether] " + PlayerCompat.name(player.getGameProfile()) + " tried to change an asset lock without permission");
                     return;
                 }

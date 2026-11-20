@@ -66,11 +66,19 @@ public final class ClipLockGuard
         if (editorType != 10 && editorType != 14 && editorType != 15)
         {
             EDITING.remove(playerId);
+            return;
         }
-        else if (previous == null || !previous.filmId.equals(filmId) || !previous.branch.equals(branch))
+
+        /* Opening the keyframe editor keeps whatever clip selection the timeline reported before:
+         * the player is still on the same clip, and dropping the record here would leave them out
+         * of an automatic lock created by someone else a moment later. Only a record from another
+         * film or branch is stale enough to drop. */
+        if (previous != null && previous.filmId.equals(filmId) && previous.branch.equals(branch))
         {
-            EDITING.remove(playerId);
+            return;
         }
+
+        EDITING.remove(playerId);
     }
 
     /**
@@ -147,7 +155,13 @@ public final class ClipLockGuard
                 return payload;
             }
 
-            return replaceLock(payload, incoming.toData(), stored.toData());
+            /* Another editor entering the clip adds themselves to the whitelist. The server keeps
+             * the authoritative lock, so take only additions from the client and never let it
+             * drop a member or change the owner: a snapshot that replaced the whole lock would
+             * make a player who joined later wait for the next snapshot to be let in. */
+            ClipLockData merged = mergeWhitelist(stored, incoming);
+
+            return replaceLock(payload, incoming.toData(), merged.toData());
         }
 
         if (!validAutomaticLock(player, incoming))
@@ -182,6 +196,47 @@ public final class ClipLockGuard
         copy.put(ClipLockData.KEY, after);
 
         return copy;
+    }
+
+    /**
+     * Folds the whitelist additions of one automatic lock update into the server's copy.
+     *
+     * <p>The owner and the mode stay those of the stored lock, so a client can never take over
+     * someone else's automatic lock; only extra members are accepted. This is what lets a player
+     * who opened the clip later be added without waiting for the lock to be recreated, while an
+     * already allowed editor is never dropped by a stale copy of the clip.</p>
+     */
+    private static ClipLockData mergeWhitelist(ClipLockData stored, ClipLockData incoming)
+    {
+        ClipLockData merged = new ClipLockData(stored.clipId);
+
+        merged.owner = stored.owner;
+        merged.ownerName = stored.ownerName;
+        merged.mode = stored.mode;
+        merged.automatic = stored.automatic;
+        merged.whitelist.putAll(stored.whitelist);
+        merged.blacklist.putAll(stored.blacklist);
+
+        if (incoming != null && stored.mode == AssetLockMode.WHITELIST)
+        {
+            UUID owner = stored.owner;
+
+            for (Map.Entry<UUID, String> entry : incoming.whitelist.entrySet())
+            {
+                UUID id = entry.getKey();
+
+                /* Keep the list bounded to the players who actually share this film: an update
+                 * from a client cannot smuggle in ids that are not a served game profile. */
+                if (id == null || merged.whitelist.containsKey(id) || id.equals(owner))
+                {
+                    continue;
+                }
+
+                merged.whitelist.put(id, entry.getValue() == null ? "" : entry.getValue());
+            }
+        }
+
+        return merged;
     }
 
     private static ClipLockData createAutomaticLock(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, int index, ClipLockData source)
@@ -248,7 +303,7 @@ public final class ClipLockGuard
         }
 
         MapType stored = FilmBranchStore.workingData(filmId, branch);
-        Map<String, MapType> before = stored == null ? new HashMap<>() : index(stored);
+        List<MapType> storedClips = stored == null ? new ArrayList<>() : clips(stored);
         List<MapType> incomingClips = clips(incoming);
 
         for (int i = 0; i < incomingClips.size(); i++)
@@ -261,7 +316,7 @@ public final class ClipLockGuard
                 continue;
             }
 
-            ClipLockData previous = ClipLockData.read(before.get(lock.clipId));
+            ClipLockData previous = storedLock(storedClips, i, lock.clipId);
 
             if (previous == null && validAutomaticLock(player, lock))
             {
@@ -274,7 +329,15 @@ public final class ClipLockGuard
                 }
             }
 
-            if (previous == null || !sameValue(previous.toData(), lock.toData()))
+            if (previous == null)
+            {
+                /* The branch copy has no lock on this clip yet. A fresh automatic lock was handled
+                 * above; anything else (a manual lock, or an update to a lock the branch has not
+                 * stored yet) is refused the way it is on the path sync. */
+                return deny(player);
+            }
+
+            if (!sameValue(previous.toData(), lock.toData()))
             {
                 return deny(player);
             }
@@ -318,7 +381,7 @@ public final class ClipLockGuard
             MapType oldClip = type.asMap();
             ClipLockData lock = ClipLockData.read(oldClip);
 
-            if (lock == null || lock.allows(player.getUuid()))
+            if (lock == null || allows(lock, player.getUuid()))
             {
                 continue;
             }
@@ -373,14 +436,26 @@ public final class ClipLockGuard
     }
 
     /**
+     * Whether a lock admits this player.
+     *
+     * <p>An automatic lock belongs to one editing session and is shared with the players who
+     * were editing the clip when it was created; it admits them and nobody else, exactly like a
+     * whitelist lock. The owner's own release removes it again.</p>
+     */
+    private static boolean allows(ClipLockData lock, UUID playerId)
+    {
+        return lock == null || lock.allows(playerId);
+    }
+
+    /**
      * Whether a path sync from {@code player} may be applied to the camera timeline.
      *
      * <p>Camera edits are relayed to the other editors rather than merged into the branch
      * working copy the way replays are, so this compares the synced clip index against the
      * server's copy: a clip carrying a lock the player may not touch cannot be written, and
-     * only level 2 may add, change or remove a lock. An index the server has never seen is
-     * let through, because its copy lags behind a live camera session and there is nothing
-     * authoritative to compare against.</p>
+     * a lock may only be added, changed or removed by its owner or a level-2 manager. An index
+     * the server has never seen is let through, because its copy lags behind a live camera
+     * session and there is nothing authoritative to compare against.</p>
      *
      * @param path    the data path of the synced value, {@code ["camera", "<index>", ...]}
      * @param payload the value being written
@@ -396,33 +471,45 @@ public final class ClipLockGuard
         boolean introducesLock = payload != null && payload.isMap() && payload.asMap().has(ClipLockData.KEY);
         Clip clip = clipAt(filmId, branch, path.get(1));
 
-        /* The server's copy does not have this clip yet: only the lock payload needs a check. */
+        /* The server's copy does not have this clip yet: there is no lock to compare against, so
+         * only the payload carrying a lock is looked at. A level-2 player renumbers clips freely;
+         * everyone else may only introduce their own automatic lock here (a free clip has no
+         * lock, so adding one takes nothing away from another player). */
         if (clip == null)
         {
-            return validAutomaticLock(player, wholeClip, payload)
-                || !(wholeClip && introducesLock) || BbsOpManager.canManage(player);
+            return validAutomaticLock(player, wholeClip, payload) || !(wholeClip && introducesLock)
+                || BbsOpManager.canManage(player);
         }
 
         BaseType data = clip.toData();
         ClipLockData stored = data != null && data.isMap() ? ClipLockData.read(data.asMap()) : null;
 
-        /* A clip nobody has locked yet may be edited, but a lock may only be created by level 2. */
+        /* A clip nobody has locked yet may be edited by anyone. Adding a lock to it is fine for
+         * the player taking their own automatic lock; handing out a manual lock is a management
+         * action and stays level 2, so a level-1 editor can never lock a clip for other people. */
         if (stored == null)
         {
-            return validAutomaticLock(player, wholeClip, payload) || !introducesLock || BbsOpManager.canManage(player);
+            return validAutomaticLock(player, wholeClip, payload) || !introducesLock
+                || BbsOpManager.canManage(player);
         }
 
         if (wholeClip && introducesLock && !BbsOpManager.canManage(player))
         {
             ClipLockData incoming = ClipLockData.read(payload.asMap());
 
-            if (incoming == null || !sameValue(stored.toData(), incoming.toData()))
+            /* Only the lock itself is compared here, never the clip content around it: a player
+             * re-broadcasting a clip they legitimately edit (the automatic lock rides along with
+             * every clip sync) must not be refused for the edit that ships in the same payload. */
+            boolean shares = incoming != null && stored.automatic && stored.owner != null
+                && stored.owner.equals(incoming.owner) && incoming.automatic;
+
+            if (!shares && (incoming == null || !sameValue(stored.toData(), incoming.toData())))
             {
                 return deny(player);
             }
         }
 
-        if (BbsOpManager.canManage(player) || stored.allows(player.getUuid()))
+        if (BbsOpManager.canManage(player) || allows(stored, player.getUuid()))
         {
             return true;
         }
@@ -455,21 +542,33 @@ public final class ClipLockGuard
         return i < 0 || i >= clips.size() ? null : clips.get(i);
     }
 
-    private static Map<String, MapType> index(MapType film)
+    /**
+     * Finds the branch copy's lock for one incoming clip: by the lock's own id first, then by the
+     * clip's position.
+     *
+     * <p>The id match survives a reorder (BBS renumbers clips by index on every {@code sync()},
+     * which also happens on load), while the index fallback covers a clip whose lock reached the
+     * client but not the branch copy yet, so a player is not refused for a difference that is
+     * only about how the two copies number the same clip.</p>
+     */
+    private static ClipLockData storedLock(List<MapType> storedClips, int index, String clipId)
     {
-        Map<String, MapType> output = new HashMap<>();
-
-        for (MapType clip : clips(film))
+        for (MapType clip : storedClips)
         {
             ClipLockData lock = ClipLockData.read(clip);
 
-            if (lock != null)
+            if (lock != null && lock.clipId.equals(clipId))
             {
-                output.put(lock.clipId, clip);
+                return lock;
             }
         }
 
-        return output;
+        if (index >= 0 && index < storedClips.size())
+        {
+            return ClipLockData.read(storedClips.get(index));
+        }
+
+        return null;
     }
 
     private static ListType clipsList(MapType film)

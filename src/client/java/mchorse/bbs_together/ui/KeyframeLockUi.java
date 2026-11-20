@@ -55,7 +55,7 @@ public final class KeyframeLockUi
         }
 
         List<KeyframeLockClient.HitRecord> hits = KeyframeLockClient.hits(view, context.mouseX, context.mouseY);
-        boolean manage = KeyframeLockClient.canManage();
+        boolean manage = KeyframeLockClient.canOperateLocks();
 
         /* The button is present for everyone: a closed padlock when the locks in view are
          * enforced on this player, an open one when they are not. Only managers can press it. */
@@ -76,7 +76,7 @@ public final class KeyframeLockUi
     {
         UIContext context = view.getContext();
 
-        if (context == null || !KeyframeLockClient.canManage())
+        if (context == null || !KeyframeLockClient.canOperateLocks())
         {
             return;
         }

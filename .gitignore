@@ -67,3 +67,19 @@ lib/**/*.zip
 
 # Deployment backups (old jar snapshots)
 dist/*.bak
+
+# Local Gradle user home and the sources unpacked from the BBS reference jars
+.gradle-user/
+.gradle-build/
+.gradle-old/
+
+# Entries left in the root by unpacking a BBS jar; the mod's own copies live under src/
+/META-INF/
+/assets/
+/fabric.mod.json
+/bbs.mixins.json
+/bbs.client.mixins.json
+/bbs.accesswidener
+
+# Client output captured while debugging a network session
+/client-log.txt

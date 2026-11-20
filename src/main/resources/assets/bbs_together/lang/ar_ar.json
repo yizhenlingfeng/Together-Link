@@ -1,0 +1,7 @@
+{
+    "bbs_together.bbsop.domain.record": "التسجيل",
+    "bbs_together.utility.sync.download": "تنزيل الأصول من الخادم",
+    "bbs_together.utility.sync.receive": "استقبال الأصول المُرسلة",
+    "bbs_together.utility.sync.title": "مزامنة BBS Together",
+    "bbs_together.utility.sync.upload": "رفع الأصول إلى الخادم"
+}

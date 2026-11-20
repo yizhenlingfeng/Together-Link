@@ -45,7 +45,7 @@ public final class AssetLockUi
      */
     public static void openMenu(UIContext context, AssetLockType type, String assetId)
     {
-        if (context == null || !AssetLockClient.canManage() || type == null || assetId == null)
+        if (context == null || !AssetLockClient.canOperateLocks() || type == null || assetId == null)
         {
             return;
         }
@@ -119,7 +119,7 @@ public final class AssetLockUi
     /** Open the multi-select player picker for one of the two list modes. */
     public static void openPicker(UIContext context, AssetLockType type, String assetId, AssetLockMode mode, AssetLock lock)
     {
-        if (context == null || !AssetLockClient.canManage() || (mode != AssetLockMode.WHITELIST && mode != AssetLockMode.BLACKLIST))
+        if (context == null || !AssetLockClient.canOperateLocks() || (mode != AssetLockMode.WHITELIST && mode != AssetLockMode.BLACKLIST))
         {
             return;
         }

@@ -210,9 +210,55 @@ processResources {
 		)
 	}
 
+	/* 原版只从 assets/<ns>/lang/*.json 解析服务端下发的 Text.translatable，而本模组的
+	 * 文本放在 BBS 自己的 L10n 表（assets/<ns>/assets/strings/*.json）里。这里补上
+	 * 一份 lang/ 副本，否则玩家看到的永远是原始语言键。副本由
+	 * scripts/gen_vanilla_lang.py 从 L10n 表生成。 */
+	from("assets/bbs_together/lang")
+
 	filesMatching("*.mixins.json") {
 		filter { line -> line.replace('${mixin_compatibility}', mixinCompatibility) }
 	}
+}
+
+/* 构建时校验 lang/ 副本与 L10n 表一致：漏键会让玩家看到原始语言键，旧键则会盖住
+ * 新文案。不一致时先运行 scripts/gen_vanilla_lang.py 重新生成。 */
+tasks.register('checkLangCopy') {
+	group = 'verification'
+	description = 'Verifies that assets/bbs_together/lang mirrors assets/bbs_together/assets/strings.'
+	def srcDir = file('src/main/resources/assets/bbs_together/assets/strings')
+	def dstDir = file('src/main/resources/assets/bbs_together/lang')
+	inputs.dir srcDir
+	inputs.dir dstDir
+	outputs.upToDateWhen { false }
+
+	doLast {
+		def problems = []
+		srcDir.listFiles()?.each { src ->
+			if (!src.name.endsWith('.json')) return
+			def mirror = new File(dstDir, src.name)
+			if (!mirror.exists()) { problems << "missing ${mirror.name}"; return }
+			def from = new groovy.json.JsonSlurper().parseText(src.getText('UTF-8'))
+			def to = new groovy.json.JsonSlurper().parseText(mirror.getText('UTF-8'))
+			from.each { k, v ->
+				if (!(v instanceof String)) return
+				if (to[k] != v) problems << "${src.name}: ${k}"
+			}
+			to.each { k, v -> if (!(k in from)) problems << "${src.name}: stale ${k}" }
+		}
+		if (!problems.isEmpty()) {
+			throw new GradleException('Vanilla lang copy is out of date (' + problems.size() + ' keys). ' +
+				'Run: python scripts/gen_vanilla_lang.py\n  ' + problems.take(20).join('\n  '))
+		}
+	}
+}
+
+tasks.named('build') { dependsOn 'checkLangCopy' }
+
+/* lang/ 副本已在资源目录里，processResources 又会复制一遍，同一个条目会两次进入
+ * jar。保留先写入的一份，丢弃重复项。 */
+tasks.named('jar') {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 /* The client mixin config is processed by the split-source-set task, not by

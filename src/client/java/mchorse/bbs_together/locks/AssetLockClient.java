@@ -86,7 +86,17 @@ public final class AssetLockClient
         return client.player == null ? null : client.player.getUuid();
     }
 
-    /** Level-2 admins are the only ones who see or use the lock UI. */
+    /**
+     * Whether the local player sees and uses the lock UI. Level 1 and up may create locks;
+     * opening or rewriting a lock somebody else holds still requires level 2 on the server,
+     * which refuses those writes per lock record.
+     */
+    public static boolean canOperateLocks()
+    {
+        return TogetherClientNetwork.isConnected() && BbsOpClientState.canOperateLocks();
+    }
+
+    /** Level-2 admins bypass every lock, both in the UI and on the server. */
     public static boolean canManage()
     {
         return TogetherClientNetwork.isConnected() && BbsOpClientState.canManage();

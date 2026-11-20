@@ -1,0 +1,6 @@
+{
+    "bbs_together.bbsop.domain.record": "Aufnahme",
+    "bbs_together.utility.sync.download": "Assets vom Server herunterladen",
+    "bbs_together.utility.sync.receive": "Gesendete Assets empfangen",
+    "bbs_together.utility.sync.upload": "Assets zum Server hochladen"
+}

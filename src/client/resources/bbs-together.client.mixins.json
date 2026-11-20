@@ -61,7 +61,8 @@
         "ValueChangeUndoLockMixin",
         "UserFormSectionCategoriesPathMixin",
         "UIClipsLockMenuMixin",
-        "UIClipLockShieldMixin"
+        "UIClipLockShieldMixin",
+        "UIClipsPanelPickGuardMixin"
     ],
     "injectors": {
         "defaultRequire": 1

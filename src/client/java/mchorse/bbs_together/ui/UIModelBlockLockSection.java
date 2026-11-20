@@ -202,7 +202,7 @@ public class UIModelBlockLockSection extends UIElement
     /** Keep the controls in sync with the selected block and the server push. */
     public void refresh()
     {
-        boolean visible = AssetLockClient.canManage() && this.block.get() != null;
+        boolean visible = AssetLockClient.canOperateLocks() && this.block.get() != null;
 
         if (!visible)
         {

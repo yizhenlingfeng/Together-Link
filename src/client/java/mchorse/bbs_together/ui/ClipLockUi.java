@@ -45,7 +45,7 @@ public final class ClipLockUi
     {
         UIContext context = clips.getContext();
 
-        if (context == null || !ClipLockClient.canManage())
+        if (context == null || !ClipLockClient.canOperateLocks())
         {
             return;
         }
@@ -83,7 +83,7 @@ public final class ClipLockUi
 
     private static void openMenu(UIClips clips, IUIClipsDelegate delegate, Clip clip)
     {
-        if (clip == null || !ClipLockClient.canManage())
+        if (clip == null || !ClipLockClient.canOperateLocks())
         {
             return;
         }

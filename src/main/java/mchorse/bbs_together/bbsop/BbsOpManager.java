@@ -188,6 +188,22 @@ public final class BbsOpManager
     }
 
     /**
+     * Whether this player may create, change or remove asset, clip and keyframe locks: level 1
+     * and up. Level 2 keeps the extra right to bypass somebody else's lock, which is checked
+     * where reads are guarded, not here.
+     */
+    public static boolean canOperateLocks(ServerPlayerEntity player)
+    {
+        return player != null && get(player.getUuid()) >= LEVEL_EDITOR;
+    }
+
+    /** {@link #canOperateLocks(ServerPlayerEntity)} for a plain id. */
+    public static boolean canOperateLocks(UUID playerId)
+    {
+        return playerId != null && get(playerId) >= LEVEL_EDITOR;
+    }
+
+    /**
      * Set a player's level. Returns {@code true} if the value actually changed.
      * Persists; the caller is responsible for pushing sync packets.
      */

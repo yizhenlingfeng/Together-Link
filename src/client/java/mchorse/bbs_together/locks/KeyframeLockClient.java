@@ -294,6 +294,12 @@ public final class KeyframeLockClient
         return ClipLockClient.canManage();
     }
 
+    /** Level 1 and up may create keyframe locks; changing another player's lock needs level 2. */
+    public static boolean canOperateLocks()
+    {
+        return ClipLockClient.canOperateLocks();
+    }
+
     /** Whether the clip that owns this keyframe sheet keeps the local player out. */
     public static boolean lockedForSelf(UIKeyframeSheet sheet)
     {

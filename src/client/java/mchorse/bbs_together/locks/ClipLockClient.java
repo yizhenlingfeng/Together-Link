@@ -36,6 +36,12 @@ public final class ClipLockClient
         return AssetLockClient.canManage();
     }
 
+    /** Level 1 and up may create clip locks; rewriting another player's lock needs level 2. */
+    public static boolean canOperateLocks()
+    {
+        return AssetLockClient.canOperateLocks();
+    }
+
     public static ClipLockData get(Clip clip)
     {
         if (clip == null)
@@ -102,7 +108,7 @@ public final class ClipLockClient
      *
      * <p>While a player has a clip's keyframe editor open and the setting is on, the clip is
      * locked for everyone else; closing the editor removes that automatic lock again. Only the
-     * automatic lock this session created is removed — a manual lock from a level-2 admin is
+     * automatic lock this session created is removed — a manual lock set by an administrator is
      * left untouched.</p>
      *
      * <p>Called every frame with the index of the clip whose keyframe editor is open, or a
@@ -183,6 +189,16 @@ public final class ClipLockClient
          * lock when the clip carries none, or carries our own automatic lock. */
         if (existing != null && !(existing.automatic && self.equals(existing.owner)))
         {
+            /* Someone else already locked this clip — automatically or by hand — so the player
+             * is a co-editor at most. Joining the whitelist of their automatic lock is what lets
+             * two players edit the same clip together while a third one stays out; the server
+             * only accepts additions to that list. */
+            if (existing.automatic && existing.mode == AssetLockMode.WHITELIST && !existing.whitelist.containsKey(self))
+            {
+                existing.whitelist.put(self, selfName());
+                broadcast(film, clip);
+            }
+
             return;
         }
 
@@ -307,9 +323,9 @@ public final class ClipLockClient
      *
      * <p>Camera clips are not part of the full-film save (the server only merges replay
      * data there), so the lock has to travel over the same path sync channel the timeline
-     * itself uses. The payload is lock-only: the receivers apply it onto their own clip
-     * only because {@code ValueGroup.fromData} keeps values that are absent from the map,
-     * so a partial map that carries just this key updates the lock and nothing else.</p>
+     * itself uses. The whole clip goes out so that releasing a lock also clears it on the
+     * other editors: {@code ValueGroup.fromData} keeps values absent from the map, so a
+     * lock-only payload could add a lock but never remove one.</p>
      */
     public static void broadcast(Film film, Clip clip)
     {

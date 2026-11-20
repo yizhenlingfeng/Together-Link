@@ -204,7 +204,7 @@ public final class AssetLockManager
     public static synchronized boolean set(ServerPlayerEntity actor, AssetLockType type, String assetId,
         AssetLockMode mode, Map<UUID, String> members)
     {
-        if (actor == null || type == null || !BbsOpManager.canManage(actor))
+        if (actor == null || type == null || !BbsOpManager.canOperateLocks(actor))
         {
             return false;
         }

@@ -705,11 +705,16 @@ public class TogetherClientNetwork {
         int version = buf.isReadable(4) ? buf.readInt() : 0;
 
         client.execute(() -> {
+            /* The server may send a permission/lock broadcast before this reply, in which
+             * case markServerSeen() has already flipped the connected flag without knowing
+             * the protocol. Always record the real version; only run the one-time setup the
+             * first time we learn about the server. */
+            serverProtocolVersion = version;
+
             if (isBBSTogetherOnServer) {
                 return;
             }
 
-            serverProtocolVersion = version;
             isBBSTogetherOnServer = true;
             TogetherClientNetwork.onServerReady();
         });

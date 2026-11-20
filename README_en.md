@@ -66,8 +66,9 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 | Film write guard | Film saves, renames, deletions, undos, and folder operations all go through `FilmWriteGuard` |
 | Clip locks | Individual camera timeline clips can be locked to a whitelist or blacklist; the lock lives in the clip's own data and travels with the film |
 | Clip lock display | A locked clip draws a lock mark on its bar; the panel of a player without permission turns grey and the Edit button becomes a lock button |
-| Clip lock enforcement | The server re-checks whole-film snapshots and camera syncs, restoring unauthorized changes to the branch copy; adding or removing a lock requires level 2 |
-| Keyframe locks | The lock icon in the keyframe editor's context menu freezes a selected keyframe range at once, across several tracks, in replay tracks and camera clips alike; regular players see a closed lock, while level-2 managers see an open lock used to add or remove locks |
+| Clip lock enforcement | The server re-checks whole-film snapshots and camera syncs, restoring unauthorized changes to the branch copy; adding or removing a lock requires BBS level 1 or above, and level 2 can still bypass a lock |
+| Lock clips when editing | A switch in the keyframes tab of the project settings (off by default). With it on, opening a clip's keyframe editor locks that clip to you, and closing the editor releases it, removing only this automatic lock while manual locks stay. While locked, you and the players editing the same clip at the same time keep editing, including those who join later; everyone else can neither open its keyframe editor nor change it on the timeline |
+| Keyframe locks | The lock icon in the keyframe editor's context menu freezes a selected keyframe range at once, across several tracks, in replay tracks and camera clips alike; players of level 1 and above see an open lock used to add or remove locks, while everyone else sees a closed, inactive one |
 | Keyframe lock sync | Locks live in the namespaced key of the replay or camera clip they belong to, are broadcast as soon as one is added or removed, and are written to the server copy; the server merges them per range, so an older snapshot cannot wipe a lock someone just added |
 | Keyframe lock enforcement | Locked content is read-only for everyone. Level-2 managers can only add or remove locks and must unlock before editing; undo outside the lock still works, while edits touching a lock are refused and restored |
 
@@ -110,7 +111,7 @@ Current version: **2.1**. Fabric API is required; licensed under MIT.
 
 - The integrated server in single-player/LAN worlds automatically grants the host level 2.
 - Dedicated servers no longer automatically make the first player to join an admin; on the first start, run `/bbsop <player> 2` from the console.
-- Only BBS level 2 can always bypass asset locks; a lock's creator is subject to the lock as well after being demoted.
+- Level 1 and above can create, change, and remove asset, clip, and keyframe locks; only level 2 can always bypass a lock and keep editing. A lock's creator is subject to the lock as well after being demoted.
 
 ## Server commands
 
@@ -157,6 +158,7 @@ Config file: `config/bbs/settings/bbs_together.json`.
 | `server.asset_egress_kbps` | 0 | Server total egress limit; 0 = unlimited |
 | `server.asset_ingress_kbps` | 0 | Server total ingress limit; 0 = unlimited |
 | `behaviors.behavior_log_limit` | 1000 | Maximum number of behavior log entries |
+| `edit_lock_clips` (keyframes tab) | off | Lock a clip while its keyframe editor is open and release it when the editor closes. Only you and the players editing the same clip at that time keep editing; only the automatic lock is released, manual locks stay |
 | `coop.coop_invite_seconds` | 60 | Co-op recording invite lifetime (seconds) |
 
 ## Compatibility
@@ -200,7 +202,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 | Directory | Contents |
 |---|---|
-| `src/main/java/.../locks` | Asset locks, clip locks, deletion tombstones, persistence |
+| `src/main/java/.../locks` | Asset locks, clip locks, keyframe locks, deletion tombstones, persistence |
 | `src/main/java/.../network` | Server networking, asset sync, film write policy, crusher |
 | `src/main/java/.../commits` | Commit graph, branch working copies, diffs, atomic writes |
 | `src/main/java/.../bbsop` | Permission levels and feature domains |
@@ -220,12 +222,13 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The model lock entry is now a top-right icon in the context menu, next to the "add category" plus button.
 - Form category folders are now synced as server assets (stored under `form_categories/`, reusing the existing chunked transfer and permissions).
 - Camera clips can be locked individually: a lock icon appears after ≡ in the clip context menu, setting the clip to nobody / whitelist / blacklist, or removing the lock. The lock lives in the clip's own data (`bbs_together:clip_lock`), travels with the film and through copy, paste and undo; the server matches clips by the lock's random ID.
-- The lock is drawn on the timeline: a lock badge on the bar; without permission the panel greys out, "Keyframes → Edit" shows as a lock button and cannot be clicked, and dragging, cutting, removing, shifting to cursor and double-click-to-open all stop working. The lock is broadcast to same-branch editors and written to the server copy; the server re-checks the full snapshot and the camera sync and reverts unauthorized changes. Creating or removing a lock requires level 2.
+- The lock is drawn on the timeline: a lock badge on the bar; without permission the panel greys out, "Keyframes → Edit" shows as a lock button and cannot be clicked, and dragging, cutting, removing, shifting to cursor and double-click-to-open all stop working. The lock is broadcast to same-branch editors and written to the server copy; the server re-checks the full snapshot and the camera sync and reverts unauthorized changes. Creating or removing a lock requires level 1 or above.
 - Reworked the "Film nodes" tab layout and palette: the top bar, film list, commit graph, and details pane now sit on distinct surface levels. The wider film list shows commit count, current branch, and latest commit time, with search, All/Shown/Current filters, and sorting by name, latest commit, or commit count.
 - The commit graph now has aligned captions and date separators: Commit, Message, Changes, Author, and Time columns line up, while Time, Author, and Changes collapse in that order as a column narrows. Commit hashes have higher contrast, HEAD can be located in one click, and long histories support ↑/↓ selection, Enter to open, and Ctrl+C to copy the short hash (Shift for the full hash).
 - The bottom details pane is now a resizable two-column view: the left side shows the full commit message, author and time, clip/keyframe stats, and changes grouped by section; the right side summarizes change counts. Right-clicking a node can copy the short/full hash or message, rename, reset, squash, check out its branch, hide the film, or set its color.
 - The clip context menu validates the clipboard first: non-BBS data counts as "nothing to paste" and the paste button is disabled (arbitrary text used to throw and crash the client).
 - Asset sync now counts as complete only once the server confirms it: uploads, asset reports, film inventories and server sends all carry receipts, and the client advances its local state only after one arrives — no more "shown as done but the server never had it".
+- New "Lock clips when editing" switch in the keyframes tab of the project settings (off by default): opening a clip's keyframe editor locks that clip to you, and closing the editor releases it. Players editing the same clip at the same time keep working together, while everyone else can neither open its keyframe editor nor change it on the timeline; releasing removes only this automatic lock, so manual locks stay. Each client decides for itself, and the switch works on servers with protocol 6 or later.
 
 #### Fixed
 
@@ -243,7 +246,7 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - The server lost ticks while transferring large files: asset slice reads moved to the sending thread and the payload parses for live editing and film saves moved off the network thread, so one big packet no longer occupies the event loop and delays or times out other players.
 - Joining with many films stuttered in proportion to the film count: the film inventory used to submit one main-thread task per film; it now collects everything in the background and broadcasts once.
 - Memory grew over long sessions: the server's film snapshot cache, asset hash cache and the client's server manifest snapshot all became bounded LRUs, so opening more films or rejoining repeatedly no longer grows the heap linearly.
-- Keyframe locks are now read-only for everyone, including level-2 managers. Managers can create and remove locks, but locked keys and loop blocks can only be edited after unlocking.
+- Keyframe locks are now read-only for everyone. Players of level 1 and above create and remove locks, but locked keys and loop blocks can only be edited after unlocking.
 - Closed the remaining lock-edit paths: properties panels, motion-shift handles, loop menus, Ctrl-click, paste and stacking, recording and flight-mode clips, and replay translation or rotation gizmos can no longer write into a lock. Direct channel replacement also restores the locked content, and an unfinished channel transaction no longer grants a permanent write exemption.
 - Scoped undo and improved sync consistency: undo outside a lock works normally, while edits that touch a lock are refused. The server validates owner snapshots, target ticks and indices, and returns the owning channel after a refusal so the client cannot retain a rejected edit.
 - The keyframe lock context menu in the clip editor showed a white block: the caption row used the coloured menu item overload, which paints a 22-pixel swatch into the icon column. It now uses the plain item and shows text only.
@@ -255,6 +258,11 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Lock outlines flickered, appeared on the wrong tracks, or showed up on unlocked or folded rows. Dashed edges now use fixed integer-pixel geometry, channels are matched only by their exact ids, and hidden tracks are skipped, preventing suffix mismatches and hidden rows from being drawn at the top of the list.
 - The local keyframe lock guard crashed the client on start-up (`InvalidInjectionException`): the new insertion guard was attached to `UIKeyframes`, while the method actually belongs to the `IUIKeyframeGraph` interface. It now injects the right target by its full signature and covers both the timeline and the curve graph.
 - The asset and clip lock menus now read "Whitelisted players" and "Blacklisted players", matching what the lists actually contain.
+- Level 1 could not create locks: the clip, keyframe and asset lock menus were limited to level 2. Level 1 and above can now create, change, and remove locks, while level 2 keeps its privilege of editing through a lock.
+- A level-1 player could still edit a clip a level 2 was editing: automatic and manual locks used different admission rules, and the server matched clips by lock id during whole-film checks, which failed once clips were reordered. Both lock kinds now admit by whitelist, fall back to the clip index when the id is gone, and merge co-editors' whitelists instead of overwriting them with the server's older copy.
+- "Lock clips when editing" never engaged for level-1 players: the client recorded the protocol version only from the handshake packet, while the permission and lock packets arrived first and caused the handshake to be discarded as a duplicate, leaving the version at 0 and the switch permanently inactive. The version is now recorded whichever packet arrives first.
+- A locked clip could still be opened from the timeline by double-clicking it into the keyframe editor: the guard covered selection and dragging only, while opening a clip takes a separate path. That path is now guarded too.
+- Server messages showed raw translation keys (such as `bbs_together.clip_lock.notify.locked`): BBS reads `assets/bbs_together/strings`, while the vanilla client reads `assets/bbs_together/lang`, and translatable text sent by the server only consults the latter. Both tables are now provided, and the build verifies they match.
 
 #### Verified
 
@@ -267,6 +275,8 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 - Clip locks live in the clip's namespaced key; old data without it is treated as unlocked, no migration needed.
 - Keyframe locks live in the namespaced key of the replay or camera clip they belong to (`bbs_together:keyframe_lock`) and are saved with the film; old data is treated as unlocked, no migration needed.
 - The packet size check now inspects a single chunk (16-byte header plus at most 30,000 bytes of data) instead of the whole payload, so the protocol no longer depends on payload size.
+- "Lock clips when editing" uses the protocol-6 clip lock and keyframe-edit focus channel; the switch stays inactive on older servers, and everything else works unchanged.
+- Players of level 1 and above can create, change, and remove locks, but only level 2 can edit through a lock.
 
 ### v2.0.4
 
