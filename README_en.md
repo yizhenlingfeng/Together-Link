@@ -218,56 +218,58 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 #### Added
 
-- Coop recording room redesigned: a scalable panel showing the film, branch, recording stage, replay list (with model preview, duration, keyframe count and the player who claimed it) and the participant roster; the recording stage becomes a read-only progress panel.
-- The model lock entry is now a top-right icon in the context menu, next to the "add category" plus button.
-- Form category folders are now synced as server assets (stored under `form_categories/`, reusing the existing chunked transfer and permissions).
-- Camera clips can be locked individually: a lock icon appears after ≡ in the clip context menu, setting the clip to nobody / whitelist / blacklist, or removing the lock. The lock lives in the clip's own data (`bbs_together:clip_lock`), travels with the film and through copy, paste and undo; the server matches clips by the lock's random ID.
-- The lock is drawn on the timeline: a lock badge on the bar; without permission the panel greys out, "Keyframes → Edit" shows as a lock button and cannot be clicked, and dragging, cutting, removing, shifting to cursor and double-click-to-open all stop working. The lock is broadcast to same-branch editors and written to the server copy; the server re-checks the full snapshot and the camera sync and reverts unauthorized changes. Creating or removing a lock requires level 1 or above.
-- Reworked the "Film nodes" tab layout and palette: the top bar, film list, commit graph, and details pane now sit on distinct surface levels. The wider film list shows commit count, current branch, and latest commit time, with search, All/Shown/Current filters, and sorting by name, latest commit, or commit count.
-- The commit graph now has aligned captions and date separators: Commit, Message, Changes, Author, and Time columns line up, while Time, Author, and Changes collapse in that order as a column narrows. Commit hashes have higher contrast, HEAD can be located in one click, and long histories support ↑/↓ selection, Enter to open, and Ctrl+C to copy the short hash (Shift for the full hash).
-- The bottom details pane is now a resizable two-column view: the left side shows the full commit message, author and time, clip/keyframe stats, and changes grouped by section; the right side summarizes change counts. Right-clicking a node can copy the short/full hash or message, rename, reset, squash, check out its branch, hide the film, or set its color.
-- The clip context menu validates the clipboard first: non-BBS data counts as "nothing to paste" and the paste button is disabled (arbitrary text used to throw and crash the client).
-- Asset sync now counts as complete only once the server confirms it: uploads, asset reports, film inventories and server sends all carry receipts, and the client advances its local state only after one arrives — no more "shown as done but the server never had it".
-- New "Lock clips when editing" switch in the keyframes tab of the project settings (off by default): opening a clip's keyframe editor locks that clip to you, and closing the editor releases it. Players editing the same clip at the same time keep working together, while everyone else can neither open its keyframe editor nor change it on the timeline; releasing removes only this automatic lock, so manual locks stay. Each client decides for itself, and the switch works on servers with protocol 6 or later.
+- Coop recording room redesigned: a resizable panel with film, branch, stage, replays and participants; the stage is read-only.
+- Model lock moved to a top icon in the context menu, next to the add-category plus.
+- Form category folders now sync as server assets under `form_categories/`.
+- Clips can be locked one by one: an icon in the clip menu sets nobody / whitelist / blacklist, or removes the lock. The lock lives in the clip data, so it saves and undoes with the film.
+- Locks are drawn on the timeline: a badge on the bar, greyed panels and blocked drag, cut, remove and double-click. The server re-checks snapshots and syncs, and reverts unauthorized changes.
+- Keyframe ranges can be locked: the menu icon freezes the selected keys, including whole loop blocks; replay and camera editors both work.
+- Locked ranges show as a dashed, locked overlay. Their keys are read-only and unlock restores editing; undos touching a range are refused.
+- Film nodes tab reworked: top bar, film list, commit graph and details on separate levels, with search, filters and sorting.
+- The commit graph gained aligned captions and date separators; narrow columns collapse, arrows select, Enter opens, Ctrl+C copies the short hash.
+- The details pane is now a resizable two-column view; right-click can copy the hash or message, rename, reset, squash and check out a branch.
+- The clip menu validates the clipboard first, so non-BBS data cannot be pasted (it used to crash the client).
+- Asset sync completes only after the server confirms it, so nothing shows as done while the server lacks it.
+- New "Lock clips when editing" switch (keyframes tab, off by default): opening a clip's keyframe editor locks it to you and closing releases it. Players editing it at the same time keep working; others cannot enter. Only the automatic lock is released. Needs protocol 6.
 
 #### Fixed
 
-- Re-starting a coop recording now hides the old bodies of already-claimed replays, so they no longer double up with real players.
-- Changing the replay count then committing no longer desyncs or wipes replays: the throwing `ValueStableList.sync()` call is removed and replays are rebuilt by payload id; a payload check skips mismatched lists instead of clearing the whole table.
-- The coop recording end notice no longer shows raw keys (now resolved through the BBS language table).
-- Closing chat or inventory while recording no longer makes the coop room panel cover the world again.
-- The Film nodes tab no longer stacks nodes at the top and refuses to scroll on the first open after each launch; it lays out again as soon as the size is known and re-checks every frame.
-- Undo could rewrite locked keyframes: the rollback recorded the values from before the lock, so only the server's delta re-check noticed while the client still drew the rollback. The client now compares the locked ranges before undoing or redoing and refuses with "the undo would change locked keyframes"; the server judges undos more strictly and rejects and re-pushes the mirrored values if a lock record, keyframe or loop block would be rolled back.
-- Asset and film sync failed wholesale: the packet size check measured the whole payload, while an outgoing payload is split into 30,000-byte chunks before it hits the wire, so everything larger than 32,767 bytes (a whole film, an asset manifest, the commit graph, the behaviour list) was dropped before chunking and the sync failed silently. Only the individual chunk is checked now, so any size goes out correctly.
-- Empty-payload channels were rejected: undo sync, declining a coop invite and creating a commit for a film you are not viewing all send empty data, which the old check treated as invalid. Zero bytes now travel as the protocol's one-byte sentinel again.
-- Undo sync was lost with larger deltas: the undo data used to ride in the chunk tail, and the tail is appended whole to the last chunk, so a large delta pushed that chunk over the limit and the whole undo was dropped. The undo data now goes into the chunked payload and can be any size.
-- Oversized commit messages overflowed the last chunk: the message was written to the tail with no length limit and could push a nearly full payload over the limit. It is now capped to the length the server actually reads.
-- Saving a film stalled the server and viewers missed it: parsing, merging, serializing and writing to disk all move to a dedicated thread while the main thread only swaps references and broadcasts, and the save is persisted before it is broadcast, so a viewer never sees state the server has not stored.
-- The server lost ticks while transferring large files: asset slice reads moved to the sending thread and the payload parses for live editing and film saves moved off the network thread, so one big packet no longer occupies the event loop and delays or times out other players.
-- Joining with many films stuttered in proportion to the film count: the film inventory used to submit one main-thread task per film; it now collects everything in the background and broadcasts once.
-- Memory grew over long sessions: the server's film snapshot cache, asset hash cache and the client's server manifest snapshot all became bounded LRUs, so opening more films or rejoining repeatedly no longer grows the heap linearly.
-- Keyframe locks are now read-only for everyone. Players of level 1 and above create and remove locks, but locked keys and loop blocks can only be edited after unlocking.
-- Closed the remaining lock-edit paths: properties panels, motion-shift handles, loop menus, Ctrl-click, paste and stacking, recording and flight-mode clips, and replay translation or rotation gizmos can no longer write into a lock. Direct channel replacement also restores the locked content, and an unfinished channel transaction no longer grants a permanent write exemption.
-- Scoped undo and improved sync consistency: undo outside a lock works normally, while edits that touch a lock are refused. The server validates owner snapshots, target ticks and indices, and returns the owning channel after a refusal so the client cannot retain a rejected edit.
-- The keyframe lock context menu in the clip editor showed a white block: the caption row used the coloured menu item overload, which paints a 22-pixel swatch into the icon column. It now uses the plain item and shows text only.
-- The 1.21.11 client disconnected right after joining (`readerIndex + length exceeds writerIndex`): after the server started sending the progress, colour, selection and commit-position channels as chunks, the client still read them as one flat buffer and took the chunk header for a field. Those channels are now reassembled through the chunker before they are parsed, so both ends agree on the format.
-- Locking or unlocking a camera clip created a spurious commit node: applying a lock used to save the whole film immediately, which made the server record a commit even when the film itself had not changed. The lock is now broadcast to same-branch editors and written to the server copy on its own data-sync channel, without a full film save, so locking a clip no longer produces a commit.
-- Non-admins could not lock anything and had to lock a second time: the server only allowed a request when neither the owner nor the payload carried a lock, and refused everything else. The client had already written the lock, the server copy had not, so it took a second click to line up. Decisions are now made per range: a payload that still covers every range the owner holds is accepted, and only requests that drop or narrow an existing lock are refused.
-- Locking a range rolled the film back to the previous edit: BBS clears the owner's namespaced keys before rebuilding them from the payload, and the lock records live there, so a slightly stale snapshot erased locks other editors had just added and wrote that state to disk. Child values are still updated as before, but namespaced keys are merged key by key instead of being replaced.
-- Two players saw the lock box on different rows: in single-channel curve mode every track reused one fixed row height, although that mode shows one channel whose lane is the whole plot area. The box now uses the plot height and shares the row coordinates of the timeline mode.
-- Lock outlines flickered, appeared on the wrong tracks, or showed up on unlocked or folded rows. Dashed edges now use fixed integer-pixel geometry, channels are matched only by their exact ids, and hidden tracks are skipped, preventing suffix mismatches and hidden rows from being drawn at the top of the list.
-- The local keyframe lock guard crashed the client on start-up (`InvalidInjectionException`): the new insertion guard was attached to `UIKeyframes`, while the method actually belongs to the `IUIKeyframeGraph` interface. It now injects the right target by its full signature and covers both the timeline and the curve graph.
-- The asset and clip lock menus now read "Whitelisted players" and "Blacklisted players", matching what the lists actually contain.
-- Level 1 could not create locks: the clip, keyframe and asset lock menus were limited to level 2. Level 1 and above can now create, change, and remove locks, while level 2 keeps its privilege of editing through a lock.
-- A level-1 player could still edit a clip a level 2 was editing: automatic and manual locks used different admission rules, and the server matched clips by lock id during whole-film checks, which failed once clips were reordered. Both lock kinds now admit by whitelist, fall back to the clip index when the id is gone, and merge co-editors' whitelists instead of overwriting them with the server's older copy.
-- "Lock clips when editing" never engaged for level-1 players: the client recorded the protocol version only from the handshake packet, while the permission and lock packets arrived first and caused the handshake to be discarded as a duplicate, leaving the version at 0 and the switch permanently inactive. The version is now recorded whichever packet arrives first.
-- A locked clip could still be opened from the timeline by double-clicking it into the keyframe editor: the guard covered selection and dragging only, while opening a clip takes a separate path. That path is now guarded too.
-- Server messages showed raw translation keys (such as `bbs_together.clip_lock.notify.locked`): BBS reads `assets/bbs_together/strings`, while the vanilla client reads `assets/bbs_together/lang`, and translatable text sent by the server only consults the latter. Both tables are now provided, and the build verifies they match.
-- A level-1 player could not lock a clip and the lock icon only flashed: the keyframe-lock guard treated a whole-clip sync as if it had to carry a keyframe lock record, which clip locks and ordinary clip edits never do, so every whole-clip write from level 1 was refused while level 2 slipped through. A refusal re-sends the server's clip copy to the sender, which overwrote the local lock and looked like a flashing icon. The guard now validates payloads only for clips that actually hold a keyframe lock.
-- Films opened with stale content, and switching branches refreshed nothing: the server marked a branch as delivered as soon as it read that branch for a player, so opening the film sent only the branch label and no content. If that read never became the copy the client was editing, the player stayed on their own stale copy for the whole session and every write was dropped silently on an index mismatch. A branch now counts as delivered only when its content is actually sent, and the record is cleared on disconnect.
-- A crashed or disconnected player kept a clip occupied: automatic edit locks were released only when the client closed the keyframe editor, so a disconnect, crash or branch switch left the lock in the branch copy and later editors could neither lock the clip automatically nor by hand. Disconnecting, leaving the film and switching branches now release that player's automatic locks and broadcast the unlocked clip; a lock whose owner stopped editing is taken over by the current editor.
-- A level-1 player could not create a keyframe lock: adding and removing one still required level 2 even though the icon itself was shown to level 1. Both ends now agree, and level 1 and above can add and remove keyframe locks.
-- The dashboard created an empty film called open: it reports the film screen being open with that literal, which the server took for a film id and pushed around. The sentinel no longer triggers a branch sync.
+- Restarting a coop recording now hides the old bodies of claimed replays.
+- Changing the replay count then committing no longer desyncs or wipes replays.
+- The coop recording end notice no longer shows raw keys.
+- Closing chat or inventory while recording no longer makes the room panel cover the world.
+- The Film nodes tab no longer stacks nodes at the top or refuses to scroll on first open.
+- Undo could rewrite locked keyframes; the client now refuses with a notice and the server judges strictly.
+- Asset and film sync failed wholesale: the size check measured the whole payload although it is chunked, so large content was dropped; only the chunk is checked now.
+- Empty-payload channels were rejected; zero bytes travel as the sentinel again.
+- Undo sync was lost with large deltas; the data now rides in the chunked payload.
+- Long commit messages overflowed the last chunk; they are capped to the read length.
+- Saving a film stalled the server and viewers missed it; parsing and writing moved off-thread and the save is persisted before it is broadcast.
+- The server lost ticks during large transfers; disk reads and payload parses moved off the main and network threads.
+- Joining with many films stuttered; the inventory is collected in the background and broadcast once.
+- Memory grew over long sessions; the snapshot and hash caches are bounded LRUs now.
+- Keyframe locks are read-only for everyone; level 1 and above only add and remove them.
+- Remaining lock-edit paths are closed: properties, motion handles, loop menus, Ctrl-click, paste, gizmos and direct channel replacement.
+- Undo outside a lock works, undos touching one are refused and the owning channel is re-pushed.
+- The keyframe lock menu showed a white block; it uses a plain item now.
+- The 1.21.11 client disconnected after joining; chunked channels are reassembled before parsing.
+- Locking needed a second click; the server now decides per range.
+- Locking rolled the film back to the previous edit; namespaced keys are merged key by key.
+- Two players saw the lock box on different rows; it follows the plot height now.
+- Lock outlines flickered, drifted or appeared on hidden tracks; fixed-pixel geometry and exact channel ids.
+- The local keyframe lock guard crashed on start-up; it now injects `IUIKeyframeGraph`.
+- Lock menus read "Whitelisted players" and "Blacklisted players" now.
+- Locking a clip created a spurious commit; the lock uses its own sync channel without a full save.
+- Level 1 could not create locks; level 1 and above can now, and level 2 keeps editing through locks.
+- A level-1 player could still edit a clip a level 2 was editing; both lock kinds admit by whitelist and fall back to the clip index.
+- "Lock clips when editing" never engaged for level 1; the protocol version is recorded whichever packet arrives first.
+- A locked clip could still be opened by double-clicking; that path is guarded now.
+- Server messages showed raw keys; both language tables are provided and verified by the build.
+- A level-1 player could not lock a clip and the icon only flashed; the keyframe guard now validates payloads only for clips that hold a keyframe lock.
+- Films opened with stale content and branches refreshed nothing; a branch counts as delivered only when its content is sent, and the record is cleared on disconnect.
+- A crashed or disconnected player kept a clip occupied; disconnecting, leaving and switching branches release automatic locks, and a dead lock is taken over.
+- A level-1 player could not create a keyframe lock; adding and removing now need level 1.
+- The dashboard created an empty film called open; the sentinel no longer triggers a branch sync.
 
 #### Verified
 
@@ -275,13 +277,12 @@ Build tooling pins Loom to `1.15.5` to avoid build differences caused by snapsho
 
 #### Compatibility
 
-- The network protocol is now at version 5 (4: upload and inventory receipts; 5: asset report receipts and send-rejection receipts). The server still accepts older clients but only sends the new receipts to protocol 5, so an older client never waits for one and degrades to "sent means done". Neither direction mis-parses packets.
-- Category sync rides the normal asset channel and needs the `upload` permission to push.
-- Clip locks live in the clip's namespaced key; old data without it is treated as unlocked, no migration needed.
-- Keyframe locks live in the namespaced key of the replay or camera clip they belong to (`bbs_together:keyframe_lock`) and are saved with the film; old data is treated as unlocked, no migration needed.
-- The packet size check now inspects a single chunk (16-byte header plus at most 30,000 bytes of data) instead of the whole payload, so the protocol no longer depends on payload size.
-- "Lock clips when editing" uses the protocol-6 clip lock and keyframe-edit focus channel; the switch stays inactive on older servers, and everything else works unchanged.
-- Players of level 1 and above can create, change, and remove locks, but only level 2 can edit through a lock.
+- The network protocol is now version 5 (4: upload and inventory receipts; 5: asset report and send-rejection receipts). Older clients still connect and degrade to "sent means done".
+- Clip locks live in the clip's namespaced key; old data is treated as unlocked, no migration needed.
+- Keyframe locks live in the owner's namespaced key (`bbs_together:keyframe_lock`); no migration needed.
+- The packet size check inspects a single chunk, so the protocol no longer depends on payload size.
+- "Lock clips when editing" needs protocol 6; the switch stays inactive on older servers.
+- Players of level 1 and above create, change and remove locks; only level 2 edits through a lock.
 
 ### v2.0.4
 
