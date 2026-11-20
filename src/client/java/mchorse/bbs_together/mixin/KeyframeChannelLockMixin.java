@@ -15,6 +15,7 @@ public abstract class KeyframeChannelLockMixin
     @Inject(method = "fromData", at = @At("HEAD"), remap = false)
     private void bbs_together$beginData(BaseType data, CallbackInfo ci)
     {
+        KeyframeLockClient.beginChannelDeserialization();
         KeyframeLockClient.beginChannelEdit((KeyframeChannel<?>) (Object) this);
     }
 
@@ -22,6 +23,7 @@ public abstract class KeyframeChannelLockMixin
     private void bbs_together$endData(BaseType data, CallbackInfo ci)
     {
         KeyframeLockClient.endChannelEdit((KeyframeChannel<?>) (Object) this);
+        KeyframeLockClient.endChannelDeserialization();
     }
 
     @Inject(method = "copyKeyframes", at = @At("HEAD"), remap = false)

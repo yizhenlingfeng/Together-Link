@@ -60,6 +60,7 @@ public final class KeyframeLockClient
 
     private static final Map<KeyframeChannel<?>, ChannelEdit> channelEdits = new WeakHashMap<>();
     private static final ThreadLocal<Integer> restoring = ThreadLocal.withInitial(() -> 0);
+    private static final ThreadLocal<Integer> deserializing = ThreadLocal.withInitial(() -> 0);
 
     private static final class ChannelEdit
     {
@@ -145,6 +146,16 @@ public final class KeyframeLockClient
     private static boolean guardsLocalWrites()
     {
         return !BBSTogetherFix22.isApplyingRemoteSync() && restoring.get() == 0;
+    }
+
+    public static void beginChannelDeserialization()
+    {
+        deserializing.set(deserializing.get() + 1);
+    }
+
+    public static void endChannelDeserialization()
+    {
+        deserializing.set(Math.max(0, deserializing.get() - 1));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -636,7 +647,7 @@ public final class KeyframeLockClient
             return false;
         }
 
-        if (channelEdits.containsKey(channel))
+        if (deserializing.get() > 0)
         {
             return false;
         }
