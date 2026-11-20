@@ -261,6 +261,9 @@ public class TogetherServerNetwork {
      * re-enter later still resynchronizes from disk.
      */
     private static final long BRANCH_DATA_FRESH_MS = 3000L;
+    /** Sentinels the client uses for "the dashboard is open" instead of a film id. */
+    private static final String FILM_SCREEN_OPEN = "open";
+
     /** Access-order LRU so hashed paths of deleted assets do not pin memory forever. */
     private static final Map<String, HashCacheEntry> assetHashCache = Collections.synchronizedMap(
         new LinkedHashMap<String, HashCacheEntry>(1024, 0.75f, true) {
@@ -367,6 +370,7 @@ public class TogetherServerNetwork {
         }
         String branch = FilmBranchStore.branchOf(filmId, player.getUuid());
         MapType data = FilmBranchStore.workingData(filmId, branch);
+
         TogetherServerNetwork.sendFilmBranchStateTo(server, player, filmId, branch, data);
         TogetherServerNetwork.markBranchStateDelivered(player, filmId, branch);
         TogetherServerNetwork.sendFilmBranchMeta(server, player, filmId, branch);
@@ -387,6 +391,7 @@ public class TogetherServerNetwork {
         boolean fresh = key.equals(lastBranchStateSent.get(player.getUuid()))
             && at != null
             && System.currentTimeMillis() - at <= BRANCH_DATA_FRESH_MS;
+
         if (fresh) {
             TogetherServerNetwork.sendFilmBranchMeta(server, player, filmId, branch);
         } else {
@@ -697,7 +702,7 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.flushUploadAggregates(player, true);
             UUID uuid = player.getUuid();
             CoopSessionManager.onDisconnect(uuid, server);
-            ClipLockGuard.forgetPlayer(uuid);
+            ClipLockGuard.forgetPlayer(server, uuid);
             LinkedHashMap<UUID, Integer> linkedHashMap2 = linkedHashMap = playerReplaySelections;
             synchronized (linkedHashMap2) {
                 playerReplaySelections.remove(uuid);
@@ -717,6 +722,8 @@ public class TogetherServerNetwork {
             playerReceivePush.remove(uuid);
             playerOwnedAssets.remove(uuid);
             playerProtocols.remove(uuid);
+            lastBranchStateSent.remove(uuid);
+            lastBranchStateAt.remove(uuid);
             LinkedBlockingQueue<AssetSendTask> pendingAssets = assetSendQueues.remove(uuid);
             if (pendingAssets != null) {
                 pendingAssets.clear();
@@ -784,7 +791,7 @@ public class TogetherServerNetwork {
                 server.execute(() -> {
                     playerEditingFilm.remove(leaver, clearFilmId);
                     playerCursors.remove(leaver);
-                    ClipLockGuard.forgetPlayer(leaver);
+                    ClipLockGuard.forgetPlayer(server, leaver);
                     TogetherServerNetwork.broadcastFilmSelections(server);
                     TogetherServerNetwork.together_broadcastCursorSnapshot(server, clearFilmId);
                 });
@@ -808,9 +815,7 @@ public class TogetherServerNetwork {
         boolean leaving = editorType < 0;
         server.execute(() -> {
             playerEditingFilm.put(player.getUuid(), filmId);
-            if (leaving || tick >= 0.0F || row >= 0.0F || !selected.isEmpty()) {
-                ClipLockGuard.trackCursor(player.getUuid(), filmId, TogetherServerNetwork.playerBranch(filmId, player), editorType, selected);
-            }
+            ClipLockGuard.trackCursor(player.getUuid(), editorType);
             if (leaving) {
                 playerCursors.remove(player.getUuid());
             } else {
@@ -1058,7 +1063,6 @@ public class TogetherServerNetwork {
                 long syncMaxBytes = TogetherServerNetwork.syncMaxBytes();
                 if (assetsRoot.exists()) {
                     Files.walkFileTree(assetsPath, (FileVisitor<? super Path>)new SimpleFileVisitor<Path>(){
-
                         @Override
                         public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                             if (!attrs.isRegularFile()) {
@@ -1702,7 +1706,34 @@ public class TogetherServerNetwork {
         }
     }
 
-    private static void scheduleFilmSave(MinecraftServer server, String filmId, String branch) {
+    /**
+     * Relays one clip's current branch copy to the editors of that branch, which is how a lock
+     * the server removed (a dead automatic lock) disappears on the other clients.
+     */
+    public static void broadcastClipData(MinecraftServer server, String filmId, String branch, int index, BaseType clipData) {
+        if (server == null || filmId == null || clipData == null) {
+            return;
+        }
+        List<String> path = new ArrayList<String>();
+        path.add("camera");
+        path.add(String.valueOf(index));
+        byte[] data = DataStorageUtils.writeToBytes(clipData);
+        for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
+            if (!entry.getValue().equals(filmId)) continue;
+            ServerPlayerEntity other = server.getPlayerManager().getPlayer(entry.getKey());
+            if (other == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
+            TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity) other, CLIENT_FILM_DATA_SYNC, data, outBuf -> {
+                outBuf.writeString(filmId);
+                outBuf.writeString(branch);
+                outBuf.writeInt(path.size());
+                for (String s : path) {
+                    outBuf.writeString(s);
+                }
+            });
+        }
+    }
+
+    public static void scheduleFilmSave(MinecraftServer server, String filmId, String branch) {
         String key = TogetherServerNetwork.branchKey(filmId, branch);
         AtomicBoolean flag = filmSaveDirty.computeIfAbsent(key, k -> new AtomicBoolean(false));
         flag.set(true);
@@ -2052,7 +2083,11 @@ public class TogetherServerNetwork {
                 if (wasFirst) {
                     BBSMod.getActions().trackDamage(PlayerCompat.serverWorld(player));
                 }
-                if (!(key = filmId + "\t" + (branch = TogetherServerNetwork.playerBranch(filmId, player))).equals(lastBranchStateSent.get(player.getUuid()))) {
+                /* The dashboard announces itself with the literal "open" instead of a film id.
+                 * Treating that as a film would create an empty film called "open" and push it
+                 * to the player, so the branch state is only synced for real film ids. */
+                if (!FILM_SCREEN_OPEN.equals(filmId)
+                    && !(key = filmId + "\t" + (branch = TogetherServerNetwork.playerBranch(filmId, player))).equals(lastBranchStateSent.get(player.getUuid()))) {
                     TogetherServerNetwork.sendFilmBranchState(server, player, filmId);
                 }
             }
@@ -2771,6 +2806,7 @@ public class TogetherServerNetwork {
                 return;
             }
             playerEditingFilm.put(player.getUuid(), filmId);
+            ClipLockGuard.forgetPlayer(server, player.getUuid());
             TogetherServerNetwork.branchCheckoutMessage(player, branch, "", true);
             LinkedHashMap<UUID, Integer> linkedHashMap = playerReplaySelections;
             synchronized (linkedHashMap) {
@@ -3397,7 +3433,6 @@ public class TogetherServerNetwork {
         }
         try {
             Files.walkFileTree(dir.toPath(), (FileVisitor<? super Path>)new SimpleFileVisitor<Path>(){
-
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     Files.deleteIfExists(file);
@@ -3866,6 +3901,7 @@ public class TogetherServerNetwork {
         if (payload != null && TogetherServerNetwork.isServerTracked(path) && (film = FilmBranchStore.working(filmId, branch)) != null) {
             lastSavedFilmSnapshots.computeIfAbsent(TogetherServerNetwork.branchKey(filmId, branch), k -> (MapType)film.toData());
             BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, path);
+
             if (target != null) {
                 try {
                     if (target instanceof ValueGroup owner) {
@@ -3879,6 +3915,13 @@ public class TogetherServerNetwork {
                 }
             }
             TogetherServerNetwork.scheduleFilmSave(server, filmId, branch);
+        } else {
+            /* A camera index the server's branch copy does not have means this player is editing
+             * a film that drifted away from the server's copy, so nothing they send can be stored.
+             * Handing them the branch copy heals that instead of dropping every edit silently. */
+            if (path != null && !path.isEmpty() && "camera".equals(path.get(0))) {
+                TogetherServerNetwork.syncFilmBranchState(server, player, filmId);
+            }
         }
     }
 

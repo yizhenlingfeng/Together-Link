@@ -151,7 +151,12 @@ public final class KeyframeLockGuard
      */
     private static boolean ownerPayload(ServerPlayerEntity player, ValueGroup owner, BaseType payload)
     {
-        if (!addsOrKeepsLocks(owner, payload) && !BbsOpManager.canManage(player))
+        List<KeyframeLockData> stored = KeyframeLockData.get(owner);
+
+        /* A keyframe lock only guards its own owner. An owner that holds none takes an ordinary
+         * payload as it comes: whole-clip syncs carry no keyframe lock at all, and refusing them
+         * here refused every clip lock and clip edit of a level-1 editor. */
+        if (!stored.isEmpty() && !keepsLocks(stored, payload) && !BbsOpManager.canManage(player))
         {
             return deny(player);
         }
@@ -175,7 +180,7 @@ public final class KeyframeLockGuard
     }
 
     /** Whether {@code payload} still carries a lock for every range the owner holds right now. */
-    private static boolean addsOrKeepsLocks(ValueGroup owner, BaseType payload)
+    private static boolean keepsLocks(List<KeyframeLockData> stored, BaseType payload)
     {
         List<KeyframeLockData> locks = KeyframeLockData.fromPayload(payload);
 
@@ -184,7 +189,7 @@ public final class KeyframeLockGuard
             return false;
         }
 
-        for (KeyframeLockData lock : KeyframeLockData.get(owner))
+        for (KeyframeLockData lock : stored)
         {
             for (KeyframeLockData.Range range : lock.ranges())
             {

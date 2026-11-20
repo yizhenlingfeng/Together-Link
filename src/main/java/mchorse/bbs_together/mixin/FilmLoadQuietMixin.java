@@ -9,7 +9,6 @@ import mchorse.bbs_mod.utils.manager.BaseManager;
 import mchorse.bbs_mod.utils.manager.FolderManager;
 import mchorse.bbs_together.commits.FilmBranchStore;
 import mchorse.bbs_together.network.FilmLoadContext;
-import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.server.network.ServerPlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -52,7 +51,12 @@ public class FilmLoadQuietMixin
 
                 if (film != null)
                 {
-                    TogetherServerNetwork.markBranchStateDelivered(player, id, branch);
+                    /* Deliberately no markBranchStateDelivered() here: BBS' own manager-data
+                     * answer is not the branch-state packet, and treating it as one made the
+                     * following film selection skip the content send. A player whose local copy
+                     * had drifted (wrong branch, dropped packet) then stayed on stale data for
+                     * the whole session. The freshness window in syncFilmBranchState still
+                     * collapses the burst of packets an editor sends when it opens a film. */
                     cir.setReturnValue(film);
 
                     return;

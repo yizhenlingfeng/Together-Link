@@ -504,7 +504,7 @@ public final class KeyframeLockClient
     {
         Film film = film(view);
 
-        if (film == null || selection == null || !selection.ok() || !canManage())
+        if (film == null || selection == null || !selection.ok() || !canOperateLocks())
         {
             return false;
         }
@@ -533,7 +533,7 @@ public final class KeyframeLockClient
     {
         Film film = film(view);
 
-        if (film == null || owner == null || id == null || !canManage())
+        if (film == null || owner == null || id == null || !canOperateLocks())
         {
             return false;
         }

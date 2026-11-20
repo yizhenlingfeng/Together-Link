@@ -12,18 +12,17 @@ import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.PlayerListEntry;
 
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * Client side of the per-clip lock. The lock lives inside the clip's own data
- * (see {@link ClipLockData}), so this class only reads and writes that one
- * foreign entry; the server re-checks every write through
- * {@link ClipLockGuard}.
+ * (see {@link ClipLockData}), so this class only reads and writes that one foreign
+ * entry; the server re-checks every write through {@link ClipLockGuard}.
  */
 @Environment(EnvType.CLIENT)
 public final class ClipLockClient
@@ -83,7 +82,41 @@ public final class ClipLockClient
 
         ClipLockData lock = get(clip);
 
-        return lock == null || lock.allows(AssetLockClient.self());
+        if (lock == null)
+        {
+            return true;
+        }
+
+        /* An automatic lock outlives a crash or a disconnect on the client that owned it. Once
+         * its owner is gone the clip is free again: letting it through here is what lets the
+         * next editor open the clip, and the server then hands the lock over for good. */
+        if (lock.automatic && !ownerOnline(lock.owner))
+        {
+            return true;
+        }
+
+        return lock.allows(AssetLockClient.self());
+    }
+
+    /** Whether the player who owns a lock is still on this server. */
+    private static boolean ownerOnline(UUID playerId)
+    {
+        MinecraftClient client = MinecraftClient.getInstance();
+
+        if (playerId == null || client.getNetworkHandler() == null)
+        {
+            return true;
+        }
+
+        for (PlayerListEntry entry : client.getNetworkHandler().getPlayerList())
+        {
+            if (playerId.equals(PlayerCompat.id(entry.getProfile())))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -185,45 +218,25 @@ public final class ClipLockClient
 
         ClipLockData existing = get(clip);
 
-        /* A manual lock (or another player's lock) is respected: only create our own automatic
-         * lock when the clip carries none, or carries our own automatic lock. */
-        if (existing != null && !(existing.automatic && self.equals(existing.owner)))
+        /* A manual lock is respected as it is. An automatic one is claimed as well: the server
+         * knows whether its owner is still editing the clip, and either adds this player to that
+         * session or hands the stale lock over. Only the server's answer holds, since the lock it
+         * echoes back replaces this claim. */
+        if (existing != null && !existing.automatic)
         {
-            /* Someone else already locked this clip — automatically or by hand — so the player
-             * is a co-editor at most. Joining the whitelist of their automatic lock is what lets
-             * two players edit the same clip together while a third one stays out; the server
-             * only accepts additions to that list. */
-            if (existing.automatic && existing.mode == AssetLockMode.WHITELIST && !existing.whitelist.containsKey(self))
-            {
-                existing.whitelist.put(self, selfName());
-                broadcast(film, clip);
-            }
 
             return;
         }
 
-        Map<UUID, String> editors = new LinkedHashMap<>();
-        editors.put(self, selfName());
-
-        int index = film.camera.getIndex(clip);
-
-        for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet())
-        {
-            TogetherClientNetwork.CursorPosition cursor = entry.getValue();
-
-            if ((cursor.editorType == 0 || cursor.editorType == 2) && cursor.selectedIndices.contains(index)
-                && film.getId().equals(TogetherClientNetwork.filmSelections.get(entry.getKey())))
-            {
-                editors.put(entry.getKey(), "");
-            }
-        }
-
+        /* The whitelist starts with the player taking the lock. The server adds the players who
+         * are editing this clip at that moment from its own focus tracking, so merely selecting
+         * the clip in the timeline never grants edit rights. */
         ClipLockData lock = new ClipLockData(ClipLockData.newId());
         lock.owner = self;
         lock.ownerName = selfName();
         lock.mode = AssetLockMode.WHITELIST;
         lock.automatic = true;
-        lock.whitelist.putAll(editors);
+        lock.whitelist.put(self, lock.ownerName);
 
         Map<String, BaseType> foreign = ((ValueGroupForeignAccessor) (Object) clip).bbs_together$getForeign();
 
