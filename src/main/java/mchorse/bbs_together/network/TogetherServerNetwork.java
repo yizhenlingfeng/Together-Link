@@ -3665,8 +3665,8 @@ public class TogetherServerNetwork {
                 BaseValue storedVal = storedReplay.keyframes.get(keyframeChannel.getId());
                 if (!(storedVal instanceof KeyframeChannel)) continue;
                 storedCh = (KeyframeChannel)storedVal;
+                if (KeyframeLockData.locksChannel(storedReplay, storedCh.getId())) continue;
                 if (keyframeChannel.getKeyframes().size() <= storedCh.getKeyframes().size()) continue;
-                KeyframeLockGuard.sanitizeChannel(storedReplay, storedCh, keyframeChannel);
                 storedCh.fromData(keyframeChannel.toData());
             }
             for (Map.Entry entry : incomingReplay.properties.tracks.entrySet()) {
@@ -3676,8 +3676,8 @@ public class TogetherServerNetwork {
                     storedReplay.properties.put((TrackId)entry.getKey(), inCh);
                     continue;
                 }
+                if (KeyframeLockData.locksChannel(storedReplay, storedCh.getId())) continue;
                 if (inCh.getKeyframes().size() <= storedCh.getKeyframes().size()) continue;
-                KeyframeLockGuard.sanitizeChannel(storedReplay, storedCh, inCh);
                 storedCh.fromData(inCh.toData());
             }
             if (incomingReplay.form.get() == null) continue;
@@ -3827,6 +3827,7 @@ public class TogetherServerNetwork {
         /* Keyframe locks are compared against the branch copy the server holds, so an
          * edit inside a locked range never reaches the other editors. */
         if (!KeyframeLockGuard.canSync(player, filmId, branch, path, payload)) {
+            TogetherServerNetwork.rejectKeyframeSync(player, filmId, branch, path);
             return;
         }
         playerEditingFilm.put(playerId, filmId);
@@ -3859,6 +3860,33 @@ public class TogetherServerNetwork {
             }
             TogetherServerNetwork.scheduleFilmSave(server, filmId, branch);
         }
+    }
+
+    private static void rejectKeyframeSync(ServerPlayerEntity player, String filmId, String branch, List<String> path) {
+        Film film = FilmBranchStore.working(filmId, branch);
+        if (film == null) {
+            return;
+        }
+        int channelDepth = path.get(0).equals("replays") ? 4 : path.get(0).equals("camera") ? 3 : path.size();
+        List<String> responsePath = path.size() > channelDepth ? new ArrayList<String>(path.subList(0, channelDepth)) : path;
+        BaseValue target = TogetherServerNetwork.resolveSyncTarget(film, responsePath);
+        if (target == null && responsePath.size() > 2) {
+            responsePath = new ArrayList<String>(responsePath.subList(0, responsePath.size() - 1));
+            target = TogetherServerNetwork.resolveSyncTarget(film, responsePath);
+        }
+        if (target == null) {
+            return;
+        }
+        byte[] data = DataStorageUtils.writeToBytes(target.toData());
+        List<String> packetPath = new ArrayList<String>(responsePath);
+        TogetherServerNetwork.crusherFor(player).sendGuarded((PlayerEntity)player, CLIENT_FILM_DATA_SYNC, data, outBuf -> {
+            outBuf.writeString(filmId);
+            outBuf.writeString(branch);
+            outBuf.writeInt(packetPath.size());
+            for (String segment : packetPath) {
+                outBuf.writeString(segment);
+            }
+        });
     }
 
     /**

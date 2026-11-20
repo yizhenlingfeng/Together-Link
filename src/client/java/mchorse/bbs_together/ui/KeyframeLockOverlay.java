@@ -59,17 +59,14 @@ public final class KeyframeLockOverlay
         boolean enforced = false;
 
         KeyframeLockClient.renderFilm(KeyframeLockClient.film(view));
-        KeyframeLockClient.currentView(view);
 
         for (UIKeyframeSheet sheet : graph.getSheets())
         {
-            if (KeyframeLockData.ownerOf(sheet.channel) == null)
+            if (!KeyframeLockClient.isSheetVisible(view, sheet) || KeyframeLockData.ownerOf(sheet.channel) == null)
             {
                 continue;
             }
 
-            /* The lookup resolves the channel names the way the editor names them, so a lock saved
-             * in one view (dope sheet) still lands on the right rows in the other (curve graph). */
             List<KeyframeLockData.Range> ranges = KeyframeLockClient.rangesForSheet(sheet);
 
             if (ranges.isEmpty())
@@ -289,61 +286,78 @@ public final class KeyframeLockOverlay
     {
         for (Map.Entry<Integer, List<int[]>> entry : segments.entrySet())
         {
-            List<int[]> runs = entry.getValue();
+            int position = entry.getKey();
 
-            runs.sort(Comparator.comparingInt((int[] run) -> run[0]));
-
-            List<int[]> merged = new ArrayList<>();
-            int[] current = null;
-
-            for (int[] run : runs)
+            for (int flag = 0; flag <= 1; flag++)
             {
-                if (current == null || run[0] > current[1])
+                List<int[]> runs = new ArrayList<>();
+
+                for (int[] segment : entry.getValue())
                 {
-                    current = new int[] {run[0], run[1]};
-                    merged.add(current);
-                }
-                else
-                {
-                    current[1] = Math.max(current[1], run[1]);
-                }
-            }
-
-            int offset = 0;
-
-            for (int[] run : merged)
-            {
-                int length = run[1] - run[0];
-                int drawn = 0;
-                int phase = Math.floorMod(offset, DASH + GAP);
-
-                while (drawn < length)
-                {
-                    int dashLength = Math.min(DASH - phase, length - drawn);
-
-                    if (dashLength <= 0)
+                    if (segment[2] == flag)
                     {
-                        break;
+                        runs.add(new int[] {segment[0], segment[1]});
                     }
+                }
 
-                    int from = run[0] + drawn;
-                    int to = from + dashLength;
+                if (runs.isEmpty())
+                {
+                    continue;
+                }
 
-                    if (horizontal)
+                runs.sort(Comparator.comparingInt((int[] run) -> run[0]));
+
+                List<int[]> merged = new ArrayList<>();
+
+                for (int[] run : runs)
+                {
+                    if (!merged.isEmpty() && run[0] <= merged.get(merged.size() - 1)[1])
                     {
-                        context.batcher.box(from, entry.getKey() - 0.5F, to, entry.getKey() + 0.5F, (drawn + phase) < DASH ? strong : soft);
+                        int[] last = merged.get(merged.size() - 1);
+
+                        last[1] = Math.max(last[1], run[1]);
                     }
                     else
                     {
-                        context.batcher.box(entry.getKey() - 0.5F, from, entry.getKey() + 0.5F, to, (drawn + phase) < DASH ? strong : soft);
+                        merged.add(new int[] {run[0], run[1]});
                     }
-
-                    drawn += dashLength;
-                    phase = 0;
                 }
 
-                offset += length;
+                int color = flag == 1 ? strong : soft;
+                int offset = flag == 1 ? 0 : -1;
+
+                for (int[] run : merged)
+                {
+                    if (horizontal)
+                    {
+                        dashHorizontal(context, run[0], run[1], position + offset, color);
+                    }
+                    else
+                    {
+                        dashVertical(context, run[0], run[1], position + offset, color);
+                    }
+                }
             }
+        }
+    }
+
+    private static void dashHorizontal(UIContext context, int x1, int x2, int y, int color)
+    {
+        for (int x = x1; x < x2; x += DASH + GAP)
+        {
+            int end = Math.min(x + DASH, x2);
+
+            context.batcher.box(x, y, end, y + 1, color);
+        }
+    }
+
+    private static void dashVertical(UIContext context, int y1, int y2, int x, int color)
+    {
+        for (int y = y1; y < y2; y += DASH + GAP)
+        {
+            int end = Math.min(y + DASH, y2);
+
+            context.batcher.box(x, y, x + 1, end, color);
         }
     }
 

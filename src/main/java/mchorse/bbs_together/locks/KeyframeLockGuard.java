@@ -33,9 +33,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * the branch working copy, so unrelated keyframe edits keep flowing.
  *
  * <p>Creating, changing or removing a lock is level-2 only, exactly like the clip
- * and film locks. Full film saves are sanitized after the fact, because BBS merges
- * keyframe channels by key count and would otherwise accept a channel that replaced
- * locked keys.</p>
+ * and film locks. Full film saves keep the server's whole channel when it has a lock,
+ * because a serialized replacement does not preserve object identity and could move a
+ * locked key out of its range while leaving a modified copy behind.</p>
  */
 public final class KeyframeLockGuard
 {
@@ -54,11 +54,6 @@ public final class KeyframeLockGuard
     public static boolean canSync(ServerPlayerEntity player, String filmId, String branch, List<String> path, BaseType payload)
     {
         if (player == null || path == null || path.size() < 2)
-        {
-            return true;
-        }
-
-        if (BbsOpManager.canManage(player))
         {
             return true;
         }
@@ -150,16 +145,33 @@ public final class KeyframeLockGuard
      * owner already holds, cannot take a lock away from anybody, and it is what an admin's lock
      * broadcast looks like; refusing it left the lock only on the client that created it, which
      * showed up as "locking a clip sometimes does not stick, lock it a second time". Payloads that
-     * drop or clear the lock record stay refused.
+     * drop or clear the lock record stay refused unless the player manages locks. Once an owner has
+     * a lock, every owner snapshot must leave its child values unchanged, managers included;
+     * lock-only broadcasts carry no children.
      */
     private static boolean ownerPayload(ServerPlayerEntity player, ValueGroup owner, BaseType payload)
     {
-        if (addsOrKeepsLocks(owner, payload))
+        if (!addsOrKeepsLocks(owner, payload) && !BbsOpManager.canManage(player))
+        {
+            return deny(player);
+        }
+
+        if (!KeyframeLockData.hasAny(owner) || payload == null || !payload.isMap())
         {
             return true;
         }
 
-        return deny(player);
+        for (String key : payload.asMap().keys())
+        {
+            BaseValue child = owner.get(key);
+
+            if (child != null && !BaseType.equals(child.toData(), payload.asMap().get(key)))
+            {
+                return deny(player);
+            }
+        }
+
+        return true;
     }
 
     /** Whether {@code payload} still carries a lock for every range the owner holds right now. */
@@ -206,9 +218,14 @@ public final class KeyframeLockGuard
     {
         List<KeyframeLockData.Range> ranges = KeyframeLockData.rangesFor(owner, channelId);
 
-        if (ranges.isEmpty() || stored == null)
+        if (ranges.isEmpty())
         {
             return true;
+        }
+
+        if (stored == null)
+        {
+            return deny(player);
         }
 
         if (payload == null || !payload.isMap())
@@ -235,14 +252,19 @@ public final class KeyframeLockGuard
     {
         List<KeyframeLockData.Range> ranges = KeyframeLockData.rangesFor(owner, channelId);
 
-        if (ranges.isEmpty() || stored == null)
+        if (ranges.isEmpty())
         {
             return true;
         }
 
+        if (stored == null)
+        {
+            return deny(player);
+        }
+
         if (keyIndex < 0 || keyIndex >= stored.getKeyframes().size())
         {
-            return true;
+            return deny(player);
         }
 
         Keyframe<?> key = stored.getKeyframes().get(keyIndex);
@@ -396,7 +418,7 @@ public final class KeyframeLockGuard
      */
     public static String undoReason(ServerPlayerEntity player, String filmId, String branch, Film film, List<String> path, BaseType payload)
     {
-        if (player == null || film == null || path == null || path.size() < 2 || BbsOpManager.canManage(player))
+        if (player == null || film == null || path == null || path.size() < 2)
         {
             return null;
         }
@@ -414,7 +436,7 @@ public final class KeyframeLockGuard
 
             if (path.size() == 2)
             {
-                return undoOwner(replay);
+                return undoOwner(replay, payload);
             }
 
             if (path.size() == 3)
@@ -426,7 +448,7 @@ public final class KeyframeLockGuard
                     return null;
                 }
 
-                return undoOwner(replay);
+                return undoOwner(replay, payload);
             }
 
             String channelId = path.get(3);
@@ -451,7 +473,7 @@ public final class KeyframeLockGuard
 
             if (path.size() == 2)
             {
-                return undoOwner(clip);
+                return undoOwner(clip, payload);
             }
 
             String channelId = path.get(2);
@@ -468,18 +490,99 @@ public final class KeyframeLockGuard
         return null;
     }
 
-    private static String undoOwner(ValueGroup owner)
+    private static String undoOwner(ValueGroup owner, BaseType payload)
     {
-        return KeyframeLockData.hasAny(owner) ? REASON_LOCKED : null;
+        if (!KeyframeLockData.hasAny(owner))
+        {
+            return null;
+        }
+
+        if (payload == null || !payload.isMap())
+        {
+            return REASON_LOCKED;
+        }
+
+        for (KeyframeLockData lock : KeyframeLockData.get(owner))
+        {
+            for (KeyframeLockData.Range range : lock.ranges())
+            {
+                KeyframeChannel<?> stored = ownerChannel(owner, range.channel());
+                BaseType incoming = ownerChannelData(payload.asMap(), range.channel());
+
+                if (stored == null || incoming == null || !incoming.isMap())
+                {
+                    return REASON_LOCKED;
+                }
+
+                List<KeyframeLockData.Range> ranges = List.of(range);
+
+                if (!sameKeys(stored, incoming.asMap().getList(KEYFRAMES), ranges)
+                    || !sameLoops(stored, incoming.asMap().getList("loops"), ranges))
+                {
+                    return REASON_LOCKED;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static KeyframeChannel<?> ownerChannel(ValueGroup owner, String channelId)
+    {
+        if (owner instanceof Replay replay)
+        {
+            KeyframeChannel<?> curated = channel(replay, KEYFRAMES, channelId);
+
+            return curated != null ? curated : channel(replay, PROPERTIES, channelId);
+        }
+
+        BaseValue direct = owner.get(channelId);
+
+        if (direct instanceof KeyframeChannel<?> channel)
+        {
+            return channel;
+        }
+
+        BaseValue channels = owner.get("channels");
+        BaseValue nested = channels instanceof ValueGroup group ? group.get(channelId) : null;
+
+        return nested instanceof KeyframeChannel<?> channel ? channel : null;
+    }
+
+    private static BaseType ownerChannelData(MapType payload, String channelId)
+    {
+        BaseType direct = payload.get(channelId);
+
+        if (direct != null)
+        {
+            return direct;
+        }
+
+        for (String group : new String[] {KEYFRAMES, PROPERTIES, "channels"})
+        {
+            BaseType value = payload.get(group);
+
+            if (value != null && value.isMap() && value.asMap().has(channelId))
+            {
+                return value.asMap().get(channelId);
+            }
+        }
+
+        return null;
     }
 
     private static String undoChannel(ValueGroup owner, KeyframeChannel<?> stored, String channelId, BaseType payload)
     {
         List<KeyframeLockData.Range> ranges = KeyframeLockData.rangesFor(owner, channelId);
 
-        if (ranges.isEmpty() || stored == null)
+        if (ranges.isEmpty())
         {
             return null;
+        }
+
+        if (stored == null)
+        {
+            return REASON_LOCKED;
         }
 
         if (payload == null || !payload.isMap() || !sameKeys(stored, payload.asMap().getList(KEYFRAMES), ranges))
@@ -494,82 +597,27 @@ public final class KeyframeLockGuard
     {
         List<KeyframeLockData.Range> ranges = KeyframeLockData.rangesFor(owner, channelId);
 
-        if (ranges.isEmpty() || stored == null)
+        if (ranges.isEmpty())
         {
             return null;
+        }
+
+        if (stored == null)
+        {
+            return REASON_LOCKED;
         }
 
         /* An index that no longer exists means the rollback would recreate a key the lock
          * may cover; there is nothing to compare against, so treat it as locked. */
         if (keyIndex < 0 || keyIndex >= stored.getKeyframes().size())
         {
-            return KeyframeLockData.locksChannel(owner, channelId) ? REASON_LOCKED : null;
+            return REASON_LOCKED;
         }
 
-        return inRange(ranges, stored.getKeyframes().get(keyIndex).getTick()) ? REASON_LOCKED : null;
-    }
+        float currentTick = stored.getKeyframes().get(keyIndex).getTick();
+        float restoredTick = payload != null && payload.isMap() && payload.asMap().has("tick") ? payload.asMap().getFloat("tick") : currentTick;
 
-    /* Full-save sanitize */
-
-    /**
-     * Restores the locked slices of a stored channel inside the incoming channel
-     * before it replaces the stored one. Called by {@code mergeFilms}.
-     */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public static void sanitizeChannel(ValueGroup owner, KeyframeChannel<?> stored, KeyframeChannel<?> incoming)
-    {
-        List<KeyframeLockData.Range> ranges = KeyframeLockData.rangesFor(owner, stored.getId());
-
-        if (ranges.isEmpty())
-        {
-            return;
-        }
-
-        for (int i = incoming.getKeyframes().size() - 1; i >= 0; i--)
-        {
-            Keyframe key = incoming.getKeyframes().get(i);
-
-            if (inRange(ranges, key.getTick()))
-            {
-                incoming.remove(i);
-            }
-        }
-
-        for (Keyframe key : stored.getKeyframes())
-        {
-            if (inRange(ranges, key.getTick()))
-            {
-                incoming.add(clone(key));
-            }
-        }
-
-        for (KeyframeLoop loop : new ArrayList<>(incoming.getLoops()))
-        {
-            if (intersects(ranges, loop.start(), incoming.getLoopEnd(loop)))
-            {
-                incoming.removeLoop(loop.id());
-            }
-        }
-
-        for (KeyframeLoop loop : new ArrayList<>(stored.getLoops()))
-        {
-            if (intersects(ranges, loop.start(), stored.getLoopEnd(loop)))
-            {
-                incoming.putLoop(loop);
-            }
-        }
-
-        incoming.sort();
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static Keyframe clone(Keyframe key)
-    {
-        Keyframe copy = new Keyframe("", key.getFactory(), key.getTick(), key.getFactory().copy(key.getValue()));
-
-        copy.copyOverExtra(key);
-
-        return copy;
+        return inRange(ranges, currentTick) || inRange(ranges, restoredTick) ? REASON_LOCKED : null;
     }
 
     /* Resolution */

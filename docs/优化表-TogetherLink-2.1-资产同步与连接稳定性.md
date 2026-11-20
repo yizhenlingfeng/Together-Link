@@ -396,21 +396,19 @@ sendGuarded(整包 1,048,576 B)
 | 选区 | `cacheKeyframes` / `submitKeyframes` 返回后清理选区 | 全选、选择轨道、框选等不经过「点击某个键」的路径 |
 | 判定 | 新增 `KeyframeLockClient.lockedFor` / `lockedKey` / `lockedTick` | 统一「这把锁对本地玩家是否生效」：`!canManage()` 且该通道有锁 |
 
-保留的行为：锁管理者（`canManage`，等级 ≥ 2）照旧可以编辑，和服务端守卫的放行条件一致。
+保留的行为：锁管理者（`canManage`，等级 ≥ 2）可以创建和解除锁，但锁内数据对管理者同样只读，解锁后才能编辑。
 
-**未做**：关键帧属性面板里数值字段（trackpad）的写入拦截。BBS 的值控件回调是
-`(v) -> value.set(...)`，闭包里拿不到所属值，而 `UINumericInput` 的构造器与 `valueBinding`
-都不暴露绑定目标，需要额外的 shadow 或改 BBS 侧接口；本轮没有可靠的挂接点，强行加会把
-所有数值控件一起包一层，风险大于收益。属性面板编辑单帧数值这一条路径仍不受本地保护，
-但服务端在联机时仍会拒绝并把改动回滚（`CLIENT_UNDO_REJECTED`）。
+**第三轮补齐（2026-11-20）**：属性面板不再只依赖选区过滤。锁定关键帧不创建属性面板，已打开的面板在锁生效后停止渲染和输入；数值编辑、贝塞尔手柄、Anchor、动作配置、形状键、粒子设置等直接对象写入均由关键帧 setter 或通道事务兜底。`BaseValue` 的通知事务记录锁区快照与关键帧身份，恢复非法修改；整通道替换导致原锁内对象消失时回退整次修改。服务端收到管理员权威同步时走既有的远程应用边界，不会被本地锁误回滚。
+
+服务端同步改为失败关闭：锁存在但通道或索引无法解析时拒绝，撤销同时检查当前 tick 与恢复 tick，owner 快照中的子值必须与服务端一致。普通增量被拒绝时立即回发所属通道（owner 快照则回退到对应 owner），避免索引偏移；完整影片保存保留服务端的锁定通道，避免序列化替换后在区外留下移动副本。owner 撤销逐通道比较锁区，不再因剪辑有锁而拒绝全部撤回；回放位移和旋转 Gizmo 在写入实体前按当前 tick 拦截，避免只恢复通道却仍移动实体。
 
 补记 2026-11-20（第一轮落地后用户反馈「没区别」，第二轮补齐 C 与 D 两条路径）：
 
 | 层 | 改动 | 覆盖的编辑入口 |
 |---|---|---|
 | Ctrl+左键 | `UIKeyframesLockMixin` 在 `subMouseClicked` 的 **HEAD** 注入 `blocksKeyframeEdit`：命中的键被锁则不删，空位落在锁内则不插 | BBS 的 Ctrl+左键走 `removeOrCreateKeyframe`，不经过上一行的选取路径 |
-| 自动插键 | 新增 `IUIKeyframeGraphLockMixin`，在 `IUIKeyframeGraph#addKeyframe` 的 HEAD 快照通道、RETURN 比对撤回 | 播放头插键、自动关键帧、快捷键插键都汇聚到这个接口方法（它是 default 方法，不属于 `UIKeyframes`） |
-| 匹配 | `namesOf(sheet)` 用当前编辑器里各通道的确切名字，替换原先的 `endsWith` 后缀匹配 | 修「同步回来后锁定框变阶梯」：后缀匹配会让一个通道认领相邻通道的锁 |
+| 自动插键 | `IUIKeyframeGraphLockMixin` 在 `IUIKeyframeGraph#addKeyframe` 的 HEAD 直接拒绝锁区插入，通道事务再兜底其他直接 `insert` 路径 | 播放头插键、自动关键帧、快捷键插键；同 tick 不再先覆盖后删除 |
+| 匹配 | `rangesForSheet(sheet)` 只按 `channel.getId()` 精确取得锁区间，不再做前后缀推断；绘制与菜单命中跳过不可见轨道 | 修「同步回来后锁定框变阶梯」及锁框落到未锁定轨道、折叠区域的问题；显示、编辑拦截和服务端共用同一通道身份 |
 
 踩坑记录：`javac` 不校验 mixin 的方法名与描述符，`addKeyframe` 挂在 `UIKeyframes` 上时三个目标都能构建通过，直到启动才以 `InvalidInjectionException` 崩溃。本轮之后凡是新增注入，都在构建后用 `jar tf` 确认类进包，并对照 `javap` 的输出核对目标签名。
 

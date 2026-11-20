@@ -5,14 +5,13 @@ import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeLoops;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframes;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
-import mchorse.bbs_mod.utils.keyframes.KeyframeLoop;
 import mchorse.bbs_together.locks.KeyframeLockClient;
-import mchorse.bbs_together.locks.KeyframeLockData;
 import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -42,7 +41,7 @@ public abstract class UIKeyframeLoopsLockMixin
 
         UIKeyframeSheet sheet = this.view.getGraph().getSheet(context.mouseY);
 
-        if (sheet == null || KeyframeLockData.ownerOf(sheet.channel) == null)
+        if (sheet == null)
         {
             return;
         }
@@ -63,16 +62,27 @@ public abstract class UIKeyframeLoopsLockMixin
             return;
         }
 
-        KeyframeLoop loop = this.selectedChannel.getLoop(this.selectedId);
-
-        if (loop == null)
-        {
-            return;
-        }
-
-        if (KeyframeLockData.loopLocked(KeyframeLockData.ownerOf(this.selectedChannel), this.selectedChannel.getId(), loop, this.selectedChannel.getLoopEnd(loop)))
+        if (KeyframeLockClient.loopLocked(this.selectedChannel, this.selectedId))
         {
             cir.setReturnValue(true);
+        }
+    }
+
+    @Inject(method = "setEnd", at = @At("HEAD"), cancellable = true, remap = false)
+    private void bbs_together$blockLockedLoopResize(KeyframeChannel<?> channel, String id, float end, CallbackInfo ci)
+    {
+        if (KeyframeLockClient.loopLocked(channel, id))
+        {
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "remove", at = @At("HEAD"), cancellable = true, remap = false)
+    private void bbs_together$blockLockedLoopRemove(KeyframeChannel<?> channel, String id, CallbackInfo ci)
+    {
+        if (KeyframeLockClient.loopLocked(channel, id))
+        {
+            ci.cancel();
         }
     }
 }

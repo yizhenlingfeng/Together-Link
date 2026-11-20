@@ -5,7 +5,6 @@ import mchorse.bbs_mod.data.types.ListType;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
-import mchorse.bbs_mod.settings.values.IValueListener;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.KeyframeSelection;
@@ -19,6 +18,7 @@ import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_mod.utils.keyframes.Keyframe;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_mod.utils.keyframes.KeyframeLoop;
+import mchorse.bbs_together.BBSTogetherFix22;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -33,9 +33,10 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 /**
- * Client side of the multi-keyframe lock. It only touches the foreign map of the
- * nearest replay or camera clip; the server re-checks every write through
- * {@link KeyframeLockGuard}.
+ * Client side of the multi-keyframe lock. Lock records live in the foreign map of the
+ * nearest replay or camera clip. Local writes are refused at the UI entry points and
+ * re-checked in channel transactions; authoritative remote writes use the remote-apply
+ * boundary, and the server independently re-checks every write through {@link KeyframeLockGuard}.
  */
 @Environment(EnvType.CLIENT)
 public final class KeyframeLockClient
@@ -52,73 +53,229 @@ public final class KeyframeLockClient
      * view over, so the film it belongs to is parked here for the duration of a render. */
     private static Film rendering;
 
-    /* The keyframe editor hands its overlay nothing but the render context, and the lock menu is
-     * opened from a click, so both the film and the sheets are parked here for the duration of one
-     * call. Both are replaced by the next call that needs them. */
-    private static UIKeyframes view;
-
     public static void renderFilm(Film film)
     {
         rendering = film;
     }
 
-    public static void currentView(UIKeyframes keyframes)
+    private static final Map<KeyframeChannel<?>, ChannelEdit> channelEdits = new WeakHashMap<>();
+    private static final ThreadLocal<Integer> restoring = ThreadLocal.withInitial(() -> 0);
+
+    private static final class ChannelEdit
     {
-        view = keyframes;
+        private int depth = 1;
+        private final BaseType before;
+        private final List<Keyframe<?>> lockedKeys;
+
+        private ChannelEdit(BaseType before, List<Keyframe<?>> lockedKeys)
+        {
+            this.before = before;
+            this.lockedKeys = lockedKeys;
+        }
     }
 
-    /* The graph interface is shared by the dope sheet and the curve graph, so the snapshot of a
-     * channel's keys is parked here instead of in the mixin fields: one mixin instance would be
-     * shared by every graph in the process. */
-    private static final Map<KeyframeChannel<?>, Object[]> pendingInsertions = new WeakHashMap<>();
-
-    /** Remembers a channel's keys before an insertion so a locked result can be rolled back. */
-    public static void rememberInsertion(UIKeyframeSheet sheet, float tick, List<Keyframe<?>> keys)
+    public static void beginChannelEdit(KeyframeChannel<?> channel)
     {
-        if (sheet == null || sheet.channel == null)
+        ChannelEdit edit = channelEdits.get(channel);
+
+        if (edit != null)
+        {
+            edit.depth += 1;
+            return;
+        }
+
+        if (!guardsLocalWrites())
         {
             return;
         }
 
-        if (lockedTick(sheet, tick))
+        ValueGroup owner = KeyframeLockData.ownerOf(channel);
+        List<KeyframeLockData.Range> ranges = owner == null ? List.of() : KeyframeLockData.rangesFor(owner, channel.getId());
+
+        if (ranges.isEmpty())
         {
-            pendingInsertions.put(sheet.channel, new Object[] {sheet, new ArrayList<>(keys)});
+            return;
         }
-        else
+
+        ArrayList<Keyframe<?>> lockedKeys = new ArrayList<>();
+
+        for (Keyframe<?> key : channel.getKeyframes())
         {
-            pendingInsertions.remove(sheet.channel);
+            if (locked(ranges, key.getTick()))
+            {
+                lockedKeys.add(key);
+            }
+        }
+
+        channelEdits.put(channel, new ChannelEdit(channel.toData(), lockedKeys));
+    }
+
+    public static void endChannelEdit(KeyframeChannel<?> channel)
+    {
+        ChannelEdit edit = channelEdits.get(channel);
+
+        if (edit == null)
+        {
+            return;
+        }
+
+        edit.depth -= 1;
+
+        if (edit.depth > 0)
+        {
+            return;
+        }
+
+        channelEdits.remove(channel);
+
+        if (BaseType.equals(edit.before, channel.toData()))
+        {
+            return;
+        }
+
+        ValueGroup owner = KeyframeLockData.ownerOf(channel);
+        List<KeyframeLockData.Range> ranges = owner == null ? List.of() : KeyframeLockData.rangesFor(owner, channel.getId());
+
+        if (!ranges.isEmpty())
+        {
+            restoreChannel(channel, edit, ranges);
         }
     }
 
-    /** Drops every keyframe the last insertion added inside a lock. */
-    public static void dropLockedInsertions()
+    private static boolean guardsLocalWrites()
     {
-        for (Object[] pending : pendingInsertions.values())
+        return !BBSTogetherFix22.isApplyingRemoteSync() && restoring.get() == 0;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void restoreChannel(KeyframeChannel<?> channel, ChannelEdit edit, List<KeyframeLockData.Range> ranges)
+    {
+        KeyframeChannel stored = new KeyframeChannel(channel.getId(), channel.getFactory());
+
+        stored.fromData(edit.before);
+        restoring.set(restoring.get() + 1);
+
+        try
         {
-            if (pending == null || pending.length != 2)
-            {
-                continue;
-            }
+            boolean replaced = false;
 
-            if (!(pending[0] instanceof UIKeyframeSheet sheet) || !(pending[1] instanceof List<?> keys))
+            for (Keyframe<?> key : edit.lockedKeys)
             {
-                continue;
-            }
-
-            ArrayList<Keyframe<?>> before = new ArrayList<>();
-
-            for (Object key : keys)
-            {
-                if (key instanceof Keyframe<?> keyframe)
+                if (!containsIdentity(channel, key))
                 {
-                    before.add(keyframe);
+                    replaced = true;
+                    break;
                 }
             }
 
-            undoInsertedKeys(sheet, before);
+            if (replaced)
+            {
+                replaceChannel(channel, stored);
+                return;
+            }
+
+            for (int i = channel.getKeyframes().size() - 1; i >= 0; i--)
+            {
+                Keyframe<?> key = (Keyframe<?>) channel.getKeyframes().get(i);
+
+                if (locked(ranges, key.getTick()) || containsIdentity(edit.lockedKeys, key))
+                {
+                    channel.remove(i);
+                }
+            }
+
+            for (Object entry : stored.getKeyframes())
+            {
+                Keyframe key = (Keyframe) entry;
+
+                if (locked(ranges, key.getTick()))
+                {
+                    channel.add(cloneKey(key));
+                }
+            }
+
+            restoreLoops(channel, stored, ranges, false);
+            channel.sort();
+        }
+        finally
+        {
+            restoring.set(restoring.get() - 1);
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void replaceChannel(KeyframeChannel<?> channel, KeyframeChannel stored)
+    {
+        for (int i = channel.getKeyframes().size() - 1; i >= 0; i--)
+        {
+            channel.remove(i);
         }
 
-        pendingInsertions.clear();
+        for (Object key : stored.getKeyframes())
+        {
+            channel.add(cloneKey((Keyframe) key));
+        }
+
+        restoreLoops(channel, stored, List.of(), true);
+        channel.sort();
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void restoreLoops(KeyframeChannel<?> channel, KeyframeChannel stored, List<KeyframeLockData.Range> ranges, boolean all)
+    {
+        for (KeyframeLoop loop : new ArrayList<>(channel.getLoops()))
+        {
+            if (all || intersects(ranges, loop.start(), channel.getLoopEnd(loop)))
+            {
+                channel.removeLoop(loop.id());
+            }
+        }
+
+        for (Object entry : new ArrayList<>(stored.getLoops()))
+        {
+            KeyframeLoop loop = (KeyframeLoop) entry;
+
+            if (all || intersects(ranges, loop.start(), stored.getLoopEnd(loop)))
+            {
+                channel.putLoop(loop);
+            }
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static Keyframe cloneKey(Keyframe key)
+    {
+        Keyframe copy = new Keyframe("", key.getFactory());
+
+        copy.copy(key);
+
+        return copy;
+    }
+
+    private static boolean containsIdentity(KeyframeChannel<?> channel, Keyframe<?> candidate)
+    {
+        for (Keyframe<?> key : channel.getKeyframes())
+        {
+            if (key == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean containsIdentity(List<Keyframe<?>> keys, Keyframe<?> candidate)
+    {
+        for (Keyframe<?> key : keys)
+        {
+            if (key == candidate)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static boolean canManage()
@@ -387,23 +544,6 @@ public final class KeyframeLockClient
         return ((Keyframe<?>) channel.getKeyframes().get(index)).getTick();
     }
 
-    /**
-     * Whether a stored lock channel id refers to this sheet.
-     *
-     * <p>The editor names sheets in more than one way: the dope sheet uses the raw channel id while the
-     * single-channel curve graph prefixes it. A lock stored from one of them has to be found from the
-     * other, or it silently stops protecting the moment the timeline switches view.</p>
-     */
-    private static boolean matches(String stored, String current)
-    {
-        if (stored == null || current == null)
-        {
-            return false;
-        }
-
-        return stored.equals(current) || current.endsWith(stored) || stored.endsWith(current);
-    }
-
     /** The channel an undo entry edited, either the value itself or the group a key sits in. */
     private static KeyframeChannel<?> channelOf(BaseValue value)
     {
@@ -458,155 +598,58 @@ public final class KeyframeLockClient
 
     public static List<KeyframeLockData.Range> rangesForSheet(UIKeyframeSheet sheet)
     {
+        if (sheet == null || sheet.channel == null)
+        {
+            return List.of();
+        }
+
         ValueGroup owner = KeyframeLockData.ownerOf(sheet.channel);
 
-        return owner == null ? List.of() : rangesFor(owner, sheet);
-    }
-
-    /**
-     * Every lock range that covers a sheet's channel.
-     *
-     * <p>A stored channel id is looked up in the names this sheet answers to. Only names taken from
-     * the sheets themselves are accepted: one channel id can be a suffix of another one
-     * (BBS channel ids and sheet ids are built from the same key path), and a plain suffix test
-     * would then make a lock on one channel claim the rows of its neighbours - which is how a saved
-     * lock came back as a stair-stepped shape after a relog.</p>
-     */
-    private static List<KeyframeLockData.Range> rangesFor(ValueGroup owner, UIKeyframeSheet sheet)
-    {
-        ArrayList<KeyframeLockData.Range> ranges = new ArrayList<>();
-        List<String> names = KeyframeLockClient.namesOf(sheet);
-
-        if (names.isEmpty())
-        {
-            return ranges;
-        }
-
-        for (KeyframeLockData lock : KeyframeLockData.get(owner))
-        {
-            for (KeyframeLockData.Range range : lock.ranges())
-            {
-                String stored = range.channel();
-
-                if (stored != null && names.contains(stored))
-                {
-                    ranges.add(range);
-                }
-            }
-        }
-
-        return ranges;
-    }
-
-    /**
-     * The sheets of the view currently being rendered or edited. The keyframe overlay and the lock
-     * menu both run inside the editor's own callbacks, so the view is parked for the duration of the
-     * call instead of being threaded through every helper.
-     */
-    private static List<UIKeyframeSheet> sheets()
-    {
-        UIKeyframes current = KeyframeLockClient.view;
-
-        return current == null || current.getGraph() == null ? List.of() : current.getGraph().getSheets();
-    }
-
-    /** The channel id and sheet id of one sheet, the two names a stored lock may use for it. */
-    private static List<String> names(UIKeyframeSheet sheet)
-    {
-        ArrayList<String> names = new ArrayList<>(2);
-
-        if (sheet == null)
-        {
-            return names;
-        }
-
-        String channel = sheet.channel == null ? null : sheet.channel.getId();
-
-        if (channel != null && !channel.isEmpty())
-        {
-            names.add(channel);
-        }
-
-        if (sheet.id != null && !sheet.id.isEmpty() && !sheet.id.equals(channel))
-        {
-            names.add(sheet.id);
-        }
-
-        return names;
-    }
-
-    /**
-     * Every name the given sheet answers to: its own two ids, plus the ids of any other sheet whose
-     * channel id is a prefix or a suffix of its own. The two keyframe views name the same channel
-     * differently (the curve graph strips a leading part of the id), so the translation has to come
-     * from the sheets that are currently on screen rather than from string arithmetic.
-     */
-    private static List<String> namesOf(UIKeyframeSheet sheet)
-    {
-        ArrayList<String> names = new ArrayList<>(KeyframeLockClient.names(sheet));
-
-        if (names.isEmpty())
-        {
-            return names;
-        }
-
-        String mine = sheet.channel.getId();
-
-        for (UIKeyframeSheet other : KeyframeLockClient.sheets())
-        {
-            if (other == sheet || other.channel == null)
-            {
-                continue;
-            }
-
-            String theirs = other.channel.getId();
-
-            if (theirs == null || theirs.isEmpty())
-            {
-                continue;
-            }
-
-            if (mine.equals(theirs) || mine.endsWith(theirs) || theirs.endsWith(mine))
-            {
-                for (String name : KeyframeLockClient.names(other))
-                {
-                    if (!names.contains(name))
-                    {
-                        names.add(name);
-                    }
-                }
-            }
-        }
-
-        return names;
+        return owner == null ? List.of() : KeyframeLockData.rangesFor(owner, sheet.channel.getId());
     }
 
     /* Local enforcement */
 
-    /**
-     * Whether the lock on this sheet applies to the local player, so the editor itself refuses to
-     * change those keys.
-     *
-     * <p>The server only re-checks writes, and that is enough for a dedicated server. In single
-     * player and on an integrated server the local player is the server: it may edit, but nobody
-     * sends its edits through a network channel, so the guard would never see them. The UI has to
-     * enforce the same rule it draws, or the lock is decoration. Lock managers keep editing on
-     * purpose - the guard lets them through too.</p>
-     */
-    public static boolean lockedFor(UIKeyframeSheet sheet)
-    {
-        return sheet != null && !canManage() && !rangesForSheet(sheet).isEmpty();
-    }
-
-    /** Whether a key of a sheet sits inside a lock that applies to us. */
+    /** Whether a key of a sheet sits inside a lock. */
     public static boolean lockedKey(UIKeyframeSheet sheet, Keyframe<?> key)
     {
-        if (!lockedFor(sheet) || key == null)
+        return sheet != null && key != null && locked(rangesForSheet(sheet), key.getTick());
+    }
+
+    public static boolean lockedKeyframe(Keyframe<?> key)
+    {
+        if (key == null || !(key.getParent() instanceof KeyframeChannel<?> channel))
         {
             return false;
         }
 
-        return locked(rangesForSheet(sheet), key.getTick());
+        ValueGroup owner = KeyframeLockData.ownerOf(channel);
+        List<KeyframeLockData.Range> ranges = owner == null ? List.of() : KeyframeLockData.rangesFor(owner, channel.getId());
+
+        return locked(ranges, key.getTick());
+    }
+
+    public static boolean blocksKeyframeMutation(Keyframe<?> key, float targetTick)
+    {
+        if (!guardsLocalWrites() || key == null || !(key.getParent() instanceof KeyframeChannel<?> channel))
+        {
+            return false;
+        }
+
+        if (channelEdits.containsKey(channel))
+        {
+            return false;
+        }
+
+        ValueGroup owner = KeyframeLockData.ownerOf(channel);
+        List<KeyframeLockData.Range> ranges = owner == null ? List.of() : KeyframeLockData.rangesFor(owner, channel.getId());
+
+        return locked(ranges, key.getTick()) || locked(ranges, targetTick);
+    }
+
+    public static boolean blocksKeyframeMutation(Keyframe<?> key)
+    {
+        return key != null && blocksKeyframeMutation(key, key.getTick());
     }
 
     /**
@@ -653,84 +696,35 @@ public final class KeyframeLockClient
         return pair == null && lockedTick(graph.getSheet(mouseY), (float) view.fromGraphX(mouseX));
     }
 
-    /** Whether a tick of a sheet falls inside a lock that applies to the local player. */
-    public static boolean lockedTick(UIKeyframeSheet sheet, float tick)
+    public static boolean lockedTick(KeyframeChannel<?> channel, float tick)
     {
-        return lockedFor(sheet) && locked(rangesForSheet(sheet), tick);
-    }
-
-    /**
-     * The keyframes of a sheet that an {@link IUIKeyframeGraph#addKeyframe} call is about to create.
-     *
-     * <p>Keyframes can appear without the user clicking on a key: Ctrl+click in empty space, the
-     * "create at playhead" shortcut and auto-keyframing all end in a channel insertion. Taking the
-     * channel's key set before the call and diffing it after is the only place that catches all
-     * three without patching each shortcut.</p>
-     */
-    public static List<Keyframe<?>> channelKeys(UIKeyframeSheet sheet)
-    {
-        ArrayList<Keyframe<?>> keys = new ArrayList<>();
-
-        if (sheet != null)
-        {
-            for (Object key : sheet.channel.getKeyframes())
-            {
-                keys.add((Keyframe<?>) key);
-            }
-        }
-
-        return keys;
-    }
-
-    /**
-     * Removes the keyframes a guarded insertion created. Called with the snapshot taken by
-     * {@link #channelKeys(UIKeyframeSheet)} before the insertion.
-     */
-    public static boolean undoInsertedKeys(UIKeyframeSheet sheet, List<Keyframe<?>> before)
-    {
-        if (sheet == null || before == null)
+        if (channel == null)
         {
             return false;
         }
 
-        boolean removed = false;
-        List keyframes = sheet.channel.getKeyframes();
+        ValueGroup owner = KeyframeLockData.ownerOf(channel);
+        List<KeyframeLockData.Range> ranges = owner == null ? List.of() : KeyframeLockData.rangesFor(owner, channel.getId());
 
-        /* Backwards, so the indices of the remaining keys stay valid while dropping. */
-        for (int i = keyframes.size() - 1; i >= 0; i--)
-        {
-            if (!containsKey(before, (Keyframe<?>) keyframes.get(i)))
-            {
-                sheet.channel.remove(i);
-                removed = true;
-            }
-        }
-
-        if (removed)
-        {
-            sheet.channel.preNotify(IValueListener.FLAG_UNMERGEABLE);
-        }
-
-        return removed;
+        return locked(ranges, tick);
     }
 
-    private static boolean containsKey(List<Keyframe<?>> keys, Keyframe<?> candidate)
+    /** Whether a tick of a sheet falls inside a lock that applies to the local player. */
+    public static boolean lockedTick(UIKeyframeSheet sheet, float tick)
     {
-        for (Keyframe<?> key : keys)
-        {
-            if (key == candidate)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return sheet != null && lockedTick(sheet.channel, tick);
     }
 
     /* Hit testing */
 
     public record HitRecord(ValueGroup owner, KeyframeLockData lock, KeyframeLockData.Range range, int y, int height)
     {}
+
+    public static boolean isSheetVisible(UIKeyframes view, UIKeyframeSheet sheet)
+    {
+        return view != null && sheet != null && view.getGraph() != null
+            && view.getGraph().getSheet(sheet.id) == sheet;
+    }
 
     /**
      * Pixel {@code [y, height]} of a sheet row.
@@ -749,12 +743,22 @@ public final class KeyframeLockClient
         return new int[] {view.graphArea.y + IUIKeyframeGraph.TOP_MARGIN, Math.max(16, view.graphArea.ey() - view.graphArea.y - IUIKeyframeGraph.TOP_MARGIN)};
     }
 
+    public static boolean loopLocked(KeyframeChannel<?> channel, String id)
+    {
+        if (channel == null || id == null)
+        {
+            return false;
+        }
+
+        KeyframeLoop loop = channel.getLoop(id);
+
+        return loop != null && KeyframeLockData.loopLocked(KeyframeLockData.ownerOf(channel), channel.getId(), loop, channel.getLoopEnd(loop));
+    }
+
     /** Whether a loop block of a sheet reacts to the mouse at {@code mouseX}, using BBS' own grab margins. */
     public static boolean loopLocked(UIKeyframes view, UIKeyframeSheet sheet, int mouseX)
     {
-        ValueGroup owner = KeyframeLockData.ownerOf(sheet.channel);
-
-        if (owner == null)
+        if (sheet == null)
         {
             return false;
         }
@@ -762,11 +766,10 @@ public final class KeyframeLockClient
         for (Object entry : sheet.channel.getLoops())
         {
             KeyframeLoop loop = (KeyframeLoop) entry;
-            float end = sheet.channel.getLoopEnd(loop);
             int x1 = view.toGraphX(loop.start());
-            int x2 = view.toGraphX(end);
+            int x2 = view.toGraphX(sheet.channel.getLoopEnd(loop));
 
-            if (mouseX >= x1 - 3 && mouseX <= x2 + 4 && KeyframeLockData.loopLocked(owner, sheet.channel.getId(), loop, end))
+            if (mouseX >= x1 - 3 && mouseX <= x2 + 4 && loopLocked(sheet.channel, loop.id()))
             {
                 return true;
             }
@@ -788,6 +791,11 @@ public final class KeyframeLockClient
 
         for (UIKeyframeSheet sheet : graph.getSheets())
         {
+            if (!isSheetVisible(view, sheet))
+            {
+                continue;
+            }
+
             ValueGroup owner = KeyframeLockData.ownerOf(sheet.channel);
             List<KeyframeLockData> locks = owner == null ? List.of() : KeyframeLockData.get(owner);
 
@@ -907,7 +915,9 @@ public final class KeyframeLockClient
 
         if (target instanceof Keyframe<?> keyframe)
         {
-            return locked(ranges, keyframe.getTick());
+            float restoredTick = value.isMap() && value.asMap().has("tick") ? value.asMap().getFloat("tick") : keyframe.getTick();
+
+            return locked(ranges, keyframe.getTick()) || locked(ranges, restoredTick);
         }
 
         if (!value.isMap() || !value.asMap().has("keyframes"))
