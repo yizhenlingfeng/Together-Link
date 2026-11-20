@@ -7,6 +7,7 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_together.bbsop.BbsOpManager;
 import mchorse.bbs_together.commits.FilmBranchStore;
+import mchorse.bbs_together.compat.PlayerCompat;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -14,6 +15,7 @@ import net.minecraft.util.Formatting;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,8 +33,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * and the same lock decides. Locked clips are matched by the lock's own UUID, since
  * BBS renumbers clips by index whenever the list is reordered.</p>
  *
- * <p>Creating, changing and removing a lock is reserved to level 2, exactly like the
- * film and model lock menus.</p>
+ * <p>Manually creating, changing and removing a lock is reserved to level 2. Automatic
+ * edit locks are created by their editor and keep the players who were already editing
+ * the clip in their whitelist.</p>
  */
 public final class ClipLockGuard
 {
@@ -40,9 +43,185 @@ public final class ClipLockGuard
     private static final String CAMERA = "camera";
 
     private static final Map<UUID, Long> NOTICE_AT = new ConcurrentHashMap<>();
+    private static final Map<UUID, EditingClips> EDITING = new ConcurrentHashMap<>();
 
     private ClipLockGuard()
     {}
+
+    public static void trackCursor(UUID playerId, String filmId, String branch, int editorType, List<Integer> selected)
+    {
+        if (playerId == null)
+        {
+            return;
+        }
+
+        if (editorType == 0 || editorType == 2)
+        {
+            EDITING.put(playerId, new EditingClips(filmId, branch, new ArrayList<>(selected)));
+            return;
+        }
+
+        EditingClips previous = EDITING.get(playerId);
+
+        if (editorType != 10 && editorType != 14 && editorType != 15)
+        {
+            EDITING.remove(playerId);
+        }
+        else if (previous == null || !previous.filmId.equals(filmId) || !previous.branch.equals(branch))
+        {
+            EDITING.remove(playerId);
+        }
+    }
+
+    /**
+     * Records that a player has a clip's keyframe editor open, so that an automatic lock
+     * created by another editor keeps them in its whitelist as a co-editor.
+     *
+     * <p>Focus sync carries the plain clip index (unlike the keyframe cursor, whose selection
+     * is a keyframe encoding), so the index can be matched against the lock directly.</p>
+     */
+    public static void trackKeyframeFocus(UUID playerId, String filmId, String branch, int clipIndex)
+    {
+        if (playerId == null || filmId == null)
+        {
+            return;
+        }
+
+        if (clipIndex < 0)
+        {
+            EditingClips previous = EDITING.get(playerId);
+
+            if (previous != null && previous.filmId.equals(filmId))
+            {
+                EDITING.remove(playerId);
+            }
+
+            return;
+        }
+
+        List<Integer> selected = new ArrayList<>();
+        selected.add(clipIndex);
+
+        EDITING.put(playerId, new EditingClips(filmId, branch, selected));
+    }
+
+    public static void forgetPlayer(UUID playerId)
+    {
+        if (playerId != null)
+        {
+            EDITING.remove(playerId);
+            NOTICE_AT.remove(playerId);
+        }
+    }
+
+    public static void reset()
+    {
+        EDITING.clear();
+        NOTICE_AT.clear();
+    }
+
+    public static BaseType prepareAutomaticLock(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, List<String> path, BaseType payload)
+    {
+        if (player == null || path == null || path.size() != 2 || !CAMERA.equals(path.get(0))
+            || payload == null || !payload.isMap())
+        {
+            return payload;
+        }
+
+        MapType map = payload.asMap();
+        ClipLockData incoming = ClipLockData.read(map);
+
+        if (incoming == null || !incoming.automatic)
+        {
+            return payload;
+        }
+
+        Clip clip = clipAt(filmId, branch, path.get(1));
+        BaseType data = clip == null ? null : clip.toData();
+        ClipLockData stored = data != null && data.isMap() ? ClipLockData.read(data.asMap()) : null;
+
+        if (stored != null)
+        {
+            if (!stored.automatic || !stored.clipId.equals(incoming.clipId))
+            {
+                return payload;
+            }
+
+            return replaceLock(payload, incoming.toData(), stored.toData());
+        }
+
+        if (!validAutomaticLock(player, incoming))
+        {
+            return payload;
+        }
+
+        int index;
+
+        try
+        {
+            index = Integer.parseInt(path.get(1));
+        }
+        catch (NumberFormatException e)
+        {
+            return payload;
+        }
+
+        ClipLockData created = createAutomaticLock(server, player, filmId, branch, index, incoming);
+
+        return replaceLock(payload, incoming.toData(), created.toData());
+    }
+
+    private static BaseType replaceLock(BaseType payload, MapType before, MapType after)
+    {
+        if (sameValue(before, after))
+        {
+            return payload;
+        }
+
+        MapType copy = (MapType) payload.copy();
+        copy.put(ClipLockData.KEY, after);
+
+        return copy;
+    }
+
+    private static ClipLockData createAutomaticLock(MinecraftServer server, ServerPlayerEntity player, String filmId, String branch, int index, ClipLockData source)
+    {
+        ClipLockData lock = new ClipLockData(source.clipId);
+        lock.owner = player.getUuid();
+        lock.ownerName = PlayerCompat.name(player.getGameProfile());
+        lock.mode = AssetLockMode.WHITELIST;
+        lock.automatic = true;
+        lock.whitelist.put(lock.owner, lock.ownerName);
+
+        for (Map.Entry<UUID, EditingClips> entry : EDITING.entrySet())
+        {
+            EditingClips editing = entry.getValue();
+
+            if (!editing.filmId.equals(filmId) || !editing.branch.equals(branch) || !editing.selected.contains(index))
+            {
+                continue;
+            }
+
+            ServerPlayerEntity editor = server.getPlayerManager().getPlayer(entry.getKey());
+
+            if (editor != null)
+            {
+                lock.whitelist.put(entry.getKey(), PlayerCompat.name(editor.getGameProfile()));
+            }
+        }
+
+        return lock;
+    }
+
+    private static boolean validAutomaticLock(ServerPlayerEntity player, ClipLockData lock)
+    {
+        return lock != null && lock.automatic && lock.mode == AssetLockMode.WHITELIST && player.getUuid().equals(lock.owner);
+    }
+
+    private static boolean validAutomaticLock(ServerPlayerEntity player, boolean wholeClip, BaseType payload)
+    {
+        return wholeClip && payload != null && payload.isMap() && validAutomaticLock(player, ClipLockData.read(payload.asMap()));
+    }
 
     /**
      * Checks the camera clips of a snapshot about to be stored.
@@ -69,18 +248,12 @@ public final class ClipLockGuard
         }
 
         MapType stored = FilmBranchStore.workingData(filmId, branch);
+        Map<String, MapType> before = stored == null ? new HashMap<>() : index(stored);
+        List<MapType> incomingClips = clips(incoming);
 
-        /* Nothing to protect on the first save of a branch. */
-        if (stored == null)
+        for (int i = 0; i < incomingClips.size(); i++)
         {
-            return true;
-        }
-
-        Map<String, MapType> before = index(stored);
-
-        /* Re-locking, changing and unlocking are level-2 operations as well. */
-        for (MapType newClip : clips(incoming))
-        {
+            MapType newClip = incomingClips.get(i);
             ClipLockData lock = ClipLockData.read(newClip);
 
             if (lock == null)
@@ -90,13 +263,27 @@ public final class ClipLockGuard
 
             ClipLockData previous = ClipLockData.read(before.get(lock.clipId));
 
+            if (previous == null && validAutomaticLock(player, lock))
+            {
+                MinecraftServer server = player.getEntityWorld() == null ? null : player.getEntityWorld().getServer();
+
+                if (server != null)
+                {
+                    newClip.put(ClipLockData.KEY, createAutomaticLock(server, player, filmId, branch, i, lock).toData());
+                    continue;
+                }
+            }
+
             if (previous == null || !sameValue(previous.toData(), lock.toData()))
             {
                 return deny(player);
             }
         }
 
-        restoreLockedClips(player, stored, incoming);
+        if (stored != null)
+        {
+            restoreLockedClips(player, stored, incoming);
+        }
 
         return true;
     }
@@ -212,7 +399,8 @@ public final class ClipLockGuard
         /* The server's copy does not have this clip yet: only the lock payload needs a check. */
         if (clip == null)
         {
-            return !(wholeClip && introducesLock) || BbsOpManager.canManage(player);
+            return validAutomaticLock(player, wholeClip, payload)
+                || !(wholeClip && introducesLock) || BbsOpManager.canManage(player);
         }
 
         BaseType data = clip.toData();
@@ -221,7 +409,17 @@ public final class ClipLockGuard
         /* A clip nobody has locked yet may be edited, but a lock may only be created by level 2. */
         if (stored == null)
         {
-            return !introducesLock || BbsOpManager.canManage(player);
+            return validAutomaticLock(player, wholeClip, payload) || !introducesLock || BbsOpManager.canManage(player);
+        }
+
+        if (wholeClip && introducesLock && !BbsOpManager.canManage(player))
+        {
+            ClipLockData incoming = ClipLockData.read(payload.asMap());
+
+            if (incoming == null || !sameValue(stored.toData(), incoming.toData()))
+            {
+                return deny(player);
+            }
         }
 
         if (BbsOpManager.canManage(player) || stored.allows(player.getUuid()))
@@ -294,6 +492,11 @@ public final class ClipLockGuard
         }
 
         return output;
+    }
+
+    public static boolean sameClipContent(BaseType a, BaseType b)
+    {
+        return a != null && b != null && a.isMap() && b.isMap() && sameClipData(a.asMap(), b.asMap());
     }
 
     /** Compare two clip maps, skipping the lock key itself (checked separately). */
@@ -391,6 +594,20 @@ public final class ClipLockGuard
         String sb = b.toString();
 
         return sa != null && sa.equals(sb);
+    }
+
+    private static final class EditingClips
+    {
+        private final String filmId;
+        private final String branch;
+        private final List<Integer> selected;
+
+        private EditingClips(String filmId, String branch, List<Integer> selected)
+        {
+            this.filmId = filmId;
+            this.branch = branch;
+            this.selected = selected;
+        }
     }
 
     private static boolean deny(ServerPlayerEntity player)

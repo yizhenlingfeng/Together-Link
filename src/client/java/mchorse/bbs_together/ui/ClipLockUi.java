@@ -4,7 +4,6 @@ import mchorse.bbs_mod.l10n.L10n;
 import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.ui.film.IUIClipsDelegate;
 import mchorse.bbs_mod.ui.film.UIClips;
-import mchorse.bbs_mod.ui.film.UIClipsPanel;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
 import mchorse.bbs_mod.ui.utils.context.ContextMenuManager;
@@ -142,10 +141,7 @@ public final class ClipLockUi
         ClipLockClient.apply(delegate.getFilm(), clip, mode, members);
         delegate.fillData();
 
-        if (delegate instanceof UIClipsPanel panel && panel.filmPanel != null)
-        {
-            /* Save right away so the lock reaches the other players and the server snapshot. */
-            panel.filmPanel.save();
-        }
+        /* The lock is broadcast on its own data-sync channel by ClipLockClient, so no full
+         * film save is needed here; saving would run forceSave() and record a commit. */
     }
 }

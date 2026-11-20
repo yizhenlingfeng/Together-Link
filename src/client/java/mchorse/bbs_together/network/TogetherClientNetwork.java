@@ -2078,6 +2078,21 @@ public class TogetherClientNetwork {
         TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_CURSOR_POSITION, (PacketByteBuf)buf);
     }
 
+    /** Tells the server which clip's keyframe editor this player has open (negative to clear),
+     * so an automatic edit lock keeps a co-editing player in its whitelist. */
+    public static void sendKeyframeEditFocus(String filmId, int clipIndex) {
+        if (!isBBSTogetherOnServer) {
+            return;
+        }
+        if (MinecraftClient.getInstance().player == null) {
+            return;
+        }
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(filmId == null ? "" : filmId);
+        buf.writeInt(clipIndex);
+        TogetherClientNetworking.send((Identifier)TogetherServerNetwork.SERVER_KEYFRAME_EDIT_FOCUS, (PacketByteBuf)buf);
+    }
+
     /** Send the latest throttled cursor state, called once per render tick so the final
      * cursor position/selection before a pause still lands. */
     public static void flushPendingCursor() {

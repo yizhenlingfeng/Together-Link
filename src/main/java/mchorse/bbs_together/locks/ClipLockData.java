@@ -31,11 +31,13 @@ public class ClipLockData
     private static final String MODE = "mode";
     private static final String WHITELIST = "whitelist";
     private static final String BLACKLIST = "blacklist";
+    private static final String AUTOMATIC = "automatic";
 
     public final String clipId;
     public UUID owner;
     public String ownerName = "";
     public AssetLockMode mode = AssetLockMode.ALL;
+    public boolean automatic;
 
     public final Map<UUID, String> whitelist = new LinkedHashMap<>();
     public final Map<UUID, String> blacklist = new LinkedHashMap<>();
@@ -86,6 +88,7 @@ public class ClipLockData
         map.putString(OWNER, this.owner == null ? "" : this.owner.toString());
         map.putString(OWNER_NAME, this.ownerName == null ? "" : this.ownerName);
         map.putString(MODE, this.mode.name());
+        map.putBool(AUTOMATIC, this.automatic);
         map.put(WHITELIST, list(this.whitelist));
         map.put(BLACKLIST, list(this.blacklist));
 
@@ -118,6 +121,7 @@ public class ClipLockData
         lock.owner = parseId(map.getString(OWNER, ""));
         lock.ownerName = map.getString(OWNER_NAME, "");
         lock.mode = mode(map.getString(MODE, ""));
+        lock.automatic = map.getBool(AUTOMATIC);
         readList(map.getMap(WHITELIST), lock.whitelist);
         readList(map.getMap(BLACKLIST), lock.blacklist);
 

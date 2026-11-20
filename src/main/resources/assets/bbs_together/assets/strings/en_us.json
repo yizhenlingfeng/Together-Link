@@ -57,6 +57,8 @@
   "bbs_together.config.keyframes.default_interpolation_enabled-comment": "When enabled, newly created keyframes use the selected interpolation below. When disabled, BBSFS keeps its original track or previous-keyframe interpolation behavior.",
   "bbs_together.config.keyframes.default_shape-comment": "Default shape for newly created keyframes. Click the icon on the right to choose a shape.",
   "bbs_together.config.keyframes.default_interpolation-comment": "When default keyframe interpolation is enabled, newly created keyframes use the interpolation selected here.",
+  "bbs_together.config.keyframes.edit_lock_clips": "Lock clips when editing",
+  "bbs_together.config.keyframes.edit_lock_clips-comment": "When enabled, editing a clip locks it to you and the players already editing it. No one else can join its editing session. An administrator can remove the lock manually.",
   "bbs_together.config.behaviors.title": "Behavior log",
   "bbs_together.config.behaviors.tooltip": "Server-side audit log of edits, downloads and uploads",
   "bbs_together.config.behaviors.behavior_log_limit": "Log size limit",

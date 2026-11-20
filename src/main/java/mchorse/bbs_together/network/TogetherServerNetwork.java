@@ -135,6 +135,7 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_FILM_RENAMED = Identifier.of("bbs_together", "s_film_renamed");
     public static final Identifier SERVER_PLAYER_COLOR = Identifier.of("bbs_together", "s_player_color");
     public static final Identifier SERVER_CURSOR_POSITION = Identifier.of("bbs_together", "s_cursor_position");
+    public static final Identifier SERVER_KEYFRAME_EDIT_FOCUS = Identifier.of("bbs_together", "s_keyframe_edit_focus");
     public static final Identifier SERVER_FILM_SELECTION = Identifier.of("bbs_together", "s_film_selection");
     public static final Identifier SERVER_REPLAY_SELECTION = Identifier.of("bbs_together", "s_replay_selection");
     public static final Identifier SERVER_REPLAY_FORM_LOCK = Identifier.of("bbs_together", "s_replay_form_lock");
@@ -144,9 +145,9 @@ public class TogetherServerNetwork {
     public static final Identifier SERVER_HELLO = Identifier.of("bbs_together", "s_hello");
     public static final Identifier CLIENT_HELLO = Identifier.of("bbs_together", "c_hello");
     public static final Identifier CLIENT_SERVER_LIMITS = Identifier.of("bbs_together", "c_server_limits");
-    /** Bumped to 4 when upload ACKs landed, 5 when inventory ACKs and asset-send reject
-     *  receipts landed. Clients gate their receipt handling on this value. */
-    public static final int PROTOCOL_VERSION = 5;
+    /** Bumped to 4 for upload ACKs, 5 for inventory/send-reject receipts and 6 for automatic
+     *  clip edit locks. Clients gate their receipt handling on this value. */
+    public static final int PROTOCOL_VERSION = 6;
     /** Oldest client protocol this server talks to. Below this the client predates basic
      *  sync and the connection would only produce confusing partial behaviour; a warning is
      *  logged at hello rather than a kick. */
@@ -509,6 +510,7 @@ public class TogetherServerNetwork {
         TogetherServerNetworking.preRegister();
         TogetherServerNetworking.register((Identifier)SERVER_PLAYER_COLOR, (server, player, handler, buf, resp) -> TogetherServerNetwork.handlePlayerColor(server, player, buf));
         TogetherServerNetworking.register((Identifier)SERVER_CURSOR_POSITION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCursorPosition(server, player, buf));
+        TogetherServerNetworking.register((Identifier)SERVER_KEYFRAME_EDIT_FOCUS, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleKeyframeEditFocus(server, player, buf));
         TogetherServerNetworking.register((Identifier)SERVER_FILM_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleFilmSelection(server, player, buf));
         TogetherServerNetworking.register((Identifier)SERVER_REPLAY_SELECTION, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplaySelection(server, player, buf));
         TogetherServerNetworking.register((Identifier)SERVER_REPLAY_FORM_LOCK, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleReplayFormLock(server, player, buf));
@@ -630,6 +632,7 @@ public class TogetherServerNetwork {
         assetPendingDropped.set(0L);
         TransferLog.reset();
         CoopSessionManager.reset();
+        ClipLockGuard.reset();
         BBSTogetherFix28Server.resetState();
     }
 
@@ -694,6 +697,7 @@ public class TogetherServerNetwork {
             TogetherServerNetwork.flushUploadAggregates(player, true);
             UUID uuid = player.getUuid();
             CoopSessionManager.onDisconnect(uuid, server);
+            ClipLockGuard.forgetPlayer(uuid);
             LinkedHashMap<UUID, Integer> linkedHashMap2 = linkedHashMap = playerReplaySelections;
             synchronized (linkedHashMap2) {
                 playerReplaySelections.remove(uuid);
@@ -780,6 +784,7 @@ public class TogetherServerNetwork {
                 server.execute(() -> {
                     playerEditingFilm.remove(leaver, clearFilmId);
                     playerCursors.remove(leaver);
+                    ClipLockGuard.forgetPlayer(leaver);
                     TogetherServerNetwork.broadcastFilmSelections(server);
                     TogetherServerNetwork.together_broadcastCursorSnapshot(server, clearFilmId);
                 });
@@ -803,6 +808,9 @@ public class TogetherServerNetwork {
         boolean leaving = editorType < 0;
         server.execute(() -> {
             playerEditingFilm.put(player.getUuid(), filmId);
+            if (leaving || tick >= 0.0F || row >= 0.0F || !selected.isEmpty()) {
+                ClipLockGuard.trackCursor(player.getUuid(), filmId, TogetherServerNetwork.playerBranch(filmId, player), editorType, selected);
+            }
             if (leaving) {
                 playerCursors.remove(player.getUuid());
             } else {
@@ -834,6 +842,12 @@ public class TogetherServerNetwork {
                 outBuf.release();
             }
         });
+    }
+
+    private static void handleKeyframeEditFocus(MinecraftServer server, ServerPlayerEntity player, PacketByteBuf buf) {
+        String filmId = buf.readString();
+        int clipIndex = buf.readInt();
+        server.execute(() -> ClipLockGuard.trackKeyframeFocus(player.getUuid(), filmId, TogetherServerNetwork.playerBranch(filmId, player), clipIndex));
     }
 
     private static void broadcastCursorRemoval(MinecraftServer server, String filmId, UUID gone) {
@@ -3819,6 +3833,12 @@ public class TogetherServerNetwork {
         if (TogetherServerNetwork.denyLockedFilm(server, player, filmId)) {
             return;
         }
+        BaseType originalPayload = payload;
+        payload = ClipLockGuard.prepareAutomaticLock(server, player, filmId, branch, path, payload);
+        boolean echoAutomaticLock = payload != originalPayload;
+        if (echoAutomaticLock) {
+            bytes = DataStorageUtils.writeToBytes(payload);
+        }
         /* A clip lock is enforced on the clip the server already holds: a path into a
          * locked camera clip is refused before it can reach the other editors. */
         if (!ClipLockGuard.canSyncCamera(player, filmId, branch, path, payload)) {
@@ -3833,7 +3853,7 @@ public class TogetherServerNetwork {
         playerEditingFilm.put(playerId, filmId);
         for (Map.Entry<UUID, String> entry : playerEditingFilm.entrySet()) {
             ServerPlayerEntity other;
-            if (!entry.getValue().equals(filmId) || entry.getKey().equals(playerId) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
+            if (!entry.getValue().equals(filmId) || (entry.getKey().equals(playerId) && !echoAutomaticLock) || (other = server.getPlayerManager().getPlayer(entry.getKey())) == null || !TogetherServerNetwork.playerBranch(filmId, other).equals(branch)) continue;
             TogetherServerNetwork.crusherFor(other).sendGuarded((PlayerEntity)other, CLIENT_FILM_DATA_SYNC, bytes, outBuf -> {
                 outBuf.writeString(filmId);
                 outBuf.writeString(branch);
@@ -3996,7 +4016,12 @@ public class TogetherServerNetwork {
                 String undoLock;
 
                 try {
-                    undoLock = KeyframeLockGuard.undoReason(player, filmId, branch, film, c.path, DataStorageUtils.readFromBytes(c.data));
+                    BaseType undoData = DataStorageUtils.readFromBytes(c.data);
+                    if (!ClipLockGuard.canSyncCamera(player, filmId, branch, c.path, undoData)) {
+                        TogetherServerNetwork.rejectUndo(server, player, film, changes);
+                        return;
+                    }
+                    undoLock = KeyframeLockGuard.undoReason(player, filmId, branch, film, c.path, undoData);
                 }
                 catch (Exception e) {
                     undoLock = KeyframeLockGuard.REASON_LOCKED;
@@ -4007,8 +4032,11 @@ public class TogetherServerNetwork {
                     player.sendMessage(Text.translatable(undoLock).formatted(Formatting.YELLOW), false);
                     return;
                 }
-                byte[] actual = DataStorageUtils.writeToBytes((BaseType)current.toData());
+                BaseType currentData = current.toData();
+                byte[] actual = DataStorageUtils.writeToBytes(currentData);
                 if (Arrays.equals(actual, c.expected)) continue;
+                if (c.path.size() == 2 && "camera".equals(c.path.get(0))
+                    && ClipLockGuard.sameClipContent(currentData, DataStorageUtils.readFromBytes(c.expected))) continue;
                 TogetherServerNetwork.rejectUndo(server, player, film, changes);
                 return;
             }

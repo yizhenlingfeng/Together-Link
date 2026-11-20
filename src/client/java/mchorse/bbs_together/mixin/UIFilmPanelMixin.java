@@ -35,6 +35,7 @@ import mchorse.bbs_together.BBSTogetherFix45;
 import mchorse.bbs_together.ITogetherDopeSheet;
 import mchorse.bbs_together.ITogetherReplaysEditor;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
+import mchorse.bbs_together.locks.ClipLockClient;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.network.TogetherUndoSync;
 import net.fabricmc.api.EnvType;
@@ -199,6 +200,8 @@ public class UIFilmPanelMixin {
         this.sendCursorIfMoved(self, context);
         TogetherClientNetwork.flushPendingCursor();
         this.sendPlayheadIfChanged(self);
+        /* Keep the automatic edit lock on the clip whose keyframe editor is open. */
+        ClipLockClient.syncEditSession((Film)self.getData(), BBSTogetherFix14.openKeyframeClipIndex(self));
         this.renderRemoteCursors(self, context);
         this.renderRemotePlayheadLines(self, context);
         if (self.replayEditor.keyframeEditor != null && self.replayEditor.keyframeEditor.view != null && (iUIKeyframeGraph = self.replayEditor.keyframeEditor.view.getGraph()) instanceof ITogetherDopeSheet) {

@@ -45,6 +45,7 @@ public class TogetherSettings {
     public static ValueKeyframeInterpolation defaultKeyframeInterpolation;
     public static ValueBoolean defaultKeyframeColorEnabled;
     public static ValueInt defaultKeyframeColor;
+    public static ValueBoolean editLockClips;
     public static ValueInt behaviorLogLimit;
     /** Cooperative recording: how long invitees have to accept a request (seconds). */
     public static ValueInt coopInviteSeconds;
@@ -96,6 +97,7 @@ public class TogetherSettings {
         settingsBuilder.register((BaseValue)defaultKeyframeInterpolation);
         defaultKeyframeColorEnabled = settingsBuilder.getBoolean("default_color_enabled", false);
         defaultKeyframeColor = settingsBuilder.getInt("default_color", -1).color();
+        editLockClips = settingsBuilder.getBoolean("edit_lock_clips", false);
         settingsBuilder.category("behaviors");
         behaviorLogLimit = settingsBuilder.getInt("behavior_log_limit", 1000, 100, 50000);
         settingsBuilder.category("coop");
@@ -163,6 +165,10 @@ public class TogetherSettings {
 
     public static int getDefaultKeyframeColor() {
         return defaultKeyframeColor == null ? -1 : (Integer)defaultKeyframeColor.get();
+    }
+
+    public static boolean shouldEditLockClips() {
+        return editLockClips != null && (Boolean)editLockClips.get();
     }
 }
 

@@ -57,6 +57,8 @@
   "bbs_together.config.keyframes.default_interpolation_enabled-comment": "开启后，新建关键帧会使用下方选择的默认插值；关闭时保留 BBSFS 根据轨道或前一个关键帧自动决定插值的原始逻辑。",
   "bbs_together.config.keyframes.default_shape-comment": "新建关键帧使用的默认形状。点击右侧图标可选择形状。",
   "bbs_together.config.keyframes.default_interpolation-comment": "启用默认关键帧插值后，新建关键帧会使用这里选择的插值。",
+  "bbs_together.config.keyframes.edit_lock_clips": "编辑锁定关键帧",
+  "bbs_together.config.keyframes.edit_lock_clips-comment": "开启后，首次编辑剪辑会自动锁定，仅你和当时正在编辑该剪辑的玩家可继续修改，其他玩家不能加入。管理员可手动解除锁定。",
   "bbs_together.config.behaviors.title": "行为日志",
   "bbs_together.config.behaviors.tooltip": "服务器端的编辑/下载/上传审计日志",
   "bbs_together.config.behaviors.behavior_log_limit": "日志条数上限",

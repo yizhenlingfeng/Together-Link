@@ -170,6 +170,30 @@ public final class BBSTogetherFix14 {
         return BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel) != null;
     }
 
+    /**
+     * Index of the camera clip whose keyframe editor is open, or -1 when none is open.
+     * The automatic edit lock keys off this: it locks exactly the clip being keyframed.
+     */
+    public static int openKeyframeClipIndex(UIFilmPanel uIFilmPanel) {
+        if (uIFilmPanel == null || uIFilmPanel.cameraEditor == null) {
+            return -1;
+        }
+        UIClipsPanel clipsPanel = uIFilmPanel.cameraEditor;
+        UIClip<?> clipPanel = BBSTogetherFix14.getClipPanel(clipsPanel);
+        if (clipPanel == null || clipPanel.clip == null || !BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(clipsPanel, BBSTogetherFix14.getCameraKeyframeEditor(clipsPanel))) {
+            return -1;
+        }
+        if (clipsPanel.clips == null || clipsPanel.clips.getClips() == null) {
+            return -1;
+        }
+        try {
+            return clipsPanel.clips.getClips().getIndex(clipPanel.clip);
+        }
+        catch (Exception exception) {
+            return -1;
+        }
+    }
+
     public static int currentEditorType(UIFilmPanel uIFilmPanel) {
         int n = BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel);
         if (n >= 0) {
