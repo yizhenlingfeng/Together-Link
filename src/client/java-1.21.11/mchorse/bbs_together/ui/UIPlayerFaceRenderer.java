@@ -80,7 +80,8 @@ public class UIPlayerFaceRenderer
 
             AbstractTexture texture = mc.getTextureManager().getTexture(skin);
 
-            if (!(texture.getGlTexture() instanceof GlTexture glTexture))
+            /* A skin still being stitched has no GL id yet — asking a null one for it throws. */
+            if (texture == null || !(texture.getGlTexture() instanceof GlTexture glTexture))
             {
                 return false;
             }

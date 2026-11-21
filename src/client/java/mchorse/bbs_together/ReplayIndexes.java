@@ -30,7 +30,7 @@ public final class ReplayIndexes {
         }
         if (uIFilmPanel.replayEditor.replaysList != null && uIFilmPanel.replayEditor.replaysList.replays != null) {
             Replay current = uIFilmPanel.replayEditor.replaysList.replays.getSelectedReplayFirst();
-            return current == null ? -1 : film.replays.getList().indexOf(current);
+            return ReplayIndexes.identityReplayIndex(film.replays.getList(), current);
         }
         return -1;
     }

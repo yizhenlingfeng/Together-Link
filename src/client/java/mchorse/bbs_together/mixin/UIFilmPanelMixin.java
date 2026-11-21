@@ -112,7 +112,7 @@ public class UIFilmPanelMixin {
         UIFilmPanel self = (UIFilmPanel)(Object)this;
         Film data = (Film)self.getData();
         TogetherClientNetwork.sendFilmSelection(data != null ? data.getId() : "");
-        if (data != null && (replay = self.replayEditor.getReplay()) != null && (idx = data.replays.getList().indexOf(replay)) >= 0) {
+        if (data != null && (replay = self.replayEditor.getReplay()) != null && (idx = ReplayIndexes.identityReplayIndex(data.replays.getList(), replay)) >= 0) {
             TogetherClientNetwork.sendReplaySelection(data.getId(), idx);
         }
     }
@@ -514,7 +514,7 @@ public class UIFilmPanelMixin {
                 if (self.getData() != null) {
                     boolean remoteOnSameReplay;
                     Replay localReplay = self.replayEditor.getReplay();
-                    int localReplayIdx = localReplay == null ? -1 : ((Film)self.getData()).replays.getList().indexOf(localReplay);
+                    int localReplayIdx = ReplayIndexes.identityReplayIndex(((Film)self.getData()).replays.getList(), localReplay);
                     Map<Integer, List<UUID>> selMap = TogetherClientNetwork.replaySelections.get(((Film)self.getData()).getId());
                     boolean bl = remoteOnSameReplay = selMap != null && localReplayIdx >= 0 && selMap.containsKey(localReplayIdx) && selMap.get(localReplayIdx).contains(uuid);
                     if (!remoteOnSameReplay) continue;

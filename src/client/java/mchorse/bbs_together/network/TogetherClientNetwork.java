@@ -4410,7 +4410,7 @@ public class TogetherClientNetwork {
         }
         if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
             Replay current = panel.replayEditor.replaysList.replays.getSelectedReplayFirst();
-            return current == null ? -1 : ((Film)panel.getData()).replays.getList().indexOf(current);
+            return ReplayIndexes.identityReplayIndex(((Film)panel.getData()).replays.getList(), current);
         }
         return -1;
     }

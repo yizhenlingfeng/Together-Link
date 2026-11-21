@@ -1,6 +1,7 @@
 package mchorse.bbs_together.mixin;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,6 +19,7 @@ import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.IUIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
+import mchorse.bbs_together.ReplayIndexes;
 import mchorse.bbs_together.ReplayStructureRecovery;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
@@ -188,7 +190,7 @@ public class UIReplayListMixin {
             return;
         }
         String string = ((Film)uIFilmPanel.getData()).getId();
-        int n = ((Film)uIFilmPanel.getData()).replays.getList().indexOf(replayListEntry.replay);
+        int n = ReplayIndexes.identityReplayIndex(((Film)uIFilmPanel.getData()).replays.getList(), replayListEntry.replay);
         if (n < 0) {
             return;
         }
@@ -263,7 +265,11 @@ public class UIReplayListMixin {
             return;
         }
         String string = ((Film)uIReplayList.panel.getData()).getId();
-        int n5 = ((Film)uIReplayList.panel.getData()).replays.getList().indexOf(replay);
+        /* Replays use equals() on their own data, so indexOf() answers "which row looks like this
+         * one" - with duplicated replays every copy resolves to the first of them and the list
+         * then paints that one player's head on all of them. The selection is keyed by row, so
+         * resolve the row by identity instead and always read the map with that index. */
+        int n5 = ReplayIndexes.identityReplayIndex(((Film)uIReplayList.panel.getData()).replays.getList(), replay);
         if (n5 < 0) {
             return;
         }
@@ -284,7 +290,10 @@ public class UIReplayListMixin {
         if (arrayList.isEmpty()) {
             return;
         }
-        if ((n4 = arrayList.size()) <= 0) {
+        /* One head per player: two packets racing over the same merge can leave a player listed
+         * under two rows, and the row must never paint the same face twice. */
+        ArrayList<UUID> arrayList2 = new ArrayList<UUID>(new LinkedHashSet<UUID>(arrayList));
+        if ((n4 = arrayList2.size()) <= 0) {
             return;
         }
         int n7 = 10;
@@ -295,7 +304,7 @@ public class UIReplayListMixin {
             n10 -= 35;
         }
         int n11 = 0;
-        for (UUID uUID3 : arrayList) {
+        for (UUID uUID3 : arrayList2) {
             int n12 = n10 + n11;
             int n13 = n3 + 1;
             Integer n14 = TogetherClientNetwork.playerColors.get(uUID3);
