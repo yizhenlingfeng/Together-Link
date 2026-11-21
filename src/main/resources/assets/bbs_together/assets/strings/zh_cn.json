@@ -210,7 +210,7 @@
     "bbs_together.config.keyframes.default_interpolation_enabled-comment": "开启后，新建关键帧会使用下方选择的默认插值；关闭时保留 BBSFS 根据轨道或前一个关键帧自动决定插值的原始逻辑。",
     "bbs_together.config.keyframes.default_shape": "默认关键帧形状",
     "bbs_together.config.keyframes.default_shape-comment": "新建关键帧使用的默认形状。点击右侧图标可选择形状。",
-    "bbs_together.config.keyframes.edit_lock_clips": "编辑锁定关键帧",
+    "bbs_together.config.keyframes.edit_lock_clips": "编辑锁定剪辑",
     "bbs_together.config.keyframes.edit_lock_clips-comment": "开启后，打开某个剪辑的关键帧编辑区即自动锁定该剪辑；关闭该编辑区即自动解除。锁定期间仅你与同一时间在编辑该剪辑的玩家可继续修改，其他玩家既不能进入关键帧编辑区，也不能在时间轴上改动它。只解除本次自动锁，管理员手动设置的锁保留。",
     "bbs_together.config.keyframes.title": "关键帧",
     "bbs_together.config.keyframes.tooltip": "通过 BBS Together 新建关键帧时使用的默认样式",
