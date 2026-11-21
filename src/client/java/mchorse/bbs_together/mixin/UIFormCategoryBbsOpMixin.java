@@ -28,9 +28,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * A model that exists locally but was never uploaded to the server (others can't see it) gets a
  * grey gradient fading up from the bottom of its cell and a localized "local only" suffix in its
  * tooltip.
- * (The read-only block on the category's right-click menu lives in
- * {@link UIElementContextMenuBbsOpMixin} — the subclasses each register their own menus.)
- *
  * <p>Also completes the model cell's right-click menu with the two delete actions (request server
  * deletion / local deletion) and the level-2 model lock, which sits in the menu's icon bar.
  * {@code UIFormCategory.buildContextMenu} is the one shared menu builder all categories funnel
