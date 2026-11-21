@@ -16,8 +16,8 @@ import mchorse.bbs_together.commits.FilmBranchStore;
 import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.server.MinecraftServer;
 
-public final class BBSTogetherFix18 {
-    private BBSTogetherFix18() {
+public final class ReplayMerge {
+    private ReplayMerge() {
     }
 
     public static void mergeRecordingFinished(String string, int n, BaseType baseType, MinecraftServer minecraftServer) {
@@ -33,7 +33,7 @@ public final class BBSTogetherFix18 {
         if (n < 0 || n >= list.size()) {
             return;
         }
-        BBSTogetherFix18.mergeReplayData((Replay)list.get(n), baseType.asMap());
+        ReplayMerge.mergeReplayData((Replay)list.get(n), baseType.asMap());
         MapType mapType = (MapType)film.toData();
         FilmBranchStore.setWorking(string, branch, mapType);
         FilmBranchStore.save(string, branch);
@@ -45,13 +45,13 @@ public final class BBSTogetherFix18 {
             return;
         }
         if (mapType.has("keyframes")) {
-            BBSTogetherFix18.mergeReplayKeyframes(replay.keyframes, mapType.get("keyframes"));
+            ReplayMerge.mergeReplayKeyframes(replay.keyframes, mapType.get("keyframes"));
         }
         if (mapType.has("properties")) {
-            BBSTogetherFix18.mergeFormProperties(replay.properties, mapType.get("properties"));
+            ReplayMerge.mergeFormProperties(replay.properties, mapType.get("properties"));
         }
         if (mapType.has("actions")) {
-            BBSTogetherFix18.mergeActions(replay.actions, mapType.get("actions"));
+            ReplayMerge.mergeActions(replay.actions, mapType.get("actions"));
         }
     }
 

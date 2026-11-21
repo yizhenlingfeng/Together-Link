@@ -8,7 +8,7 @@ import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIScreen;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.utils.colors.Colors;
-import mchorse.bbs_together.BBSTogetherFix19;
+import mchorse.bbs_together.RecordingSyncGate;
 import mchorse.bbs_together.ui.UICoopRoomMenu;
 import mchorse.bbs_together.ui.commits.CommitUi;
 import net.fabricmc.api.EnvType;
@@ -181,7 +181,7 @@ public final class CoopClient {
             return;
         }
 
-        BBSTogetherFix19.sendRecordingFinishedData(current.filmId, recorder.exception, data);
+        RecordingSyncGate.sendRecordingFinishedData(current.filmId, recorder.exception, data);
     }
 
     /* =====================================================================================
@@ -732,7 +732,7 @@ public final class CoopClient {
 
             Films films = BBSModClient.getFilms();
             TogetherClientNetwork.lastLocalReplayIdx = replayIndex;
-            mchorse.bbs_together.BBSTogetherFix28Client.sendRecordingBaselineSnapshot(filmId, film);
+            mchorse.bbs_together.FilmSnapshotClient.sendRecordingBaselineSnapshot(filmId, film);
             films.startRecording(film, replayIndex, 0);
             TogetherClientNetwork.recordingSessionActive = true;
 

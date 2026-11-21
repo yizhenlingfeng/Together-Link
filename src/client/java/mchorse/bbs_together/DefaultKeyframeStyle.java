@@ -4,10 +4,10 @@ import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
 import mchorse.bbs_mod.utils.keyframes.Keyframe;
 import mchorse.bbs_together.TogetherSettings;
 
-public final class BBSTogetherFix65 {
+public final class DefaultKeyframeStyle {
     private static final ThreadLocal<Boolean> APPLY_TO_NEXT_KEYFRAME = ThreadLocal.withInitial(() -> false);
 
-    private BBSTogetherFix65() {
+    private DefaultKeyframeStyle() {
     }
 
     public static void beginAddKeyframe(UIKeyframeSheet uIKeyframeSheet, float f) {
@@ -26,7 +26,7 @@ public final class BBSTogetherFix65 {
     public static void applyDefaultsToNewKeyframe(Keyframe<?> keyframe) {
         try {
             if (Boolean.TRUE.equals(APPLY_TO_NEXT_KEYFRAME.get())) {
-                BBSTogetherFix65.applyDefaults(keyframe);
+                DefaultKeyframeStyle.applyDefaults(keyframe);
             }
         }
         finally {

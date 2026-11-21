@@ -77,12 +77,12 @@ import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_mod.utils.clips.Clips;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_mod.film.replays.tracks.TrackId;
-import mchorse.bbs_together.BBSTogetherFix14;
-import mchorse.bbs_together.BBSTogetherFix22;
-import mchorse.bbs_together.BBSTogetherFix28Client;
-import mchorse.bbs_together.BBSTogetherFix33Client;
-import mchorse.bbs_together.BBSTogetherFix45;
-import mchorse.bbs_together.BBSTogetherFixReplayStructure;
+import mchorse.bbs_together.CameraKeyframeSync;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
+import mchorse.bbs_together.FilmSnapshotClient;
+import mchorse.bbs_together.ReplayBackupSlots;
+import mchorse.bbs_together.ReplayIndexes;
+import mchorse.bbs_together.ReplayStructureRecovery;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.commits.FilmCommit;
 import mchorse.bbs_together.locks.AssetLock;
@@ -594,8 +594,8 @@ public class TogetherClientNetwork {
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_COMMIT_REJECTED, (client, handler, buf, resp) -> TogetherClientNetwork.handleCommitRejectedPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_HELLO, (client, handler, buf, resp) -> TogetherClientNetwork.handleHelloPacket(client, buf));
         TogetherClientNetworking.register((Identifier)TogetherServerNetwork.CLIENT_SERVER_LIMITS, (client, handler, buf, resp) -> TogetherClientNetwork.handleServerLimitsPacket(client, buf));
-        BBSTogetherFix28Client.registerReceivers();
-        BBSTogetherFixReplayStructure.registerClientReceiver();
+        FilmSnapshotClient.registerReceivers();
+        ReplayStructureRecovery.registerClientReceiver();
     }
 
     public static void reset() {
@@ -675,8 +675,8 @@ public class TogetherClientNetwork {
         AssetLockClient.reset();
         CoopClient.reset();
         isBBSTogetherOnServer = false;
-        BBSTogetherFix28Client.resetState();
-        BBSTogetherFixReplayStructure.resetClient();
+        FilmSnapshotClient.resetState();
+        ReplayStructureRecovery.resetClient();
     }
 
     public static void onJoin() {
@@ -1164,7 +1164,7 @@ public class TogetherClientNetwork {
         if (film == null || idx < 0 || idx >= film.replays.getList().size()) {
             return;
         }
-        BBSTogetherFix28Client.sendRecordingBaselineSnapshot(filmId, film);
+        FilmSnapshotClient.sendRecordingBaselineSnapshot(filmId, film);
         films.startRecording(film, idx, 0);
         recordingSessionActive = true;
     }
@@ -1193,12 +1193,12 @@ public class TogetherClientNetwork {
                 int idx = Integer.parseInt(key);
                 BaseType rd = batchMap.get(key);
                 if (idx < 0 || idx >= replays.size() || rd == null || !rd.isMap()) continue;
-                BBSTogetherFix22.beginRemoteSyncApply();
+                RemoteSyncApplyDepth.beginRemoteSyncApply();
                 try {
                     ((Replay)replays.get(idx)).fromData(rd.asMap());
                 }
                 finally {
-                    BBSTogetherFix22.endRemoteSyncApply();
+                    RemoteSyncApplyDepth.endRemoteSyncApply();
                 }
             }
             catch (NumberFormatException numberFormatException) {}
@@ -1209,7 +1209,7 @@ public class TogetherClientNetwork {
             together_updateReplayList(panel);
             panel.getController().createEntities();
             Replay r = panel.replayEditor.getReplay();
-            int idx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), r);
+            int idx = ReplayIndexes.identityReplayIndex(((Film)panel.getData()).replays.getList(), r);
             if (idx < 0 && !((Film)panel.getData()).replays.getList().isEmpty()) {
                 together_bindReplayKeepingCamera(panel.replayEditor, (Replay)((Film)panel.getData()).replays.getList().get(0));
                 idx = 0;
@@ -2143,7 +2143,7 @@ public class TogetherClientNetwork {
     }
 
     public static void sendReplaySelection(String filmId, int replayIndex) {
-        if (!isBBSTogetherOnServer || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (!isBBSTogetherOnServer || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         if (replayIndex >= 0) {
@@ -3204,10 +3204,10 @@ public class TogetherClientNetwork {
         }
         int remappedIdx = together_remapReplayIndex(film.replays.getList(), incoming.replays.getList(), currentIdx);
         together_remapClientReplaySelections(film.getId(), film, incoming);
-        BBSTogetherFix22.beginRemoteSyncApply();
+        RemoteSyncApplyDepth.beginRemoteSyncApply();
         try {
             film.fromData(incoming.toData());
-            if (!BBSTogetherFix14.hasCameraKeyframeEditor(panel)) {
+            if (!CameraKeyframeSync.hasCameraKeyframeEditor(panel)) {
                 panel.fillData();
             }
             if (panel.replayEditor.replaysList != null && panel.replayEditor.replaysList.replays != null) {
@@ -3219,7 +3219,7 @@ public class TogetherClientNetwork {
             together_restoreReplaySelection(panel, replays, remappedIdx);
         }
         finally {
-            BBSTogetherFix22.endRemoteSyncApply();
+            RemoteSyncApplyDepth.endRemoteSyncApply();
         }
         together_restoreClipSelection(panel.cameraEditor, cameraSel);
         together_restoreClipSelection(panel.actionEditor, actionSel);
@@ -3231,7 +3231,7 @@ public class TogetherClientNetwork {
         int reconfirmedIdx = together_getCurrentReplayIndex(panel, (Film)panel.getData());
         together_setLocalReplaySelection(((Film)panel.getData()).getId(), reconfirmedIdx);
         sendReplaySelection(((Film)panel.getData()).getId(), reconfirmedIdx);
-        BBSTogetherFix33Client.reannounceReplaySelectionAfterFullSync(panel);
+        ReplayBackupSlots.reannounceReplaySelectionAfterFullSync(panel);
     }
 
     private static void handleFilmDeletedPacket(MinecraftClient client, String filmId) {
@@ -4166,12 +4166,12 @@ public class TogetherClientNetwork {
         boolean structureSync = together_isReplayStructurePath(path);
         int offset = together_applyPathOffset(film, path);
         boolean applied;
-        BBSTogetherFix22.beginRemoteSyncApply();
+        RemoteSyncApplyDepth.beginRemoteSyncApply();
         try {
             applied = applyAtPath((BaseValueGroup)panel.getData(), path, offset, data);
         }
         finally {
-            BBSTogetherFix22.endRemoteSyncApply();
+            RemoteSyncApplyDepth.endRemoteSyncApply();
         }
         if (!applied) {
             return;
@@ -4196,7 +4196,7 @@ public class TogetherClientNetwork {
             together_bindReplayKeepingCamera(panel.replayEditor, currentReplay);
         }
         Replay openReplay = panel.replayEditor.getReplay();
-        int newIdx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), openReplay);
+        int newIdx = ReplayIndexes.identityReplayIndex(((Film)panel.getData()).replays.getList(), openReplay);
         sendReplaySelection(((Film)panel.getData()).getId(), newIdx);
     }
 
@@ -4297,7 +4297,7 @@ public class TogetherClientNetwork {
         }
         together_setLocalReplaySelection(film.getId(), remappedIdx);
         sendReplaySelection(film.getId(), remappedIdx);
-        BBSTogetherFix33Client.reannounceReplaySelectionAfterFullSync(panel);
+        ReplayBackupSlots.reannounceReplaySelectionAfterFullSync(panel);
     }
 
     private static Film together_getOpenOrStoredFilm(UIFilmPanel panel, String filmId) {
@@ -4331,7 +4331,7 @@ public class TogetherClientNetwork {
         Film incoming = new Film();
         incoming.fromData((BaseType)data);
         int remappedIdx = together_remapReplayIndex(film.replays.getList(), incoming.replays.getList(), currentIdx);
-        BBSTogetherFix22.beginRemoteSyncApply();
+        RemoteSyncApplyDepth.beginRemoteSyncApply();
         try {
             film.fromData(incoming.toData());
             if (panel.replayEditor != null && remappedIdx >= 0 && remappedIdx < film.replays.getList().size()) {
@@ -4340,7 +4340,7 @@ public class TogetherClientNetwork {
             panel.getController().createEntities();
         }
         finally {
-            BBSTogetherFix22.endRemoteSyncApply();
+            RemoteSyncApplyDepth.endRemoteSyncApply();
         }
     }
 
@@ -4377,7 +4377,7 @@ public class TogetherClientNetwork {
         if (!together_isReplayPath(path) || replay == null) {
             return false;
         }
-        int idx = BBSTogetherFix45.identityReplayIndex(((Film)panel.getData()).replays.getList(), replay);
+        int idx = ReplayIndexes.identityReplayIndex(((Film)panel.getData()).replays.getList(), replay);
         int pathIdx = together_replayPathIndex(path);
         return idx >= 0 && pathIdx >= 0 && path.size() > pathIdx + 1 && String.valueOf(idx).equals(path.get(pathIdx + 1));
     }
@@ -4404,7 +4404,7 @@ public class TogetherClientNetwork {
             return -1;
         }
         Replay replay = panel.replayEditor.getReplay();
-        int idx = BBSTogetherFix45.identityReplayIndex(film.replays.getList(), replay);
+        int idx = ReplayIndexes.identityReplayIndex(film.replays.getList(), replay);
         if (idx >= 0) {
             return idx;
         }
@@ -4487,7 +4487,7 @@ public class TogetherClientNetwork {
         if (!("camera".equals(section) || "action".equals(section) || "actions".equals(section))) {
             return;
         }
-        UIKeyframeEditor keyframeEditor = "camera".equals(section) ? BBSTogetherFix14.getCameraKeyframeEditor(panel) : null;
+        UIKeyframeEditor keyframeEditor = "camera".equals(section) ? CameraKeyframeSync.getCameraKeyframeEditor(panel) : null;
         if (keyframeEditor != null && keyframeEditor.editor != null) {
             keyframeEditor.editor.update();
         }

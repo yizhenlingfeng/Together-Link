@@ -4,9 +4,9 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.ui.dashboard.panels.UIDataDashboardPanel;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIContext;
-import mchorse.bbs_together.BBSTogetherFix19;
-import mchorse.bbs_together.BBSTogetherFix28Client;
-import mchorse.bbs_together.BBSTogetherFix33Client;
+import mchorse.bbs_together.RecordingSyncGate;
+import mchorse.bbs_together.FilmSnapshotClient;
+import mchorse.bbs_together.ReplayBackupSlots;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.network.TogetherEditSyncQueue;
 import net.fabricmc.api.EnvType;
@@ -47,16 +47,16 @@ public class UIFilmPanelSaveSyncMixin {
             return;
         }
         if (this.together_periodicSaveInProgress) {
-            BBSTogetherFix33Client.writePeriodicClientBackup(film);
+            ReplayBackupSlots.writePeriodicClientBackup(film);
             return;
         }
         if (TogetherClientNetwork.recordingSessionActive) {
             return;
         }
-        if (BBSTogetherFix19.shouldSuppressFullFilmSaveAfterRecording()) {
+        if (RecordingSyncGate.shouldSuppressFullFilmSaveAfterRecording()) {
             return;
         }
-        if (BBSTogetherFix28Client.consumeCloseSaveBroadcastSuppressed(film.getId())) {
+        if (FilmSnapshotClient.consumeCloseSaveBroadcastSuppressed(film.getId())) {
             return;
         }
         TogetherClientNetwork.sendFilmSaveSync(film.getId(), film, true);

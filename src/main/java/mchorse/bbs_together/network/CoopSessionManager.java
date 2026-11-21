@@ -5,7 +5,7 @@ import mchorse.bbs_together.compat.PlayerCompat;
 import mchorse.bbs_mod.data.types.MapType;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
-import mchorse.bbs_together.BBSTogetherFix18;
+import mchorse.bbs_together.ReplayMerge;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
@@ -661,7 +661,7 @@ public final class CoopSessionManager {
                     continue;
                 }
 
-                BBSTogetherFix18.mergeReplayData(replays.get(take.replayIndex), take.data);
+                ReplayMerge.mergeReplayData(replays.get(take.replayIndex), take.data);
                 mergedNames.add(session.filmId + "#" + take.replayIndex);
                 merged++;
             }

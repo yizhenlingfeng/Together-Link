@@ -9,7 +9,7 @@ import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.utils.undo.ValueChangeUndo;
 import mchorse.bbs_mod.utils.undo.CompoundUndo;
 import mchorse.bbs_mod.utils.undo.IUndo;
-import mchorse.bbs_together.BBSTogetherFix67UndoPath;
+import mchorse.bbs_together.UndoPathResolver;
 
 /**
  * Undo/redo broadcast with a server-side optimistic lock (s_undo_sync).
@@ -63,7 +63,7 @@ public final class TogetherUndoSync {
             List<String> path = new ArrayList<String>(change.name.strings);
             /* Film.findRecursively() only resolves the first segment, so a nested path would send
              * the whole replays group instead of the value that actually changed. */
-            BaseValue value = BBSTogetherFix67UndoPath.resolve(film, path);
+            BaseValue value = UndoPathResolver.resolve(film, path);
             BaseType postImage = redo ? change.newValue : change.oldValue;
             BaseType preImage = redo ? change.oldValue : change.newValue;
             if (postImage == null || preImage == null) {

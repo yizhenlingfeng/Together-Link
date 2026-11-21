@@ -33,7 +33,7 @@ import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 
-public final class BBSTogetherFix14 {
+public final class CameraKeyframeSync {
     public static final int EDITOR_CAMERA = 0;
     public static final int EDITOR_REPLAY = 1;
     public static final int EDITOR_ACTION = 2;
@@ -45,10 +45,10 @@ public final class BBSTogetherFix14 {
     public static final int EDITOR_CAMERA_REMAPPER_KEYFRAMES = 15;
     public static final int EDITOR_REPLAY_IK = 16;
     public static final int EDITOR_REPLAY_PHYSICS = 17;
-    private static final Field UI_CLIPS_PANEL_PANEL = BBSTogetherFix14.findField(UIClipsPanel.class, "panel");
-    private static final Field UI_CLIPS_PANEL_EMBEDDED = BBSTogetherFix14.findField(UIClips.class, "embedded");
+    private static final Field UI_CLIPS_PANEL_PANEL = CameraKeyframeSync.findField(UIClipsPanel.class, "panel");
+    private static final Field UI_CLIPS_PANEL_EMBEDDED = CameraKeyframeSync.findField(UIClips.class, "embedded");
 
-    private BBSTogetherFix14() {
+    private CameraKeyframeSync() {
     }
 
     public static int replayEditorType(UIReplaysEditor uIReplaysEditor) {
@@ -80,7 +80,7 @@ public final class BBSTogetherFix14 {
     }
 
     public static int legacyEditorType(int n) {
-        return BBSTogetherFix14.isReplayEditorType(n) ? 1 : (BBSTogetherFix14.isCameraKeyframeEditorType(n) ? 0 : n);
+        return CameraKeyframeSync.isReplayEditorType(n) ? 1 : (CameraKeyframeSync.isCameraKeyframeEditorType(n) ? 0 : n);
     }
 
     public static boolean editorTypesMatch(int n, int n2) {
@@ -88,10 +88,10 @@ public final class BBSTogetherFix14 {
     }
 
     public static boolean legacyCursorTypesMatch(int n, int n2) {
-        if (BBSTogetherFix14.isReplayEditorType(n) || BBSTogetherFix14.isReplayEditorType(n2) || BBSTogetherFix14.isCameraKeyframeEditorType(n) || BBSTogetherFix14.isCameraKeyframeEditorType(n2)) {
+        if (CameraKeyframeSync.isReplayEditorType(n) || CameraKeyframeSync.isReplayEditorType(n2) || CameraKeyframeSync.isCameraKeyframeEditorType(n) || CameraKeyframeSync.isCameraKeyframeEditorType(n2)) {
             return false;
         }
-        return BBSTogetherFix14.editorTypesMatch(n, n2);
+        return CameraKeyframeSync.editorTypesMatch(n, n2);
     }
 
     public static boolean shouldUseClipRenderer(int n, int n2) {
@@ -110,26 +110,26 @@ public final class BBSTogetherFix14 {
         if (uIFilmPanel == null || uIFilmPanel.cameraEditor == null) {
             return null;
         }
-        return BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel.cameraEditor);
+        return CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel.cameraEditor);
     }
 
     public static UIKeyframeEditor getCameraKeyframeEditor(UIClipsPanel uIClipsPanel) {
-        UIClip<?> uIClip = BBSTogetherFix14.getClipPanel(uIClipsPanel);
+        UIClip<?> uIClip = CameraKeyframeSync.getClipPanel(uIClipsPanel);
         if (uIClip instanceof UIKeyframeClip) {
             UIKeyframeClip clip = (UIKeyframeClip)uIClip;
-            if (BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
+            if (CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
                 return clip.keyframes;
             }
         }
         if (uIClip instanceof UICurveClip) {
             UICurveClip clip = (UICurveClip)uIClip;
-            if (BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
+            if (CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
                 return clip.keyframes;
             }
         }
         if (uIClip instanceof UIRemapperClip) {
             UIRemapperClip clip = (UIRemapperClip)uIClip;
-            if (BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
+            if (CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
                 return clip.keyframes;
             }
         }
@@ -140,26 +140,26 @@ public final class BBSTogetherFix14 {
         if (uIFilmPanel == null || uIFilmPanel.cameraEditor == null) {
             return -1;
         }
-        return BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel.cameraEditor);
+        return CameraKeyframeSync.cameraKeyframeEditorType(uIFilmPanel.cameraEditor);
     }
 
     public static int cameraKeyframeEditorType(UIClipsPanel uIClipsPanel) {
-        UIClip<?> uIClip = BBSTogetherFix14.getClipPanel(uIClipsPanel);
+        UIClip<?> uIClip = CameraKeyframeSync.getClipPanel(uIClipsPanel);
         if (uIClip instanceof UIKeyframeClip) {
             UIKeyframeClip clip = (UIKeyframeClip)uIClip;
-            if (BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
+            if (CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
                 return 10;
             }
         }
         if (uIClip instanceof UICurveClip) {
             UICurveClip clip = (UICurveClip)uIClip;
-            if (BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
+            if (CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
                 return 14;
             }
         }
         if (uIClip instanceof UIRemapperClip) {
             UIRemapperClip clip = (UIRemapperClip)uIClip;
-            if (BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
+            if (CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIClipsPanel, clip.keyframes)) {
                 return 15;
             }
         }
@@ -167,7 +167,7 @@ public final class BBSTogetherFix14 {
     }
 
     public static boolean hasCameraKeyframeEditor(UIFilmPanel uIFilmPanel) {
-        return BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel) != null;
+        return CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel) != null;
     }
 
     /**
@@ -179,8 +179,8 @@ public final class BBSTogetherFix14 {
             return -1;
         }
         UIClipsPanel clipsPanel = uIFilmPanel.cameraEditor;
-        UIClip<?> clipPanel = BBSTogetherFix14.getClipPanel(clipsPanel);
-        if (clipPanel == null || clipPanel.clip == null || !BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(clipsPanel, BBSTogetherFix14.getCameraKeyframeEditor(clipsPanel))) {
+        UIClip<?> clipPanel = CameraKeyframeSync.getClipPanel(clipsPanel);
+        if (clipPanel == null || clipPanel.clip == null || !CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(clipsPanel, CameraKeyframeSync.getCameraKeyframeEditor(clipsPanel))) {
             return -1;
         }
         if (clipsPanel.clips == null || clipsPanel.clips.getClips() == null) {
@@ -195,7 +195,7 @@ public final class BBSTogetherFix14 {
     }
 
     public static int currentEditorType(UIFilmPanel uIFilmPanel) {
-        int n = BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel);
+        int n = CameraKeyframeSync.cameraKeyframeEditorType(uIFilmPanel);
         if (n >= 0) {
             return n;
         }
@@ -203,7 +203,7 @@ public final class BBSTogetherFix14 {
             return 0;
         }
         if (uIFilmPanel != null && uIFilmPanel.replayEditor != null && uIFilmPanel.replayEditor.isVisible()) {
-            return BBSTogetherFix14.replayEditorType(uIFilmPanel.replayEditor);
+            return CameraKeyframeSync.replayEditorType(uIFilmPanel.replayEditor);
         }
         if (uIFilmPanel != null && uIFilmPanel.actionEditor != null && uIFilmPanel.actionEditor.isVisible()) {
             return 2;
@@ -212,31 +212,31 @@ public final class BBSTogetherFix14 {
     }
 
     public static boolean shouldSkipLegacyCursorRenderer(UIFilmPanel uIFilmPanel) {
-        return BBSTogetherFix14.hasCameraKeyframeEditor(uIFilmPanel);
+        return CameraKeyframeSync.hasCameraKeyframeEditor(uIFilmPanel);
     }
 
     public static boolean shouldSkipLegacyPlayheadRenderer(UIFilmPanel uIFilmPanel) {
-        return BBSTogetherFix14.hasCameraKeyframeEditor(uIFilmPanel);
+        return CameraKeyframeSync.hasCameraKeyframeEditor(uIFilmPanel);
     }
 
     public static void setCameraKeyframeHighlights(UIFilmPanel uIFilmPanel) {
         UIKeyframeDopeSheet uIKeyframeDopeSheet;
         UIKeyframes uIKeyframes;
-        UIKeyframeEditor uIKeyframeEditor = BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel);
+        UIKeyframeEditor uIKeyframeEditor = CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel);
         UIKeyframes uIKeyframes2 = uIKeyframes = uIKeyframeEditor == null ? null : uIKeyframeEditor.view;
-        if (!BBSTogetherFix14.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor) || uIKeyframes == null) {
+        if (!CameraKeyframeSync.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor) || uIKeyframes == null) {
             return;
         }
         IUIKeyframeGraph iUIKeyframeGraph = uIKeyframes.getGraph();
         if (iUIKeyframeGraph instanceof UIKeyframeDopeSheet && (uIKeyframeDopeSheet = (UIKeyframeDopeSheet)iUIKeyframeGraph) instanceof ITogetherDopeSheet) {
             ITogetherDopeSheet iTogetherDopeSheet = (ITogetherDopeSheet)uIKeyframeDopeSheet;
-            iTogetherDopeSheet.together_setExternalHighlights(BBSTogetherFix14.buildCameraKeyframeHighlights(uIFilmPanel, uIKeyframeDopeSheet));
+            iTogetherDopeSheet.together_setExternalHighlights(CameraKeyframeSync.buildCameraKeyframeHighlights(uIFilmPanel, uIKeyframeDopeSheet));
         }
     }
 
     public static void clearCameraKeyframeHighlights(UIFilmPanel uIFilmPanel) {
         UIKeyframes uIKeyframes;
-        UIKeyframeEditor uIKeyframeEditor = BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel);
+        UIKeyframeEditor uIKeyframeEditor = CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel);
         UIKeyframes uIKeyframes2 = uIKeyframes = uIKeyframeEditor == null ? null : uIKeyframeEditor.view;
         if (uIKeyframes == null) {
             return;
@@ -251,7 +251,7 @@ public final class BBSTogetherFix14 {
     public static float[] tickRowFromKeyframes(UIKeyframeEditor uIKeyframeEditor, int n, int n2) {
         UIKeyframes uIKeyframes;
         UIKeyframes uIKeyframes2 = uIKeyframes = uIKeyframeEditor == null ? null : uIKeyframeEditor.view;
-        if (uIKeyframes == null || !BBSTogetherFix14.areaForKeyframes(uIKeyframes).isInside(n, n2)) {
+        if (uIKeyframes == null || !CameraKeyframeSync.areaForKeyframes(uIKeyframes).isInside(n, n2)) {
             return null;
         }
         IUIKeyframeGraph iUIKeyframeGraph = uIKeyframes.getGraph();
@@ -284,7 +284,7 @@ public final class BBSTogetherFix14 {
             return null;
         }
         UIKeyframeDopeSheet uIKeyframeDopeSheet = (UIKeyframeDopeSheet)iUIKeyframeGraph;
-        return BBSTogetherFix14.screenFromKeyframes(uIKeyframes, uIKeyframeDopeSheet, f, f2);
+        return CameraKeyframeSync.screenFromKeyframes(uIKeyframes, uIKeyframeDopeSheet, f, f2);
     }
 
     public static int[] screenFromKeyframes(UIKeyframes uIKeyframes, UIKeyframeDopeSheet uIKeyframeDopeSheet, float f, float f2) {
@@ -300,7 +300,7 @@ public final class BBSTogetherFix14 {
         }
         int n2 = uIKeyframes.toGraphX((double)f);
         int n3 = uIKeyframeDopeSheet.getDopeSheetY(n) + (int)((double)f3 * uIKeyframeDopeSheet.getTrackHeight());
-        Area area = BBSTogetherFix14.areaForKeyframes(uIKeyframes);
+        Area area = CameraKeyframeSync.areaForKeyframes(uIKeyframes);
         if (area.isInside(n2, n3)) {
             int[] nArray2 = new int[2];
             nArray2[0] = n2;
@@ -316,13 +316,13 @@ public final class BBSTogetherFix14 {
         if (uIFilmPanel == null || uIFilmPanel.getData() == null) {
             return;
         }
-        UIKeyframeEditor uIKeyframeEditor = BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel);
-        int n = BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel);
-        if (n < 0 || !BBSTogetherFix14.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor)) {
+        UIKeyframeEditor uIKeyframeEditor = CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel);
+        int n = CameraKeyframeSync.cameraKeyframeEditorType(uIFilmPanel);
+        if (n < 0 || !CameraKeyframeSync.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor)) {
             return;
         }
-        float[] fArray = BBSTogetherFix14.tickRowFromKeyframes(uIKeyframeEditor, uIContext.mouseX, uIContext.mouseY);
-        List<Integer> list = BBSTogetherFix14.encodeVisibleKeyframeSelection(uIKeyframeEditor);
+        float[] fArray = CameraKeyframeSync.tickRowFromKeyframes(uIKeyframeEditor, uIContext.mouseX, uIContext.mouseY);
+        List<Integer> list = CameraKeyframeSync.encodeVisibleKeyframeSelection(uIKeyframeEditor);
         float f = fArray == null ? -1.0f : fArray[0];
         float f2 = fArray == null ? -1.0f : fArray[1];
         TogetherClientNetwork.sendCursorPosition(((Film)uIFilmPanel.getData()).getId(), n, f, f2, list, uIFilmPanel.getCursor());
@@ -332,15 +332,15 @@ public final class BBSTogetherFix14 {
         if (uIFilmPanel == null || uIFilmPanel.getData() == null) {
             return;
         }
-        UIKeyframeEditor uIKeyframeEditor = BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel);
-        int n = BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel);
-        if (n < 0 || !BBSTogetherFix14.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor) || TogetherClientNetwork.playerCursors.isEmpty()) {
+        UIKeyframeEditor uIKeyframeEditor = CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel);
+        int n = CameraKeyframeSync.cameraKeyframeEditorType(uIFilmPanel);
+        if (n < 0 || !CameraKeyframeSync.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor) || TogetherClientNetwork.playerCursors.isEmpty()) {
             return;
         }
         for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet()) {
             int[] nArray;
             TogetherClientNetwork.CursorPosition cursorPosition = entry.getValue();
-            if (cursorPosition.editorType != n || cursorPosition.currentTick < 0.0f || cursorPosition.currentRow < 0.0f || BBSTogetherFix14.isLocalPlayer(entry.getKey()) || (nArray = BBSTogetherFix14.screenFromKeyframes(uIKeyframeEditor, cursorPosition.currentTick, cursorPosition.currentRow)) == null) continue;
+            if (cursorPosition.editorType != n || cursorPosition.currentTick < 0.0f || cursorPosition.currentRow < 0.0f || CameraKeyframeSync.isLocalPlayer(entry.getKey()) || (nArray = CameraKeyframeSync.screenFromKeyframes(uIKeyframeEditor, cursorPosition.currentTick, cursorPosition.currentRow)) == null) continue;
             Integer n2 = TogetherClientNetwork.playerColors.get(entry.getKey());
             int n3 = (n2 == null ? 0xFFFFFF : n2) | 0xFF000000;
             uIContext.batcher.icon(Icons.CURSOR, n3, (float)nArray[0], (float)nArray[1]);
@@ -348,18 +348,18 @@ public final class BBSTogetherFix14 {
     }
 
     public static void renderCameraKeyframePlayheads(UIFilmPanel uIFilmPanel, UIContext uIContext) {
-        UIKeyframeEditor uIKeyframeEditor = BBSTogetherFix14.getCameraKeyframeEditor(uIFilmPanel);
+        UIKeyframeEditor uIKeyframeEditor = CameraKeyframeSync.getCameraKeyframeEditor(uIFilmPanel);
         UIKeyframes uIKeyframes = uIKeyframeEditor == null ? null : uIKeyframeEditor.view;
-        int n = BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel);
-        if (n < 0 || !BBSTogetherFix14.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor) || uIKeyframes == null || TogetherClientNetwork.playerCursors.isEmpty()) {
+        int n = CameraKeyframeSync.cameraKeyframeEditorType(uIFilmPanel);
+        if (n < 0 || !CameraKeyframeSync.isCameraKeyframeEditorActive(uIFilmPanel, uIKeyframeEditor) || uIKeyframes == null || TogetherClientNetwork.playerCursors.isEmpty()) {
             return;
         }
-        Area area = BBSTogetherFix14.areaForKeyframes(uIKeyframes);
+        Area area = CameraKeyframeSync.areaForKeyframes(uIKeyframes);
         Batcher2D batcher2D = uIContext.batcher;
         for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet()) {
             int n2;
             Integer n3;
-            if (BBSTogetherFix14.isLocalPlayer(entry.getKey())) continue;
+            if (CameraKeyframeSync.isLocalPlayer(entry.getKey())) continue;
             TogetherClientNetwork.CursorPosition cursorPosition = entry.getValue();
             if (cursorPosition.editorType != n || cursorPosition.playheadTick < 0 || (n3 = TogetherClientNetwork.playerColors.get(entry.getKey())) == null || (n2 = uIKeyframes.toGraphX((double)cursorPosition.playheadTick)) < area.x || n2 > area.ex()) continue;
             batcher2D.box((float)n2, (float)area.y, (float)(n2 + 2), (float)area.ey(), Colors.setA((int)(n3 | 0xFF000000), (float)0.25f));
@@ -372,13 +372,13 @@ public final class BBSTogetherFix14 {
             return hashMap;
         }
         List list = uIKeyframeDopeSheet.getSheets();
-        int n3 = BBSTogetherFix14.cameraKeyframeEditorType(uIFilmPanel);
+        int n3 = CameraKeyframeSync.cameraKeyframeEditorType(uIFilmPanel);
         if (n3 < 0) {
             return hashMap;
         }
         for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet()) {
             Integer n4;
-            if (BBSTogetherFix14.isLocalPlayer(entry.getKey())) continue;
+            if (CameraKeyframeSync.isLocalPlayer(entry.getKey())) continue;
             TogetherClientNetwork.CursorPosition cursorPosition = entry.getValue();
             if (cursorPosition.editorType != n3 || cursorPosition.selectedIndices.isEmpty() || (n4 = TogetherClientNetwork.playerColors.get(entry.getKey())) == null) continue;
             int n5 = Colors.setA((int)(n4 | 0xFF000000), (float)0.55f);
@@ -417,14 +417,14 @@ public final class BBSTogetherFix14 {
     }
 
     private static boolean isCameraKeyframeEditorActive(UIFilmPanel uIFilmPanel, UIKeyframeEditor uIKeyframeEditor) {
-        return uIKeyframeEditor != null && uIKeyframeEditor.hasParent() && uIKeyframeEditor.canBeSeen() && uIKeyframeEditor.view != null && uIKeyframeEditor.view.hasParent() && uIKeyframeEditor.view.canBeSeen() && uIFilmPanel != null && uIFilmPanel.cameraEditor != null && BBSTogetherFix14.isVisibleEmbeddedKeyframeEditor(uIFilmPanel.cameraEditor, uIKeyframeEditor);
+        return uIKeyframeEditor != null && uIKeyframeEditor.hasParent() && uIKeyframeEditor.canBeSeen() && uIKeyframeEditor.view != null && uIKeyframeEditor.view.hasParent() && uIKeyframeEditor.view.canBeSeen() && uIFilmPanel != null && uIFilmPanel.cameraEditor != null && CameraKeyframeSync.isVisibleEmbeddedKeyframeEditor(uIFilmPanel.cameraEditor, uIKeyframeEditor);
     }
 
     private static boolean isVisibleEmbeddedKeyframeEditor(UIClipsPanel uIClipsPanel, UIKeyframeEditor uIKeyframeEditor) {
         if (uIClipsPanel == null || uIClipsPanel.clips == null || uIKeyframeEditor == null || !uIKeyframeEditor.hasParent() || !uIKeyframeEditor.canBeSeen()) {
             return false;
         }
-        return BBSTogetherFix14.getEmbedded(uIClipsPanel.clips) == uIKeyframeEditor;
+        return CameraKeyframeSync.getEmbedded(uIClipsPanel.clips) == uIKeyframeEditor;
     }
 
     private static UIClip<?> getClipPanel(UIClipsPanel uIClipsPanel) {

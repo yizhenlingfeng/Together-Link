@@ -17,11 +17,11 @@ import mchorse.bbs_together.network.TogetherServerNetwork;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.client.MinecraftClient;
 
-public final class BBSTogetherFix19 {
+public final class RecordingSyncGate {
     private static final long RECORDING_SAVE_SUPPRESS_MS = 10000L;
     private static volatile long lastRecordingSyncAt;
 
-    private BBSTogetherFix19() {
+    private RecordingSyncGate() {
     }
 
     public static void sendRecordingFinished(Film film, Recorder recorder) {
@@ -29,15 +29,15 @@ public final class BBSTogetherFix19 {
             return;
         }
         MapType mapType = new MapType();
-        MapType mapType2 = BBSTogetherFix19.collectNonEmptyChannels(recorder.keyframes);
-        MapType mapType3 = BBSTogetherFix19.collectNonEmptyProperties(null);
+        MapType mapType2 = RecordingSyncGate.collectNonEmptyChannels(recorder.keyframes);
+        MapType mapType3 = RecordingSyncGate.collectNonEmptyProperties(null);
         if (!mapType2.isEmpty()) {
             mapType.put("keyframes", (BaseType)mapType2);
         }
         if (!mapType3.isEmpty()) {
             mapType.put("properties", (BaseType)mapType3);
         }
-        BBSTogetherFix19.sendRecordingFinishedData(film.getId(), recorder.exception, (BaseType)mapType);
+        RecordingSyncGate.sendRecordingFinishedData(film.getId(), recorder.exception, (BaseType)mapType);
     }
 
     public static void sendRecordingFinished(Film film, int n) {
@@ -58,7 +58,7 @@ public final class BBSTogetherFix19 {
     }
 
     public static void sendRecordingDelta(Film film, int n, Replay replay, BaseType baseType, BaseType baseType2) {
-        BBSTogetherFix19.sendRecordingDelta(film, n, replay, baseType, baseType2, null);
+        RecordingSyncGate.sendRecordingDelta(film, n, replay, baseType, baseType2, null);
     }
 
     public static void sendRecordingDelta(Film film, int n, Replay replay, BaseType baseType, BaseType baseType2, BaseType baseType3) {
@@ -66,9 +66,9 @@ public final class BBSTogetherFix19 {
             return;
         }
         MapType mapType = new MapType();
-        MapType mapType2 = BBSTogetherFix19.collectChangedChannels(replay.keyframes, baseType);
-        MapType mapType3 = BBSTogetherFix19.collectChangedProperties(replay.properties, baseType2);
-        BaseType baseType4 = BBSTogetherFix19.collectChangedActions(replay.actions, baseType3);
+        MapType mapType2 = RecordingSyncGate.collectChangedChannels(replay.keyframes, baseType);
+        MapType mapType3 = RecordingSyncGate.collectChangedProperties(replay.properties, baseType2);
+        BaseType baseType4 = RecordingSyncGate.collectChangedActions(replay.actions, baseType3);
         if (!mapType2.isEmpty()) {
             mapType.put("keyframes", (BaseType)mapType2);
         }
@@ -78,7 +78,7 @@ public final class BBSTogetherFix19 {
         if (baseType4 != null) {
             mapType.put("actions", baseType4);
         }
-        BBSTogetherFix19.sendRecordingFinishedData(film.getId(), n, (BaseType)mapType);
+        RecordingSyncGate.sendRecordingFinishedData(film.getId(), n, (BaseType)mapType);
     }
 
     public static void sendRecordingFinishedData(String string, int n, BaseType baseType) {
@@ -88,7 +88,7 @@ public final class BBSTogetherFix19 {
         lastRecordingSyncAt = System.currentTimeMillis();
         TogetherClientNetwork.recordingSessionActive = false;
         try {
-            PacketCrusher packetCrusher = BBSTogetherFix19.getClientPacketCrusher();
+            PacketCrusher packetCrusher = RecordingSyncGate.getClientPacketCrusher();
             if (packetCrusher == null || MinecraftClient.getInstance().player == null) {
                 return;
             }

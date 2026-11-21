@@ -26,8 +26,8 @@ import mchorse.bbs_mod.ui.ContentType;
 import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.replays.UIReplayList;
-import mchorse.bbs_together.BBSTogetherFix22;
-import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
+import mchorse.bbs_together.ReplayIndexes;
 import mchorse.bbs_together.network.CompressedClientPacketCrusher;
 import mchorse.bbs_together.network.CompressedServerPacketCrusher;
 import mchorse.bbs_together.network.TogetherClientNetwork;
@@ -39,7 +39,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.MinecraftServer;
 
-public final class BBSTogetherFixReplayStructure {
+public final class ReplayStructureRecovery {
     private static final Identifier SERVER_REPLAY_STRUCTURE = Identifier.of("bbs_together", "s_replay_structure_fix1615");
     private static final Identifier CLIENT_REPLAY_STRUCTURE = Identifier.of("bbs_together", "c_replay_structure_fix1615");
     /* Use Together's compressed crushers so 1.21.11 payload channels go through
@@ -53,7 +53,7 @@ public final class BBSTogetherFixReplayStructure {
     private static boolean clientRegistered;
     private static boolean serverRegistered;
 
-    private BBSTogetherFixReplayStructure() {
+    private ReplayStructureRecovery() {
     }
 
     public static Identifier getServerReplayStructureChannel() {
@@ -72,13 +72,13 @@ public final class BBSTogetherFixReplayStructure {
     }
 
     public static void sendIfChanged(UIReplayList uIReplayList, List<Replay> list) {
-        if (uIReplayList == null || list == null || uIReplayList.panel == null || uIReplayList.panel.getData() == null || !TogetherClientNetwork.isConnected() || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (uIReplayList == null || list == null || uIReplayList.panel == null || uIReplayList.panel.getData() == null || !TogetherClientNetwork.isConnected() || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         Film film = (Film)uIReplayList.panel.getData();
         List list2 = film.replays.getList();
-        int[] nArray = BBSTogetherFixReplayStructure.buildIdentityMapping(list, list2);
-        if (!BBSTogetherFixReplayStructure.hasStructuralChange(nArray, list.size(), list2.size())) {
+        int[] nArray = ReplayStructureRecovery.buildIdentityMapping(list, list2);
+        if (!ReplayStructureRecovery.hasStructuralChange(nArray, list.size(), list2.size())) {
             return;
         }
         String string = film.getId();
@@ -86,8 +86,8 @@ public final class BBSTogetherFixReplayStructure {
         if (string == null || string.isEmpty() || class_3102.player == null) {
             return;
         }
-        int n = BBSTogetherFix45.currentReplayIndex(uIReplayList.panel, film);
-        CLIENT_CRUSHER.send((PlayerEntity)class_3102.player, SERVER_REPLAY_STRUCTURE, film.replays.toData(), class_25402 -> BBSTogetherFixReplayStructure.writeMetadata(class_25402, string, list.size(), list2.size(), nArray, n));
+        int n = ReplayIndexes.currentReplayIndex(uIReplayList.panel, film);
+        CLIENT_CRUSHER.send((PlayerEntity)class_3102.player, SERVER_REPLAY_STRUCTURE, film.replays.toData(), class_25402 -> ReplayStructureRecovery.writeMetadata(class_25402, string, list.size(), list2.size(), nArray, n));
         TogetherClientNetwork.sendReplaySelection(string, n);
     }
 
@@ -98,9 +98,9 @@ public final class BBSTogetherFixReplayStructure {
         clientRegistered = true;
         TogetherClientNetworking.register((Identifier)CLIENT_REPLAY_STRUCTURE, (class_3102, class_6342, class_25403, packetSender) -> CLIENT_RECEIVER.receive(class_25403, (byArray, class_25402) -> {
             UUID uUID = class_25402.readUuid();
-            Metadata metadata = BBSTogetherFixReplayStructure.readMetadata(class_25402);
+            Metadata metadata = ReplayStructureRecovery.readMetadata(class_25402);
             BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
-            class_3102.execute(() -> BBSTogetherFixReplayStructure.applyClientStructure(uUID, metadata, baseType));
+            class_3102.execute(() -> ReplayStructureRecovery.applyClientStructure(uUID, metadata, baseType));
         }));
     }
 
@@ -112,9 +112,9 @@ public final class BBSTogetherFixReplayStructure {
         TogetherServerNetworking.register((Identifier)SERVER_REPLAY_STRUCTURE, (minecraftServer, class_32222, class_32442, class_25403, packetSender) -> {
             ServerPacketCrusher serverPacketCrusher = SERVER_RECEIVERS.computeIfAbsent(class_32222.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.receive(class_25403, (byArray, class_25402) -> {
-                Metadata metadata = BBSTogetherFixReplayStructure.readMetadata(class_25402);
+                Metadata metadata = ReplayStructureRecovery.readMetadata(class_25402);
                 BaseType baseType = DataStorageUtils.readFromBytes((byte[])byArray);
-                minecraftServer.execute(() -> BBSTogetherFixReplayStructure.applyServerStructure(minecraftServer, class_32222, metadata, baseType));
+                minecraftServer.execute(() -> ReplayStructureRecovery.applyServerStructure(minecraftServer, class_32222, metadata, baseType));
             });
         });
     }
@@ -134,7 +134,7 @@ public final class BBSTogetherFixReplayStructure {
         if (minecraftServer == null || class_32222 == null || metadata == null || baseType == null || metadata.filmId.isEmpty()) {
             return;
         }
-        if (!BBSTogetherFixReplayStructure.isUsableStructure(metadata, baseType)) {
+        if (!ReplayStructureRecovery.isUsableStructure(metadata, baseType)) {
             System.out.println("[BBSTogether] Dropped replay structure film=" + metadata.filmId + " player=" + class_32222.getUuid() + " old=" + metadata.oldSize + " new=" + metadata.newSize + " payload=" + (baseType.isList() ? baseType.asList().size() : "not-a-list"));
             return;
         }
@@ -145,7 +145,7 @@ public final class BBSTogetherFixReplayStructure {
         int n = film.replays.getList().size();
         try {
             if (n == metadata.oldSize) {
-                BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
+                ReplayStructureRecovery.applyMappedReplayStructure(film, metadata, baseType);
             } else {
                 film.replays.fromData(baseType);
             }
@@ -157,13 +157,13 @@ public final class BBSTogetherFixReplayStructure {
         }
         System.out.println("[BBSTogether] Applied replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " server=" + n);
         BBSMod.getFilms().save(metadata.filmId, film.toData().asMap());
-        BBSTogetherFixReplayStructure.remapServerSelections(class_32222.getUuid(), metadata, n);
+        ReplayStructureRecovery.remapServerSelections(class_32222.getUuid(), metadata, n);
         for (ServerPlayerEntity class_32223 : minecraftServer.getPlayerManager().getPlayerList()) {
             if (class_32223 == class_32222) continue;
             ServerPacketCrusher serverPacketCrusher = SERVER_SENDERS.computeIfAbsent(class_32223.getUuid(), uUID -> new CompressedServerPacketCrusher());
             serverPacketCrusher.send((PlayerEntity)class_32223, CLIENT_REPLAY_STRUCTURE, baseType, class_25402 -> {
                 class_25402.writeUuid(class_32222.getUuid());
-                BBSTogetherFixReplayStructure.writeMetadata(class_25402, metadata.filmId, metadata.oldSize, metadata.newSize, metadata.oldToNew, metadata.selectedIndex);
+                ReplayStructureRecovery.writeMetadata(class_25402, metadata.filmId, metadata.oldSize, metadata.newSize, metadata.oldToNew, metadata.selectedIndex);
             });
         }
         TogetherServerNetwork.broadcastReplaySelections(minecraftServer, metadata.filmId);
@@ -173,7 +173,7 @@ public final class BBSTogetherFixReplayStructure {
         if (metadata == null || baseType == null || metadata.filmId.isEmpty()) {
             return;
         }
-        if (!BBSTogetherFixReplayStructure.isUsableStructure(metadata, baseType)) {
+        if (!ReplayStructureRecovery.isUsableStructure(metadata, baseType)) {
             System.out.println("[BBSTogether] Dropped remote replay structure film=" + metadata.filmId + " old=" + metadata.oldSize + " new=" + metadata.newSize + " payload=" + (baseType.isList() ? baseType.asList().size() : "not-a-list"));
             return;
         }
@@ -181,7 +181,7 @@ public final class BBSTogetherFixReplayStructure {
             return;
         }
         try {
-            BBSTogetherFixReplayStructure.applyClientStructureNow(uUID, metadata, baseType);
+            ReplayStructureRecovery.applyClientStructureNow(uUID, metadata, baseType);
         }
         finally {
             CLIENT_STRUCTURE_APPLY.remove(metadata.filmId);
@@ -196,18 +196,18 @@ public final class BBSTogetherFixReplayStructure {
         UIDashboard uIDashboard = BBSModClient.getDashboardIfCreated();
         UIFilmPanel uIFilmPanel2 = uIFilmPanel = uIDashboard == null ? null : (UIFilmPanel)uIDashboard.getPanel(UIFilmPanel.class);
         if (uIFilmPanel == null || uIFilmPanel.getData() == null || !metadata.filmId.equals(((Film)uIFilmPanel.getData()).getId())) {
-            BBSTogetherFixReplayStructure.saveHiddenFilmStructure(metadata, baseType);
+            ReplayStructureRecovery.saveHiddenFilmStructure(metadata, baseType);
             return;
         }
         Film film = (Film)uIFilmPanel.getData();
         int n = film.replays.getList().size();
-        int n2 = BBSTogetherFix45.currentReplayIndex(uIFilmPanel, film);
+        int n2 = ReplayIndexes.currentReplayIndex(uIFilmPanel, film);
         boolean bl = n == metadata.oldSize;
-        BBSTogetherFix22.beginRemoteSyncApply();
+        RemoteSyncApplyDepth.beginRemoteSyncApply();
         try {
             try {
                 if (bl) {
-                    BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
+                    ReplayStructureRecovery.applyMappedReplayStructure(film, metadata, baseType);
                 } else {
                     film.replays.fromData(baseType);
                 }
@@ -217,8 +217,8 @@ public final class BBSTogetherFixReplayStructure {
                 throwable.printStackTrace();
             }
             List list = film.replays.getList();
-            int n3 = bl ? BBSTogetherFixReplayStructure.remapIndex(n2, metadata.oldToNew, list.size()) : BBSTogetherFixReplayStructure.clampIndex(n2, list.size());
-            BBSTogetherFixReplayStructure.remapClientSelections(metadata, uUID);
+            int n3 = bl ? ReplayStructureRecovery.remapIndex(n2, metadata.oldToNew, list.size()) : ReplayStructureRecovery.clampIndex(n2, list.size());
+            ReplayStructureRecovery.remapClientSelections(metadata, uUID);
             if (uIFilmPanel.replayEditor.replaysList != null && uIFilmPanel.replayEditor.replaysList.replays != null) {
                 uIFilmPanel.replayEditor.replaysList.replays.refreshReplayList();
                 uIFilmPanel.replayEditor.replaysList.replays.update();
@@ -237,7 +237,7 @@ public final class BBSTogetherFixReplayStructure {
             TogetherClientNetwork.sendReplaySelection(metadata.filmId, n3);
         }
         finally {
-            BBSTogetherFix22.endRemoteSyncApply();
+            RemoteSyncApplyDepth.endRemoteSyncApply();
         }
     }
 
@@ -245,8 +245,8 @@ public final class BBSTogetherFixReplayStructure {
      * WARNING - Removed try catching itself - possible behaviour change.
      */
     private static void remapServerSelections(UUID uUID, Metadata metadata, int n) {
-        Map<UUID, Integer> map = BBSTogetherFixReplayStructure.getServerReplaySelections();
-        Map<UUID, String> map2 = BBSTogetherFixReplayStructure.getServerFilmSelections();
+        Map<UUID, Integer> map = ReplayStructureRecovery.getServerReplaySelections();
+        Map<UUID, String> map2 = ReplayStructureRecovery.getServerFilmSelections();
         if (map == null) {
             return;
         }
@@ -255,13 +255,13 @@ public final class BBSTogetherFixReplayStructure {
             for (Map.Entry<UUID, Integer> entry : new ArrayList<Map.Entry<UUID, Integer>>(map.entrySet())) {
                 UUID uUID2 = entry.getKey();
                 if (!metadata.filmId.equals(map2.get(uUID2))) continue;
-                int n2 = uUID2.equals(uUID) ? BBSTogetherFixReplayStructure.clampIndex(metadata.selectedIndex, metadata.newSize) : (n == metadata.oldSize ? BBSTogetherFixReplayStructure.remapIndex(entry.getValue(), metadata.oldToNew, metadata.newSize) : BBSTogetherFixReplayStructure.clampIndex(entry.getValue(), metadata.newSize));
+                int n2 = uUID2.equals(uUID) ? ReplayStructureRecovery.clampIndex(metadata.selectedIndex, metadata.newSize) : (n == metadata.oldSize ? ReplayStructureRecovery.remapIndex(entry.getValue(), metadata.oldToNew, metadata.newSize) : ReplayStructureRecovery.clampIndex(entry.getValue(), metadata.newSize));
                 map.remove(uUID2);
                 if (n2 < 0) continue;
                 map.put(uUID2, n2);
             }
             if (!map.containsKey(uUID) && metadata.selectedIndex >= 0) {
-                map.put(uUID, BBSTogetherFixReplayStructure.clampIndex(metadata.selectedIndex, metadata.newSize));
+                map.put(uUID, ReplayStructureRecovery.clampIndex(metadata.selectedIndex, metadata.newSize));
             }
         }
     }
@@ -273,7 +273,7 @@ public final class BBSTogetherFixReplayStructure {
         }
         HashMap<Integer, List<UUID>> hashMap = new HashMap<Integer, List<UUID>>();
         for (Map.Entry<Integer, List<UUID>> entry2 : map.entrySet()) {
-            int n2 = BBSTogetherFixReplayStructure.remapIndex(entry2.getKey(), metadata.oldToNew, metadata.newSize);
+            int n2 = ReplayStructureRecovery.remapIndex(entry2.getKey(), metadata.oldToNew, metadata.newSize);
             if (n2 < 0) continue;
             hashMap.computeIfAbsent(n2, n -> new ArrayList()).addAll((Collection)entry2.getValue());
         }
@@ -282,7 +282,7 @@ public final class BBSTogetherFixReplayStructure {
                 entry2.getValue().remove(uUID);
             }
             hashMap.entrySet().removeIf(entry -> ((List)entry.getValue()).isEmpty());
-            int n3 = BBSTogetherFixReplayStructure.clampIndex(metadata.selectedIndex, metadata.newSize);
+            int n3 = ReplayStructureRecovery.clampIndex(metadata.selectedIndex, metadata.newSize);
             if (n3 >= 0) {
                 hashMap.computeIfAbsent(n3, n -> new ArrayList()).add(uUID);
             }
@@ -293,7 +293,7 @@ public final class BBSTogetherFixReplayStructure {
     private static int[] buildIdentityMapping(List<Replay> list, List<Replay> list2) {
         int[] nArray = new int[list.size()];
         for (int i = 0; i < list.size(); ++i) {
-            nArray[i] = BBSTogetherFixReplayStructure.identityIndex(list2, list.get(i));
+            nArray[i] = ReplayStructureRecovery.identityIndex(list2, list.get(i));
         }
         return nArray;
     }
@@ -323,7 +323,7 @@ public final class BBSTogetherFixReplayStructure {
             return -1;
         }
         if (nArray == null || n >= nArray.length) {
-            return BBSTogetherFixReplayStructure.clampIndex(n, n2);
+            return ReplayStructureRecovery.clampIndex(n, n2);
         }
         int n4 = nArray[n];
         if (n4 >= 0 && n4 < n2) {
@@ -352,7 +352,7 @@ public final class BBSTogetherFixReplayStructure {
      * elements before touching the list keeps a malformed entry from half replacing the film.
      */
     private static void applyMappedReplayStructure(Film film, Metadata metadata, BaseType baseType) {
-        if (film == null || !BBSTogetherFixReplayStructure.isUsableStructure(metadata, baseType)) {
+        if (film == null || !ReplayStructureRecovery.isUsableStructure(metadata, baseType)) {
             return;
         }
         ArrayList arrayList = new ArrayList(film.replays.getList());
@@ -403,7 +403,7 @@ public final class BBSTogetherFixReplayStructure {
         int n = film.replays.getList().size();
         try {
             if (n == metadata.oldSize) {
-                BBSTogetherFixReplayStructure.applyMappedReplayStructure(film, metadata, baseType);
+                ReplayStructureRecovery.applyMappedReplayStructure(film, metadata, baseType);
             } else {
                 film.replays.fromData(baseType);
             }
@@ -449,11 +449,11 @@ public final class BBSTogetherFixReplayStructure {
     }
 
     private static Map<UUID, Integer> getServerReplaySelections() {
-        return (Map)BBSTogetherFixReplayStructure.getServerField("playerReplaySelections", null);
+        return (Map)ReplayStructureRecovery.getServerField("playerReplaySelections", null);
     }
 
     private static Map<UUID, String> getServerFilmSelections() {
-        Map map = (Map)BBSTogetherFixReplayStructure.getServerField("playerEditingFilm", Map.of());
+        Map map = (Map)ReplayStructureRecovery.getServerField("playerEditingFilm", Map.of());
         return map == null ? Map.of() : map;
     }
 

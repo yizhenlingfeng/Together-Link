@@ -4,7 +4,7 @@ import mchorse.bbs_mod.data.types.BaseType;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.ui.film.utils.undo.ValueChangeUndo;
-import mchorse.bbs_together.BBSTogetherFix67UndoPath;
+import mchorse.bbs_together.UndoPathResolver;
 import mchorse.bbs_together.locks.KeyframeLockClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -47,7 +47,7 @@ public abstract class ValueChangeUndoLockMixin
 
     private static boolean bbs_together$blocked(ValueGroup context, ValueChangeUndo undo, BaseType value)
     {
-        BaseValue target = context == null || undo.name == null ? null : BBSTogetherFix67UndoPath.resolve(context, undo.name.strings);
+        BaseValue target = context == null || undo.name == null ? null : UndoPathResolver.resolve(context, undo.name.strings);
 
         if (!KeyframeLockClient.undoBlocked(target, value))
         {

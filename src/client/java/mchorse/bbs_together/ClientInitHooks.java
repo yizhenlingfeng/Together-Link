@@ -26,7 +26,7 @@ import mchorse.bbs_mod.utils.keyframes.KeyframeShape;
 import mchorse.bbs_together.values.ValueKeyframeInterpolation;
 import mchorse.bbs_together.values.ValueKeyframeShape;
 
-public class BBSTogetherFix66Client {
+public class ClientInitHooks {
     private static boolean registered;
 
     public static void registerSettingUIs() {
@@ -35,7 +35,7 @@ public class BBSTogetherFix66Client {
         }
         registered = true;
         UIValueMap.register(ValueKeyframeShape.class, (valueKeyframeShape, uIElement) -> {
-            UIIcon uIIcon2 = new UIIcon(() -> BBSTogetherFix66Client.shapeIcon((Integer)valueKeyframeShape.get()), uIIcon -> {
+            UIIcon uIIcon2 = new UIIcon(() -> ClientInitHooks.shapeIcon((Integer)valueKeyframeShape.get()), uIIcon -> {
                 UIContext context = uIIcon.getContext();
 
                 /* Outside the tree (a settings row that has been rebuilt) there is no menu to open. */
@@ -44,7 +44,7 @@ public class BBSTogetherFix66Client {
                 }
 
                 context.replaceContextMenu(contextMenuManager -> {
-                    KeyframeShape keyframeShape = BBSTogetherFix66Client.shapeAt((Integer)valueKeyframeShape.get());
+                    KeyframeShape keyframeShape = ClientInitHooks.shapeAt((Integer)valueKeyframeShape.get());
                     for (KeyframeShape keyframeShape2 : KeyframeShape.values()) {
                         IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(keyframeShape2);
                         if (iKeyframeShapeRenderer == null) continue;
@@ -52,21 +52,21 @@ public class BBSTogetherFix66Client {
                     }
                 });
             });
-            uIIcon2.tooltip(BBSTogetherFix66Client.shapeLabel((Integer)valueKeyframeShape.get()));
+            uIIcon2.tooltip(ClientInitHooks.shapeLabel((Integer)valueKeyframeShape.get()));
             return Arrays.asList(UIValueFactory.column((UIElement)uIIcon2, (BaseValue)valueKeyframeShape));
         });
         UIValueMap.register(ValueKeyframeInterpolation.class, (valueKeyframeInterpolation, uIElement) -> {
-            UIIcon uIIcon2 = new UIIcon(() -> BBSTogetherFix66Client.interpolationIcon((Integer)valueKeyframeInterpolation.get()), uIIcon -> {
+            UIIcon uIIcon2 = new UIIcon(() -> ClientInitHooks.interpolationIcon((Integer)valueKeyframeInterpolation.get()), uIIcon -> {
                 UIContext context = uIIcon.getContext();
 
                 if (context == null) {
                     return;
                 }
 
-                Interpolation interpolation = new Interpolation("default_interpolation_picker", Interpolations.MAP, BBSTogetherFix66Client.interpolationAt((Integer)valueKeyframeInterpolation.get()));
-                context.replaceContextMenu((UIContextMenu)new UIInterpolationContextMenu(interpolation).callback(() -> valueKeyframeInterpolation.set(BBSTogetherFix66Client.interpolationIndex(interpolation.getInterp()))));
+                Interpolation interpolation = new Interpolation("default_interpolation_picker", Interpolations.MAP, ClientInitHooks.interpolationAt((Integer)valueKeyframeInterpolation.get()));
+                context.replaceContextMenu((UIContextMenu)new UIInterpolationContextMenu(interpolation).callback(() -> valueKeyframeInterpolation.set(ClientInitHooks.interpolationIndex(interpolation.getInterp()))));
             });
-            uIIcon2.tooltip((ITooltip)new InterpolationTooltip(0.0f, 0.5f, () -> BBSTogetherFix66Client.interpolationAt((Integer)valueKeyframeInterpolation.get())));
+            uIIcon2.tooltip((ITooltip)new InterpolationTooltip(0.0f, 0.5f, () -> ClientInitHooks.interpolationAt((Integer)valueKeyframeInterpolation.get())));
             return Arrays.asList(UIValueFactory.column((UIElement)uIIcon2, (BaseValue)valueKeyframeInterpolation));
         });
     }
@@ -77,12 +77,12 @@ public class BBSTogetherFix66Client {
     }
 
     private static Icon shapeIcon(int n) {
-        IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(BBSTogetherFix66Client.shapeAt(n));
+        IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(ClientInitHooks.shapeAt(n));
         return iKeyframeShapeRenderer != null ? iKeyframeShapeRenderer.getIcon() : Icons.SHAPES;
     }
 
     private static IKey shapeLabel(int n) {
-        IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(BBSTogetherFix66Client.shapeAt(n));
+        IKeyframeShapeRenderer iKeyframeShapeRenderer = (IKeyframeShapeRenderer)KeyframeShapeRenderers.SHAPES.get(ClientInitHooks.shapeAt(n));
         return iKeyframeShapeRenderer != null ? iKeyframeShapeRenderer.getLabel() : UIKeys.KEYFRAMES_SHAPES_SQUARE;
     }
 
@@ -91,12 +91,12 @@ public class BBSTogetherFix66Client {
     }
 
     private static IInterp interpolationAt(int n) {
-        List<IInterp> list = BBSTogetherFix66Client.interpolations();
+        List<IInterp> list = ClientInitHooks.interpolations();
         return n >= 0 && n < list.size() ? list.get(n) : Interpolations.LINEAR;
     }
 
     private static Icon interpolationIcon(int n) {
-        return BBSTogetherFix66Client.interpolationIcon(BBSTogetherFix66Client.interpolationAt(n));
+        return ClientInitHooks.interpolationIcon(ClientInitHooks.interpolationAt(n));
     }
 
     private static Icon interpolationIcon(IInterp iInterp) {
@@ -104,7 +104,7 @@ public class BBSTogetherFix66Client {
     }
 
     private static int interpolationIndex(IInterp iInterp) {
-        List<IInterp> list = BBSTogetherFix66Client.interpolations();
+        List<IInterp> list = ClientInitHooks.interpolations();
         int n = list.indexOf(iInterp);
         return n < 0 ? 0 : n;
     }

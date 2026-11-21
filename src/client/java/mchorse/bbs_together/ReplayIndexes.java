@@ -5,8 +5,8 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 
-public final class BBSTogetherFix45 {
-    private BBSTogetherFix45() {
+public final class ReplayIndexes {
+    private ReplayIndexes() {
     }
 
     public static int identityReplayIndex(List<Replay> list, Replay replay) {
@@ -24,7 +24,7 @@ public final class BBSTogetherFix45 {
         if (uIFilmPanel == null || uIFilmPanel.replayEditor == null || film == null) {
             return -1;
         }
-        int n = BBSTogetherFix45.identityReplayIndex(film.replays.getList(), uIFilmPanel.replayEditor.getReplay());
+        int n = ReplayIndexes.identityReplayIndex(film.replays.getList(), uIFilmPanel.replayEditor.getReplay());
         if (n >= 0) {
             return n;
         }

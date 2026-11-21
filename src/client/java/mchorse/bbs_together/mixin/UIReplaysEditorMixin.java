@@ -6,8 +6,8 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.ui.film.replays.UIReplaysEditor;
 import mchorse.bbs_mod.ui.framework.elements.input.keyframes.UIKeyframeSheet;
-import mchorse.bbs_together.BBSTogetherFix22;
-import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
+import mchorse.bbs_together.ReplayIndexes;
 import mchorse.bbs_together.ITogetherReplaysEditor;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
@@ -49,10 +49,10 @@ implements ITogetherReplaysEditor {
 
     @Inject(method={"setReplay(Lmchorse/bbs_mod/film/replays/Replay;ZLmchorse/bbs_mod/ui/film/replays/UIReplaysEditor$OrbitReaction;)V"}, at={@At(value="TAIL")}, remap=false)
     private void onSetReplay(Replay replay, boolean bl, UIReplaysEditor.OrbitReaction orbitReaction, CallbackInfo callbackInfo) {
-        if (!TogetherClientNetwork.isConnected() || this.film == null || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (!TogetherClientNetwork.isConnected() || this.film == null || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
-        int n = BBSTogetherFix45.identityReplayIndex(this.film.replays.getList(), replay);
+        int n = ReplayIndexes.identityReplayIndex(this.film.replays.getList(), replay);
         TogetherClientNetwork.sendReplaySelection(this.film.getId(), n);
     }
 

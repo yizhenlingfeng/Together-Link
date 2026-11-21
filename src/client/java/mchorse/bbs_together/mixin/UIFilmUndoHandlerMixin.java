@@ -7,7 +7,7 @@ import mchorse.bbs_mod.ui.film.UIClipsPanel;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.utils.UIFilmUndoHandler;
 import mchorse.bbs_mod.ui.forms.editors.UIFormUndoHandler;
-import mchorse.bbs_together.BBSTogetherFix22;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.network.TogetherEditSyncQueue;
 import net.fabricmc.api.EnvType;
@@ -29,14 +29,14 @@ public class UIFilmUndoHandlerMixin {
 
     @Inject(method={"handleValue"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void cancelRemoteHandleValue(BaseValue baseValue, CallbackInfo callbackInfo) {
-        if (BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             callbackInfo.cancel();
         }
     }
 
     @Inject(method={"handleValue"}, at={@At(value="TAIL")}, remap=false)
     private void onHandleValue(BaseValue baseValue, CallbackInfo callbackInfo) {
-        if (!TogetherClientNetwork.isConnected() || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (!TogetherClientNetwork.isConnected() || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         UIFilmPanel uIFilmPanel = this.together_getFilmPanel();
@@ -48,7 +48,7 @@ public class UIFilmUndoHandlerMixin {
 
     @Inject(method={"handleTimers"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
     private void cancelRemoteHandleTimers(CallbackInfo callbackInfo) {
-        if (BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             TogetherEditSyncQueue.clear();
             if (this.syncData != null) {
                 this.syncData.clear();
@@ -62,7 +62,7 @@ public class UIFilmUndoHandlerMixin {
         if (!TogetherClientNetwork.isConnected()) {
             return;
         }
-        if (BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         TogetherEditSyncQueue.flush(this.together_getFilmPanel());

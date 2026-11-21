@@ -18,7 +18,7 @@ import mchorse.bbs_mod.utils.clips.Clip;
 import mchorse.bbs_mod.utils.keyframes.Keyframe;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 import mchorse.bbs_mod.utils.keyframes.KeyframeLoop;
-import mchorse.bbs_together.BBSTogetherFix22;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -145,7 +145,7 @@ public final class KeyframeLockClient
 
     private static boolean guardsLocalWrites()
     {
-        return !BBSTogetherFix22.isApplyingRemoteSync() && restoring.get() == 0;
+        return !RemoteSyncApplyDepth.isApplyingRemoteSync() && restoring.get() == 0;
     }
 
     public static void beginChannelDeserialization()

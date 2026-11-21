@@ -28,10 +28,10 @@ import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.CollectionUtils;
 import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
-import mchorse.bbs_together.BBSTogetherFix14;
-import mchorse.bbs_together.BBSTogetherFix19;
-import mchorse.bbs_together.BBSTogetherFix28Client;
-import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.CameraKeyframeSync;
+import mchorse.bbs_together.RecordingSyncGate;
+import mchorse.bbs_together.FilmSnapshotClient;
+import mchorse.bbs_together.ReplayIndexes;
 import mchorse.bbs_together.ITogetherDopeSheet;
 import mchorse.bbs_together.ITogetherReplaysEditor;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
@@ -118,7 +118,7 @@ public class UIFilmPanelMixin {
     }
 
     @Inject(method={"fillData"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix30Appear(CallbackInfo callbackInfo) {
+    private void togetherOnAppear(CallbackInfo callbackInfo) {
         if (!TogetherClientNetwork.isConnected()) {
             return;
         }
@@ -135,13 +135,13 @@ public class UIFilmPanelMixin {
         this.together_fs2AnnounceReplaySelection(uIFilmPanel, film, true);
         this.together_fs2ResetCursorBroadcastCache();
         this.together_fs2LastJoinFilmId = string;
-        if (!BBSTogetherFix28Client.consumeSmallReenterAppearJoinSuppressed(string)) {
-            BBSTogetherFix28Client.sendFilmJoinRequest(string);
+        if (!FilmSnapshotClient.consumeSmallReenterAppearJoinSuppressed(string)) {
+            FilmSnapshotClient.sendFilmJoinRequest(string);
         }
     }
 
     @Inject(method={"fillData"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix28JoinFilm(CallbackInfo callbackInfo) {
+    private void togetherOnJoinFilm(CallbackInfo callbackInfo) {
         if (!TogetherClientNetwork.isConnected()) {
             return;
         }
@@ -154,7 +154,7 @@ public class UIFilmPanelMixin {
             return;
         }
         this.together_fs2LastJoinFilmId = string;
-        BBSTogetherFix28Client.sendFilmJoinRequest(string);
+        FilmSnapshotClient.sendFilmJoinRequest(string);
     }
 
     @Inject(method={"render"}, at={@At(value="HEAD")}, remap=false)
@@ -175,8 +175,8 @@ public class UIFilmPanelMixin {
     @Inject(method={"render"}, at={@At(value="HEAD")}, remap=false)
     private void together_fs2RenderHead(UIContext uIContext, CallbackInfo callbackInfo) {
         UIFilmPanel uIFilmPanel = (UIFilmPanel)(Object)this;
-        if (TogetherClientNetwork.isConnected() && uIFilmPanel.getData() != null && BBSTogetherFix14.hasCameraKeyframeEditor(uIFilmPanel)) {
-            BBSTogetherFix14.setCameraKeyframeHighlights(uIFilmPanel);
+        if (TogetherClientNetwork.isConnected() && uIFilmPanel.getData() != null && CameraKeyframeSync.hasCameraKeyframeEditor(uIFilmPanel)) {
+            CameraKeyframeSync.setCameraKeyframeHighlights(uIFilmPanel);
             return;
         }
         UIKeyframeDopeSheet uIKeyframeDopeSheet = together_fs2GetDopeSheet(uIFilmPanel);
@@ -201,7 +201,7 @@ public class UIFilmPanelMixin {
         TogetherClientNetwork.flushPendingCursor();
         this.sendPlayheadIfChanged(self);
         /* Keep the automatic edit lock on the clip whose keyframe editor is open. */
-        ClipLockClient.syncEditSession((Film)self.getData(), BBSTogetherFix14.openKeyframeClipIndex(self));
+        ClipLockClient.syncEditSession((Film)self.getData(), CameraKeyframeSync.openKeyframeClipIndex(self));
         this.renderRemoteCursors(self, context);
         this.renderRemotePlayheadLines(self, context);
         if (self.replayEditor.keyframeEditor != null && self.replayEditor.keyframeEditor.view != null && (iUIKeyframeGraph = self.replayEditor.keyframeEditor.view.getGraph()) instanceof ITogetherDopeSheet) {
@@ -221,11 +221,11 @@ public class UIFilmPanelMixin {
             return;
         }
         this.together_fs2SendCurrentReplaySelection(uIFilmPanel);
-        if (BBSTogetherFix14.hasCameraKeyframeEditor(uIFilmPanel)) {
-            BBSTogetherFix14.setCameraKeyframeHighlights(uIFilmPanel);
-            BBSTogetherFix14.sendCameraKeyframeCursor(uIFilmPanel, uIContext);
-            BBSTogetherFix14.renderCameraKeyframeCursors(uIFilmPanel, uIContext);
-            BBSTogetherFix14.renderCameraKeyframePlayheads(uIFilmPanel, uIContext);
+        if (CameraKeyframeSync.hasCameraKeyframeEditor(uIFilmPanel)) {
+            CameraKeyframeSync.setCameraKeyframeHighlights(uIFilmPanel);
+            CameraKeyframeSync.sendCameraKeyframeCursor(uIFilmPanel, uIContext);
+            CameraKeyframeSync.renderCameraKeyframeCursors(uIFilmPanel, uIContext);
+            CameraKeyframeSync.renderCameraKeyframePlayheads(uIFilmPanel, uIContext);
             return;
         }
         if (uIFilmPanel.replayEditor == null || !uIFilmPanel.replayEditor.isVisible()) {
@@ -256,7 +256,7 @@ public class UIFilmPanelMixin {
             f2 = fArray[1];
         }
         String string = ((Film)uIFilmPanel.getData()).getId();
-        TogetherClientNetwork.sendCursorPosition(string, BBSTogetherFix14.replayEditorType(uIFilmPanel.replayEditor), f, f2, list, n);
+        TogetherClientNetwork.sendCursorPosition(string, CameraKeyframeSync.replayEditorType(uIFilmPanel.replayEditor), f, f2, list, n);
         this.together_fs2LastSelection = new ArrayList<Integer>(list);
         this.together_fs2LastSelectionSent = l;
         this.together_fs2LastReplayCursor = n;
@@ -313,18 +313,18 @@ public class UIFilmPanelMixin {
     }
 
     @Inject(method={"applyRecordedKeyframes"}, at={@At(value="TAIL")}, remap=false)
-    private void onApplyRecordedKeyframesFix19(Recorder recorder, Film film, CallbackInfo callbackInfo) {
+    private void onApplyRecordedKeyframes(Recorder recorder, Film film, CallbackInfo callbackInfo) {
         if (recorder == null || recorder.hasNotStarted()) {
             return;
         }
         if (!TogetherClientNetwork.recordingSessionActive) {
             return;
         }
-        BBSTogetherFix19.sendRecordingFinished(film, recorder);
+        RecordingSyncGate.sendRecordingFinished(film, recorder);
     }
 
     @Inject(method={"applyRecordedKeyframes"}, at={@At(value="TAIL")}, remap=false)
-    private void onApplyRecordedKeyframes(Recorder recorder, Film film, CallbackInfo ci) {
+    private void onApplyRecordedKeyframesSyncReplay(Recorder recorder, Film film, CallbackInfo ci) {
         /* Coop takes travel to the server exclusively through RECORDING_FINISHED; the
          * per-channel sync below would only race the server-side merge (and is refused
          * there anyway while the session lock holds). */
@@ -382,7 +382,7 @@ public class UIFilmPanelMixin {
         }
         MapType mapType = new MapType();
         mapType.put("actions", replay.actions.toData());
-        BBSTogetherFix19.sendRecordingFinishedData(string, n, (BaseType)mapType);
+        RecordingSyncGate.sendRecordingFinishedData(string, n, (BaseType)mapType);
     }
 
     @Inject(method={"undo"}, at={@At(value="TAIL")}, remap=false)
@@ -395,7 +395,7 @@ public class UIFilmPanelMixin {
         TogetherUndoSync.broadcast((UIFilmPanel)(Object)this, true);
     }
 
-    /* ---- cursor / playhead sync helpers (legacy paths, gated by Fix14) ---------------- */
+    /* ---- cursor / playhead sync helpers (legacy paths, gated by CameraKeyframeSync) ---- */
 
     @Unique
     private void sendCursorIfMoved(UIFilmPanel self, UIContext context) {
@@ -418,8 +418,8 @@ public class UIFilmPanelMixin {
             this.together_lastPlayheadSent = System.currentTimeMillis();
         }
         String filmId = ((Film)self.getData()).getId();
-        if (BBSTogetherFix14.hasCameraKeyframeEditor(self)) {
-            BBSTogetherFix14.sendCameraKeyframeCursor(self, context);
+        if (CameraKeyframeSync.hasCameraKeyframeEditor(self)) {
+            CameraKeyframeSync.sendCameraKeyframeCursor(self, context);
             return;
         }
         if (self.cameraEditor.isVisible() && self.cameraEditor.clips != null && (tr = this.together_tickRowFromClips(self.cameraEditor.clips, mx, my)) != null) {
@@ -452,7 +452,7 @@ public class UIFilmPanelMixin {
         this.together_lastSentPlayhead = playhead;
         this.together_lastPlayheadSent = now;
         String filmId = ((Film)self.getData()).getId();
-        TogetherClientNetwork.sendCursorPosition(filmId, BBSTogetherFix14.currentEditorType(self), -1.0f, -1.0f, Collections.emptyList(), playhead);
+        TogetherClientNetwork.sendCursorPosition(filmId, CameraKeyframeSync.currentEditorType(self), -1.0f, -1.0f, Collections.emptyList(), playhead);
     }
 
     @Unique
@@ -472,7 +472,7 @@ public class UIFilmPanelMixin {
 
     @Unique
     private void renderRemoteCursors(UIFilmPanel self, UIContext context) {
-        if (BBSTogetherFix14.shouldSkipLegacyCursorRenderer(self)) {
+        if (CameraKeyframeSync.shouldSkipLegacyCursorRenderer(self)) {
             return;
         }
         if (TogetherClientNetwork.playerCursors.isEmpty()) {
@@ -482,7 +482,7 @@ public class UIFilmPanelMixin {
         if (self.cameraEditor.isVisible()) {
             localEditorType = 0;
         } else if (self.replayEditor.isVisible()) {
-            localEditorType = BBSTogetherFix14.replayEditorType(self.replayEditor);
+            localEditorType = CameraKeyframeSync.replayEditorType(self.replayEditor);
         } else if (self.actionEditor.isVisible()) {
             localEditorType = 2;
         }
@@ -494,7 +494,7 @@ public class UIFilmPanelMixin {
             Object xyObj;
             UUID uuid = entry.getKey();
             TogetherClientNetwork.CursorPosition pos = entry.getValue();
-            if (!BBSTogetherFix14.legacyCursorTypesMatch(pos.editorType, localEditorType)) continue;
+            if (!CameraKeyframeSync.legacyCursorTypesMatch(pos.editorType, localEditorType)) continue;
             Integer col = TogetherClientNetwork.playerColors.get(uuid);
             int color = (col != null ? col : 0xFFFFFF) | 0xFF000000;
             if (pos.currentTick < 0.0f && pos.currentRow < 0.0f) continue;
@@ -562,7 +562,7 @@ public class UIFilmPanelMixin {
 
     @Unique
     private void renderRemotePlayheadLines(UIFilmPanel self, UIContext context) {
-        if (BBSTogetherFix14.shouldSkipLegacyPlayheadRenderer(self)) {
+        if (CameraKeyframeSync.shouldSkipLegacyPlayheadRenderer(self)) {
             return;
         }
         if (TogetherClientNetwork.playerCursors.isEmpty()) {
@@ -587,7 +587,7 @@ public class UIFilmPanelMixin {
                 Integer col = TogetherClientNetwork.playerColors.get(uuid);
                 if (col == null) continue;
                 int lineColor = Colors.setA((int)(col | 0xFF000000), (float)0.25f);
-                if (!BBSTogetherFix14.editorTypesMatch(pos.editorType, BBSTogetherFix14.replayEditorType(self.replayEditor))) continue;
+                if (!CameraKeyframeSync.editorTypesMatch(pos.editorType, CameraKeyframeSync.replayEditorType(self.replayEditor))) continue;
                 int screenX = self.replayEditor.keyframeEditor.view.toGraphX((double)pos.playheadTick);
                 Area viewArea = self.replayEditor.keyframeEditor.view.area;
                 if (screenX < viewArea.x || screenX > viewArea.ex()) continue;
@@ -603,7 +603,7 @@ public class UIFilmPanelMixin {
             UUID uuid = entry.getKey();
             if (MinecraftClient.getInstance().player != null && uuid.equals(MinecraftClient.getInstance().player.getUuid())) continue;
             TogetherClientNetwork.CursorPosition pos = entry.getValue();
-            if (!BBSTogetherFix14.shouldUseClipRenderer(pos.editorType, activeEditorType) || (col = TogetherClientNetwork.playerColors.get(uuid)) == null) continue;
+            if (!CameraKeyframeSync.shouldUseClipRenderer(pos.editorType, activeEditorType) || (col = TogetherClientNetwork.playerColors.get(uuid)) == null) continue;
             int lineColor = Colors.setA((int)(col | 0xFF000000), (float)0.25f);
             int screenX = activeClips.toGraphX(pos.playheadTick);
             Area clipsArea = activeClips.area;
@@ -626,7 +626,7 @@ public class UIFilmPanelMixin {
     @Unique
     private void together_fs2AnnounceReplaySelection(UIFilmPanel uIFilmPanel, Film film, boolean bl) {
         Replay replay = uIFilmPanel.replayEditor.getReplay();
-        int n = BBSTogetherFix45.identityReplayIndex(film.replays.getList(), replay);
+        int n = ReplayIndexes.identityReplayIndex(film.replays.getList(), replay);
         String string = film.getId();
         if (n < 0 || !bl && string.equals(this.together_fs2LastSentReplayFilmId) && n == this.together_fs2LastSentReplayIndex) {
             return;
@@ -677,7 +677,7 @@ public class UIFilmPanelMixin {
             return hashMap;
         }
         Replay replay = uIFilmPanel.replayEditor.getReplay();
-        int n3 = BBSTogetherFix45.identityReplayIndex(((Film)uIFilmPanel.getData()).replays.getList(), replay);
+        int n3 = ReplayIndexes.identityReplayIndex(((Film)uIFilmPanel.getData()).replays.getList(), replay);
         if (n3 < 0) {
             return hashMap;
         }
@@ -687,7 +687,7 @@ public class UIFilmPanelMixin {
         for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet()) {
             Integer n4;
             TogetherClientNetwork.CursorPosition cursorPosition = entry.getValue();
-            if (!BBSTogetherFix14.editorTypesMatch(BBSTogetherFix14.replayEditorType(uIFilmPanel.replayEditor), cursorPosition.editorType) || cursorPosition.selectedIndices.isEmpty() || !BBSTogetherFix14.shouldUseReplaySelectionFilter(map, n3, entry.getKey()) || (n4 = TogetherClientNetwork.playerColors.get(entry.getKey())) == null) continue;
+            if (!CameraKeyframeSync.editorTypesMatch(CameraKeyframeSync.replayEditorType(uIFilmPanel.replayEditor), cursorPosition.editorType) || cursorPosition.selectedIndices.isEmpty() || !CameraKeyframeSync.shouldUseReplaySelectionFilter(map, n3, entry.getKey()) || (n4 = TogetherClientNetwork.playerColors.get(entry.getKey())) == null) continue;
             int n5 = Colors.setA((int)(n4 | 0xFF000000), (float)0.55f);
             for (Integer n6 : cursorPosition.selectedIndices) {
                 int n7 = together_fs2VisibleSheetIndex(uIFilmPanel, list, n6 >> 16 & 0xFFFF);
@@ -734,19 +734,19 @@ public class UIFilmPanelMixin {
             return;
         }
         Replay replay = uIFilmPanel.replayEditor.getReplay();
-        int n = BBSTogetherFix45.identityReplayIndex(((Film)uIFilmPanel.getData()).replays.getList(), replay);
+        int n = ReplayIndexes.identityReplayIndex(((Film)uIFilmPanel.getData()).replays.getList(), replay);
         if (n < 0) {
             return;
         }
         String string = ((Film)uIFilmPanel.getData()).getId();
         Map<Integer, List<UUID>> map = TogetherClientNetwork.replaySelections.get(string);
-        int n2 = BBSTogetherFix14.replayEditorType(uIFilmPanel.replayEditor);
+        int n2 = CameraKeyframeSync.replayEditorType(uIFilmPanel.replayEditor);
         for (Map.Entry<UUID, TogetherClientNetwork.CursorPosition> entry : TogetherClientNetwork.playerCursors.entrySet()) {
             float f;
             int[] nArray;
             int n3;
             TogetherClientNetwork.CursorPosition cursorPosition = entry.getValue();
-            if (!BBSTogetherFix14.editorTypesMatch(n2, cursorPosition.editorType) || cursorPosition.currentTick < 0.0f || cursorPosition.currentRow < 0.0f || !BBSTogetherFix14.shouldUseReplaySelectionFilter(map, n, entry.getKey()) || (n3 = together_fs2VisibleSheetIndex(uIFilmPanel, uIKeyframeDopeSheet.getSheets(), (int)cursorPosition.currentRow)) < 0 || (nArray = BBSTogetherFix14.screenFromKeyframes(uIFilmPanel.replayEditor.keyframeEditor.view, uIKeyframeDopeSheet, cursorPosition.currentTick, f = (float)n3 + (cursorPosition.currentRow - (float)((int)cursorPosition.currentRow)))) == null) continue;
+            if (!CameraKeyframeSync.editorTypesMatch(n2, cursorPosition.editorType) || cursorPosition.currentTick < 0.0f || cursorPosition.currentRow < 0.0f || !CameraKeyframeSync.shouldUseReplaySelectionFilter(map, n, entry.getKey()) || (n3 = together_fs2VisibleSheetIndex(uIFilmPanel, uIKeyframeDopeSheet.getSheets(), (int)cursorPosition.currentRow)) < 0 || (nArray = CameraKeyframeSync.screenFromKeyframes(uIFilmPanel.replayEditor.keyframeEditor.view, uIKeyframeDopeSheet, cursorPosition.currentTick, f = (float)n3 + (cursorPosition.currentRow - (float)((int)cursorPosition.currentRow)))) == null) continue;
             Integer n4 = TogetherClientNetwork.playerColors.get(entry.getKey());
             int n5 = (n4 == null ? 0xFFFFFF : n4) | 0xFF000000;
             uIContext.batcher.icon(Icons.CURSOR, n5, (float)nArray[0], (float)nArray[1]);

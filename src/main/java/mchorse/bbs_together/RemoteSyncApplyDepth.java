@@ -2,7 +2,7 @@ package mchorse.bbs_together;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-public final class BBSTogetherFix22 {
+public final class RemoteSyncApplyDepth {
     private static final AtomicInteger REMOTE_SYNC_APPLY_DEPTH = new AtomicInteger();
 
     /**
@@ -15,7 +15,7 @@ public final class BBSTogetherFix22 {
      */
     private static volatile Runnable beforeRemoteApplyHook;
 
-    private BBSTogetherFix22() {
+    private RemoteSyncApplyDepth() {
     }
 
     public static void setBeforeRemoteApplyHook(Runnable hook) {

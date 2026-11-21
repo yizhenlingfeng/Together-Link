@@ -29,7 +29,7 @@
         "UIDashboardPanelsBbsOpMixin",
         "UIFormCategoryBbsOpMixin",
         "UIFilmPanelSaveSyncMixin",
-        "UIFilmControllerRecordingSyncFix19Mixin",
+        "UIFilmControllerRecordingSyncMixin",
         "BBSClientInitMixin",
         "UIDataOverlayPanelMixin",
         "FilmRecordingControllerBbsOpMixin",

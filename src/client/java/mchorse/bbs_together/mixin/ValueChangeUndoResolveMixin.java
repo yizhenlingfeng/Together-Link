@@ -3,7 +3,7 @@ package mchorse.bbs_together.mixin;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.settings.values.core.ValueGroup;
 import mchorse.bbs_mod.ui.film.utils.undo.ValueChangeUndo;
-import mchorse.bbs_together.BBSTogetherFix67UndoPath;
+import mchorse.bbs_together.UndoPathResolver;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -29,7 +29,7 @@ public abstract class ValueChangeUndoResolveMixin {
             return;
         }
 
-        BaseValue value = BBSTogetherFix67UndoPath.resolve(context, self.name.strings);
+        BaseValue value = UndoPathResolver.resolve(context, self.name.strings);
 
         if (value != null && value.getPath().equals(self.name)) {
             cir.setReturnValue(value);

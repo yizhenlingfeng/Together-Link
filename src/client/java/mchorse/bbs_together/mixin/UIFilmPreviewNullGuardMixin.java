@@ -27,7 +27,7 @@ public class UIFilmPreviewNullGuardMixin {
     private UIFilmPanel panel;
 
     @Inject(method={"render"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix132SkipRenderWithoutFilm(UIContext uIContext, CallbackInfo callbackInfo) {
+    private void togetherSkipRenderWithoutFilm(UIContext uIContext, CallbackInfo callbackInfo) {
         if (this.panel == null || this.panel.getData() == null) {
             callbackInfo.cancel();
         }

@@ -32,7 +32,7 @@ public final class BBSTogetherUndoGuard {
             return;
         }
         registered = true;
-        BBSTogetherFix22.setBeforeRemoteApplyHook(BBSTogetherUndoGuard::sealOpenUndoRecording);
+        RemoteSyncApplyDepth.setBeforeRemoteApplyHook(BBSTogetherUndoGuard::sealOpenUndoRecording);
     }
 
     private static void sealOpenUndoRecording() {

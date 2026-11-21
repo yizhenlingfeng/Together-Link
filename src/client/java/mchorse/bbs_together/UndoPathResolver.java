@@ -14,8 +14,8 @@ import mchorse.bbs_mod.settings.values.base.BaseValueGroup;
  * actually sits at the end of the path. The segments are the ids of the values on the way down,
  * so a plain walk is enough.</p>
  */
-public final class BBSTogetherFix67UndoPath {
-    private BBSTogetherFix67UndoPath() {
+public final class UndoPathResolver {
+    private UndoPathResolver() {
     }
 
     public static BaseValue resolve(BaseValue root, List<String> path) {

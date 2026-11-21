@@ -11,7 +11,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 /**
  * One gate for every server-side film write. Film writes used to be split across the BBS
  * manager-data path, the dedicated Together save/delta path, commits/branches, undo and the
- * legacy Fix28 snapshot channels; each one remembered a different subset of the rules. A
+ * legacy snapshot channels; each one remembered a different subset of the rules. A
  * missing combination (most notably the cooperative-recording lock) let one path overwrite
  * a film that another path had just frozen.
  *

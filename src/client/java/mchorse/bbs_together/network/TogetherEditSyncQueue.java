@@ -3,7 +3,7 @@ package mchorse.bbs_together.network;
 import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
-import mchorse.bbs_together.BBSTogetherFix22;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -84,7 +84,7 @@ public final class TogetherEditSyncQueue {
 
     /** Drains queued edit syncs (throttled to 100 ms), same behavior as before the move. */
     public static void flush(UIFilmPanel panel) {
-        if (QUEUE.isEmpty() || !TogetherClientNetwork.isConnected() || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (QUEUE.isEmpty() || !TogetherClientNetwork.isConnected() || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         long now = System.currentTimeMillis();
@@ -100,7 +100,7 @@ public final class TogetherEditSyncQueue {
      * old branch on the server before the film is replaced with the new branch.
      */
     public static void flushNow(UIFilmPanel panel) {
-        if (QUEUE.isEmpty() || !TogetherClientNetwork.isConnected() || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (QUEUE.isEmpty() || !TogetherClientNetwork.isConnected() || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         lastFlush = System.currentTimeMillis();

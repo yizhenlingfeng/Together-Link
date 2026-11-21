@@ -6,9 +6,9 @@ import mchorse.bbs_mod.film.Film;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.controller.UIFilmController;
-import mchorse.bbs_together.BBSTogetherFix19;
-import mchorse.bbs_together.BBSTogetherFix28Client;
-import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.RecordingSyncGate;
+import mchorse.bbs_together.FilmSnapshotClient;
+import mchorse.bbs_together.ReplayIndexes;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Environment(value=EnvType.CLIENT)
 @Mixin(value={UIFilmController.class}, remap=false)
-public abstract class UIFilmControllerRecordingSyncFix19Mixin {
+public abstract class UIFilmControllerRecordingSyncMixin {
     @Shadow
     @Final
     public UIFilmPanel panel;
@@ -48,7 +48,7 @@ public abstract class UIFilmControllerRecordingSyncFix19Mixin {
             return;
         }
         Film film = (Film)this.panel.getData();
-        BBSTogetherFix28Client.sendRecordingBaselineSnapshot(film.getId(), film);
+        FilmSnapshotClient.sendRecordingBaselineSnapshot(film.getId(), film);
     }
 
     @Inject(method={"stopRecording"}, at={@At(value="HEAD")}, remap=false)
@@ -68,7 +68,7 @@ public abstract class UIFilmControllerRecordingSyncFix19Mixin {
             return;
         }
         Film film = (Film)this.panel.getData();
-        int n = BBSTogetherFix45.identityReplayIndex(film.replays.getList(), replay);
+        int n = ReplayIndexes.identityReplayIndex(film.replays.getList(), replay);
         if (n < 0) {
             return;
         }
@@ -92,7 +92,7 @@ public abstract class UIFilmControllerRecordingSyncFix19Mixin {
             return;
         }
         Film film = (Film)this.panel.getData();
-        BBSTogetherFix19.sendRecordingDelta(film, this.together_recordingReplayIndex, replay, this.together_oldKeyframesData, this.together_oldPropertiesData, this.together_oldActionsData);
+        RecordingSyncGate.sendRecordingDelta(film, this.together_recordingReplayIndex, replay, this.together_oldKeyframesData, this.together_oldPropertiesData, this.together_oldActionsData);
     }
 
     @Inject(method = "toggleControl", at = @At("HEAD"), cancellable = true, remap = false)

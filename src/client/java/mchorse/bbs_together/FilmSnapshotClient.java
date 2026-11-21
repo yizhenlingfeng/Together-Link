@@ -14,8 +14,8 @@ import mchorse.bbs_mod.ui.dashboard.UIDashboard;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.framework.UIBaseMenu;
 import mchorse.bbs_mod.ui.framework.UIScreen;
-import mchorse.bbs_together.BBSTogetherFix28;
-import mchorse.bbs_together.BBSTogetherFix45;
+import mchorse.bbs_together.FilmChannels;
+import mchorse.bbs_together.ReplayIndexes;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.entity.player.PlayerEntity;
@@ -23,7 +23,7 @@ import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.MinecraftClient;
 
-public final class BBSTogetherFix28Client {
+public final class FilmSnapshotClient {
     private static final long CLOSE_SUPPRESS_MS = 5000L;
     private static final long SMALL_REENTER_APPEAR_SKIP_MS = 1500L;
     private static volatile boolean clientReceiversRegistered;
@@ -34,7 +34,7 @@ public final class BBSTogetherFix28Client {
     private static volatile String smallReenterAppearSkipFilmId;
     private static volatile long smallReenterAppearSkipUntil;
 
-    private BBSTogetherFix28Client() {
+    private FilmSnapshotClient() {
     }
 
     public static void registerReceivers() {
@@ -42,10 +42,10 @@ public final class BBSTogetherFix28Client {
             return;
         }
         clientReceiversRegistered = true;
-        TogetherClientNetworking.register((Identifier)BBSTogetherFix28.CLIENT_FILM_JOIN_SOURCE_REQUEST, (class_3102, class_6342, class_25402, packetSender) -> {
+        TogetherClientNetworking.register((Identifier)FilmChannels.CLIENT_FILM_JOIN_SOURCE_REQUEST, (class_3102, class_6342, class_25402, packetSender) -> {
             UUID uUID = class_25402.readUuid();
             String string = class_25402.readString();
-            class_3102.execute(() -> BBSTogetherFix28Client.sendOpenFilmSnapshotTo(uUID, string));
+            class_3102.execute(() -> FilmSnapshotClient.sendOpenFilmSnapshotTo(uUID, string));
         });
     }
 
@@ -65,7 +65,7 @@ public final class BBSTogetherFix28Client {
         String string2 = string == null ? "" : string;
         PacketByteBuf class_25402 = PacketByteBufs.create();
         class_25402.writeString(string2);
-        TogetherClientNetworking.send((Identifier)BBSTogetherFix28.SERVER_FILM_JOIN_REQUEST, (PacketByteBuf)class_25402);
+        TogetherClientNetworking.send((Identifier)FilmChannels.SERVER_FILM_JOIN_REQUEST, (PacketByteBuf)class_25402);
     }
 
     public static void sendFilmLeaveSnapshot(String string, Film film) {
@@ -79,7 +79,7 @@ public final class BBSTogetherFix28Client {
         lastLeaveSnapshotFilmId = string;
         lastLeaveSnapshotAt = l;
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_LEAVE_SNAPSHOT, film.toData(), class_25402 -> {
+            FilmSnapshotClient.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, FilmChannels.SERVER_FILM_LEAVE_SNAPSHOT, film.toData(), class_25402 -> {
                 class_25402.writeString(string);
                 class_25402.writeString(TogetherClientNetwork.filmBranch(string));
             });
@@ -94,7 +94,7 @@ public final class BBSTogetherFix28Client {
             return;
         }
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_STRUCTURE_SNAPSHOT, film.toData(), class_25402 -> {
+            FilmSnapshotClient.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, FilmChannels.SERVER_FILM_STRUCTURE_SNAPSHOT, film.toData(), class_25402 -> {
                 class_25402.writeString(string);
                 class_25402.writeString(TogetherClientNetwork.filmBranch(string));
             });
@@ -109,7 +109,7 @@ public final class BBSTogetherFix28Client {
             return;
         }
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_RECORDING_BASELINE_SNAPSHOT, film.toData(), class_25402 -> {
+            FilmSnapshotClient.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, FilmChannels.SERVER_RECORDING_BASELINE_SNAPSHOT, film.toData(), class_25402 -> {
                 class_25402.writeString(string);
                 class_25402.writeString(TogetherClientNetwork.filmBranch(string));
             });
@@ -120,16 +120,16 @@ public final class BBSTogetherFix28Client {
     }
 
     public static void sendCachedFilmLeaveSnapshot() {
-        UIFilmPanel uIFilmPanel = BBSTogetherFix28Client.getOpenFilmPanel();
+        UIFilmPanel uIFilmPanel = FilmSnapshotClient.getOpenFilmPanel();
         if (uIFilmPanel == null || uIFilmPanel.getData() == null) {
             return;
         }
         Film film = (Film)uIFilmPanel.getData();
-        BBSTogetherFix28Client.sendFilmLeaveSnapshot(film.getId(), film);
+        FilmSnapshotClient.sendFilmLeaveSnapshot(film.getId(), film);
     }
 
     public static void sendCachedFilmSmallExit() {
-        UIFilmPanel uIFilmPanel = BBSTogetherFix28Client.getOpenFilmPanel();
+        UIFilmPanel uIFilmPanel = FilmSnapshotClient.getOpenFilmPanel();
         if (uIFilmPanel == null || uIFilmPanel.getData() == null) {
             return;
         }
@@ -138,16 +138,16 @@ public final class BBSTogetherFix28Client {
         if (string == null || string.isEmpty()) {
             return;
         }
-        BBSTogetherFix28Client.sendFilmLeaveSnapshot(string, film);
-        BBSTogetherFix28Client.markCloseSaveBroadcastSuppressed(string);
-        BBSTogetherFix28Client.sendFilmJoinRequest("");
+        FilmSnapshotClient.sendFilmLeaveSnapshot(string, film);
+        FilmSnapshotClient.markCloseSaveBroadcastSuppressed(string);
+        FilmSnapshotClient.sendFilmJoinRequest("");
         TogetherClientNetwork.sendReplaySelection(string, -1);
         TogetherClientNetwork.sendCursorPosition(string, -1, -1.0f, -1.0f, Collections.emptyList(), uIFilmPanel.getCursor());
         TogetherClientNetwork.sendFilmSelection("");
     }
 
     public static void sendCachedFilmSmallReenter() {
-        UIFilmPanel uIFilmPanel = BBSTogetherFix28Client.getOpenFilmPanel();
+        UIFilmPanel uIFilmPanel = FilmSnapshotClient.getOpenFilmPanel();
         if (uIFilmPanel == null || !uIFilmPanel.isVisible() || uIFilmPanel.getData() == null) {
             return;
         }
@@ -158,15 +158,15 @@ public final class BBSTogetherFix28Client {
         }
         TogetherClientNetwork.playerCursors.clear();
         TogetherClientNetwork.sendFilmSelection(string);
-        TogetherClientNetwork.sendReplaySelection(string, BBSTogetherFix28Client.getSelectedReplayIndex(uIFilmPanel, film));
-        BBSTogetherFix28Client.sendFilmJoinRequest(string);
-        BBSTogetherFix28Client.scheduleSmallReenterReplaySelection(uIFilmPanel, string, 150L);
-        BBSTogetherFix28Client.scheduleSmallReenterReplaySelection(uIFilmPanel, string, 450L);
-        BBSTogetherFix28Client.scheduleSmallReenterReplaySelection(uIFilmPanel, string, 900L);
+        TogetherClientNetwork.sendReplaySelection(string, FilmSnapshotClient.getSelectedReplayIndex(uIFilmPanel, film));
+        FilmSnapshotClient.sendFilmJoinRequest(string);
+        FilmSnapshotClient.scheduleSmallReenterReplaySelection(uIFilmPanel, string, 150L);
+        FilmSnapshotClient.scheduleSmallReenterReplaySelection(uIFilmPanel, string, 450L);
+        FilmSnapshotClient.scheduleSmallReenterReplaySelection(uIFilmPanel, string, 900L);
     }
 
     public static void markSmallReenterAppearJoinSuppressed() {
-        UIFilmPanel uIFilmPanel = BBSTogetherFix28Client.getOpenFilmPanel();
+        UIFilmPanel uIFilmPanel = FilmSnapshotClient.getOpenFilmPanel();
         if (uIFilmPanel == null || uIFilmPanel.getData() == null) {
             return;
         }
@@ -194,7 +194,7 @@ public final class BBSTogetherFix28Client {
         if (string == null || string.isEmpty()) {
             return false;
         }
-        UUID uUID = BBSTogetherFix28Client.localPlayerUuid();
+        UUID uUID = FilmSnapshotClient.localPlayerUuid();
         for (Map.Entry<UUID, String> entry : TogetherClientNetwork.filmSelections.entrySet()) {
             if (entry.getKey().equals(uUID) || !string.equals(entry.getValue())) continue;
             return true;
@@ -223,7 +223,7 @@ public final class BBSTogetherFix28Client {
     }
 
     private static void sendOpenFilmSnapshotTo(UUID uUID, String string) {
-        UIFilmPanel uIFilmPanel = BBSTogetherFix28Client.getOpenFilmPanel();
+        UIFilmPanel uIFilmPanel = FilmSnapshotClient.getOpenFilmPanel();
         if (uUID == null || string == null || string.isEmpty() || uIFilmPanel == null || uIFilmPanel.getData() == null) {
             return;
         }
@@ -232,7 +232,7 @@ public final class BBSTogetherFix28Client {
             return;
         }
         try {
-            BBSTogetherFix28Client.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, BBSTogetherFix28.SERVER_FILM_JOIN_SNAPSHOT, film.toData(), class_25402 -> {
+            FilmSnapshotClient.getClientPacketCrusher().send((PlayerEntity)MinecraftClient.getInstance().player, FilmChannels.SERVER_FILM_JOIN_SNAPSHOT, film.toData(), class_25402 -> {
                 class_25402.writeUuid(uUID);
                 class_25402.writeString(string);
             });
@@ -258,7 +258,7 @@ public final class BBSTogetherFix28Client {
             return -1;
         }
         Replay replay = uIFilmPanel.replayEditor.getReplay();
-        return replay == null ? -1 : BBSTogetherFix45.identityReplayIndex(film.replays.getList(), replay);
+        return replay == null ? -1 : ReplayIndexes.identityReplayIndex(film.replays.getList(), replay);
     }
 
     private static void scheduleSmallReenterReplaySelection(UIFilmPanel uIFilmPanel, String string, long l) {
@@ -276,7 +276,7 @@ public final class BBSTogetherFix28Client {
                 }
                 Film film = (Film)uIFilmPanel.getData();
                 if (string.equals(film.getId())) {
-                    TogetherClientNetwork.sendReplaySelection(string, BBSTogetherFix28Client.getSelectedReplayIndex(uIFilmPanel, film));
+                    TogetherClientNetwork.sendReplaySelection(string, FilmSnapshotClient.getSelectedReplayIndex(uIFilmPanel, film));
                 }
             });
         }, "BBSTogether small reenter replay selection");

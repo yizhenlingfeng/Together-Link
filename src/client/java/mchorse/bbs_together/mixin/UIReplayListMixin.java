@@ -18,7 +18,7 @@ import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.IUIElement;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
 import mchorse.bbs_mod.ui.framework.elements.events.UIRemovedEvent;
-import mchorse.bbs_together.BBSTogetherFixReplayStructure;
+import mchorse.bbs_together.ReplayStructureRecovery;
 import mchorse.bbs_together.bbsop.BbsOpClientState;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import mchorse.bbs_together.ui.UIPlayerFaceRenderer;
@@ -54,7 +54,7 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"pasteReplay"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix1615BeforePasteReplay(MapType mapType, CallbackInfo callbackInfo) {
+    private void togetherBeforePasteReplay(MapType mapType, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
             return;
@@ -63,12 +63,12 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"pasteReplay"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133PasteReplay(MapType mapType, CallbackInfo callbackInfo) {
+    private void togetherPasteReplay(MapType mapType, CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
     @Inject(method={"fromModelBlock(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;)V"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix1615BeforeFromModelBlock(ModelBlockEntity modelBlockEntity, CallbackInfo callbackInfo) {
+    private void togetherBeforeFromModelBlock(ModelBlockEntity modelBlockEntity, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
             return;
@@ -77,12 +77,12 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"fromModelBlock(Lmchorse/bbs_mod/blocks/entities/ModelBlockEntity;)V"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133FromModelBlock(ModelBlockEntity modelBlockEntity, CallbackInfo callbackInfo) {
+    private void togetherFromModelBlock(ModelBlockEntity modelBlockEntity, CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
     @Inject(method={"addReplay(Lorg/joml/Vector3d;FF)V"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix1615BeforeAddReplay(Vector3d vector3d, float f, float f2, CallbackInfo callbackInfo) {
+    private void togetherBeforeAddReplay(Vector3d vector3d, float f, float f2, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
             return;
@@ -91,12 +91,12 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"addReplay(Lorg/joml/Vector3d;FF)V"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix1615AddReplay(Vector3d vector3d, float f, float f2, CallbackInfo callbackInfo) {
+    private void togetherAddReplay(Vector3d vector3d, float f, float f2, CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
     @Inject(method={"fromCamera"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix1615BeforeFromCamera(int n, CallbackInfo callbackInfo) {
+    private void togetherBeforeFromCamera(int n, CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
             return;
@@ -105,12 +105,12 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"fromCamera"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix1615FromCamera(int n, CallbackInfo callbackInfo) {
+    private void togetherFromCamera(int n, CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
     @Inject(method={"dupeReplay"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix1615BeforeDupeReplay(CallbackInfo callbackInfo) {
+    private void togetherBeforeDupeReplay(CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
             return;
@@ -119,12 +119,12 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"dupeReplay"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133DupeReplay(CallbackInfo callbackInfo) {
+    private void togetherDupeReplay(CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
     @Inject(method={"removeReplay"}, at={@At(value="HEAD")}, cancellable=true, remap=false)
-    private void together_fix1615BeforeRemoveReplay(CallbackInfo callbackInfo) {
+    private void togetherBeforeRemoveReplay(CallbackInfo callbackInfo) {
         if (!together_mayEditFilm()) {
             callbackInfo.cancel();
             return;
@@ -133,7 +133,7 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"removeReplay"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133RemoveReplay(CallbackInfo callbackInfo) {
+    private void togetherRemoveReplay(CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
@@ -146,7 +146,7 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"applyReplayCategory"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133ApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
+    private void togetherApplyReplayCategory(List<Replay> list, String string, CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
@@ -159,7 +159,7 @@ public class UIReplayListMixin {
     }
 
     @Inject(method={"removeReplayCategory"}, at={@At(value="TAIL")}, remap=false)
-    private void together_fix133RemoveReplayCategory(String string, CallbackInfo callbackInfo) {
+    private void togetherRemoveReplayCategory(String string, CallbackInfo callbackInfo) {
         this.together_sendReplayStructure();
     }
 
@@ -310,13 +310,13 @@ public class UIReplayListMixin {
     }
 
     private void together_captureReplayStructure() {
-        this.together_replaysBeforeStructureChange = BBSTogetherFixReplayStructure.capture((UIReplayList)(Object)this);
+        this.together_replaysBeforeStructureChange = ReplayStructureRecovery.capture((UIReplayList)(Object)this);
     }
 
     private void together_sendReplayStructure() {
         List<Replay> list = this.together_replaysBeforeStructureChange;
         this.together_replaysBeforeStructureChange = null;
-        BBSTogetherFixReplayStructure.sendIfChanged((UIReplayList)(Object)this, list);
+        ReplayStructureRecovery.sendIfChanged((UIReplayList)(Object)this, list);
     }
 }
 

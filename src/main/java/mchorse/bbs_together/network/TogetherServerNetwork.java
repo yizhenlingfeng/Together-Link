@@ -66,8 +66,8 @@ import mchorse.bbs_mod.utils.colors.Colors;
 import mchorse.bbs_mod.utils.keyframes.KeyframeChannel;
 
 import mchorse.bbs_mod.utils.clips.Clip;
-import mchorse.bbs_together.BBSTogetherFix18;
-import mchorse.bbs_together.BBSTogetherFix28Server;
+import mchorse.bbs_together.ReplayMerge;
+import mchorse.bbs_together.FilmSnapshotServer;
 import mchorse.bbs_together.TogetherSettings;
 import mchorse.bbs_together.bbsop.BbsOpDomain;
 import mchorse.bbs_together.bbsop.BbsOpManager;
@@ -575,7 +575,7 @@ public class TogetherServerNetwork {
         TogetherServerNetworking.register((Identifier)SERVER_COMMIT_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleCommitCreate(server, player, buf));
         TogetherServerNetworking.register((Identifier)SERVER_BRANCH_CREATE, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCreate(server, player, buf));
         TogetherServerNetworking.register((Identifier)SERVER_BRANCH_CHECKOUT, (server, player, handler, buf, resp) -> TogetherServerNetwork.handleBranchCheckout(server, player, buf));
-        BBSTogetherFix28Server.registerReceivers();
+        FilmSnapshotServer.registerReceivers();
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             TogetherServerNetwork.sweepUploadAggregates(server);
             CoopSessionManager.sweep(server);
@@ -638,7 +638,7 @@ public class TogetherServerNetwork {
         TransferLog.reset();
         CoopSessionManager.reset();
         ClipLockGuard.reset();
-        BBSTogetherFix28Server.resetState();
+        FilmSnapshotServer.resetState();
     }
 
     public static List<Text> diagLines(MinecraftServer server) {
@@ -2187,7 +2187,7 @@ public class TogetherServerNetwork {
                     if (CoopSessionManager.onRecordingFinished(server, online, filmId, replayIndex, replayData.asMap())) {
                         return;
                     }
-                    BBSTogetherFix18.mergeRecordingFinished(filmId, replayIndex, replayData, server, branch);
+                    ReplayMerge.mergeRecordingFinished(filmId, replayIndex, replayData, server, branch);
                     recordingPlayers.remove(playerId);
                     pendingStopPlayers.remove(playerId);
                     if (pendingStopPlayers.isEmpty()) {

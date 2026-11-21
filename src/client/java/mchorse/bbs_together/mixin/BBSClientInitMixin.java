@@ -2,7 +2,7 @@ package mchorse.bbs_together.mixin;
 
 import mchorse.bbs_mod.BBSModClient;
 import mchorse.bbs_mod.film.Recorder;
-import mchorse.bbs_together.BBSTogetherFix66Client;
+import mchorse.bbs_together.ClientInitHooks;
 import mchorse.bbs_together.network.CoopClient;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -29,7 +29,7 @@ public class BBSClientInitMixin {
 
     @Inject(method={"onInitializeClient"}, at={@At(value="TAIL")}, remap=false)
     private void onBBSClientInit(CallbackInfo ci) {
-        BBSTogetherFix66Client.registerSettingUIs();
+        ClientInitHooks.registerSettingUIs();
     }
 
     /* Coop recording: the record/replay hotkey's vanilla body requires the film panel to

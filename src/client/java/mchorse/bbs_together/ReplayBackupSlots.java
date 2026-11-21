@@ -12,25 +12,25 @@ import mchorse.bbs_mod.settings.values.base.BaseValue;
 import mchorse.bbs_mod.ui.film.UIFilmPanel;
 import mchorse.bbs_mod.ui.film.replays.UIReplayList;
 import mchorse.bbs_mod.utils.manager.storage.CompressedDataStorage;
-import mchorse.bbs_together.BBSTogetherFix22;
+import mchorse.bbs_together.RemoteSyncApplyDepth;
 import mchorse.bbs_together.network.TogetherClientNetwork;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ServerInfo;
 
-public final class BBSTogetherFix33Client {
+public final class ReplayBackupSlots {
     private static final int BACKUP_SLOTS = 10;
     private static final Map<String, Integer> BACKUP_SLOT_BY_FILM = new ConcurrentHashMap<String, Integer>();
 
-    private BBSTogetherFix33Client() {
+    private ReplayBackupSlots() {
     }
 
     public static void writePeriodicClientBackup(Film film) {
-        if (film == null || film.getId() == null || film.getId().isEmpty() || !TogetherClientNetwork.isConnected() || BBSTogetherFix33Client.isIntegratedHost()) {
+        if (film == null || film.getId() == null || film.getId().isEmpty() || !TogetherClientNetwork.isConnected() || ReplayBackupSlots.isIntegratedHost()) {
             return;
         }
         try {
-            File file = BBSTogetherFix33Client.getBackupFolder(film.getId());
-            String string = BBSTogetherFix33Client.sanitizePathPart(film.getId());
+            File file = ReplayBackupSlots.getBackupFolder(film.getId());
+            String string = ReplayBackupSlots.sanitizePathPart(film.getId());
             int n3 = BACKUP_SLOT_BY_FILM.merge(film.getId(), 1, (n, n2) -> (n + 1) % 10);
             File file2 = new File(file, string + "." + n3 + ".dat");
             MapType mapType = film.toData().asMap();
@@ -43,7 +43,7 @@ public final class BBSTogetherFix33Client {
     }
 
     public static void broadcastReplayStructureChanged(UIReplayList uIReplayList) {
-        if (uIReplayList == null || uIReplayList.panel == null || uIReplayList.panel.getData() == null || !TogetherClientNetwork.isConnected() || BBSTogetherFix22.isApplyingRemoteSync()) {
+        if (uIReplayList == null || uIReplayList.panel == null || uIReplayList.panel.getData() == null || !TogetherClientNetwork.isConnected() || RemoteSyncApplyDepth.isApplyingRemoteSync()) {
             return;
         }
         Film film = (Film)uIReplayList.panel.getData();
@@ -52,7 +52,7 @@ public final class BBSTogetherFix33Client {
             return;
         }
         TogetherClientNetwork.sendSyncDataWithPath(string, Arrays.asList("replays"), (BaseValue)film.replays);
-        BBSTogetherFix33Client.sendCurrentReplaySelection(uIReplayList.panel, film);
+        ReplayBackupSlots.sendCurrentReplaySelection(uIReplayList.panel, film);
     }
 
     public static void reannounceReplaySelectionAfterFullSync(UIFilmPanel uIFilmPanel) {
@@ -64,10 +64,10 @@ public final class BBSTogetherFix33Client {
         if (string == null || string.isEmpty()) {
             return;
         }
-        BBSTogetherFix33Client.sendCurrentReplaySelection(uIFilmPanel, film);
-        BBSTogetherFix33Client.scheduleReplaySelection(uIFilmPanel, string, 150L);
-        BBSTogetherFix33Client.scheduleReplaySelection(uIFilmPanel, string, 450L);
-        BBSTogetherFix33Client.scheduleReplaySelection(uIFilmPanel, string, 900L);
+        ReplayBackupSlots.sendCurrentReplaySelection(uIFilmPanel, film);
+        ReplayBackupSlots.scheduleReplaySelection(uIFilmPanel, string, 150L);
+        ReplayBackupSlots.scheduleReplaySelection(uIFilmPanel, string, 450L);
+        ReplayBackupSlots.scheduleReplaySelection(uIFilmPanel, string, 900L);
     }
 
     private static void sendCurrentReplaySelection(UIFilmPanel uIFilmPanel, Film film) {
@@ -95,7 +95,7 @@ public final class BBSTogetherFix33Client {
                 }
                 Film film = (Film)uIFilmPanel.getData();
                 if (string.equals(film.getId())) {
-                    BBSTogetherFix33Client.sendCurrentReplaySelection(uIFilmPanel, film);
+                    ReplayBackupSlots.sendCurrentReplaySelection(uIFilmPanel, film);
                 }
             });
         }, "BBSTogether replay selection reannounce");
@@ -110,8 +110,8 @@ public final class BBSTogetherFix33Client {
     private static File getBackupFolder(String string) {
         MinecraftClient class_3102 = MinecraftClient.getInstance();
         File file = class_3102.runDirectory;
-        String string2 = BBSTogetherFix33Client.getWorldFolderName(class_3102);
-        return new File(new File(new File(file, "saves"), string2), "bbstogether_film_backups/" + BBSTogetherFix33Client.sanitizePathPart(string));
+        String string2 = ReplayBackupSlots.getWorldFolderName(class_3102);
+        return new File(new File(new File(file, "saves"), string2), "bbstogether_film_backups/" + ReplayBackupSlots.sanitizePathPart(string));
     }
 
     private static String getWorldFolderName(MinecraftClient class_3102) {
@@ -121,7 +121,7 @@ public final class BBSTogetherFix33Client {
         if (string == null || string.isBlank()) {
             string = "bbstogether_remote";
         }
-        return BBSTogetherFix33Client.sanitizePathPart(string);
+        return ReplayBackupSlots.sanitizePathPart(string);
     }
 
     private static String sanitizePathPart(String string) {
