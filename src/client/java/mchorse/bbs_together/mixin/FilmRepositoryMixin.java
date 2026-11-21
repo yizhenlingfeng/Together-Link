@@ -25,7 +25,7 @@ import java.util.function.Consumer;
 @Mixin(FilmRepository.class)
 public class FilmRepositoryMixin
 {
-    @Inject(method = "load", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "load", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs$useCachedFilm(String id, Consumer<Film> callback, CallbackInfo ci)
     {
         /* Single-player loads from the local file and is already fast; using the cache there

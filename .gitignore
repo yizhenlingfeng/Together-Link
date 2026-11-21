@@ -83,3 +83,6 @@ dist/*.bak
 
 # Client output captured while debugging a network session
 /client-log.txt
+
+# Scratch scripts and reports from source/mixin audits
+.audit/

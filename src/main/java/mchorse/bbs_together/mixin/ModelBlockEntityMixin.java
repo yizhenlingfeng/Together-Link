@@ -27,7 +27,7 @@ import java.util.UUID;
 @Mixin(ModelBlockEntity.class)
 public class ModelBlockEntityMixin
 {
-    @Inject(method = "updateForm", at = @At("TAIL"))
+    @Inject(method = "updateForm", at = @At("TAIL"), remap = false)
     private void together$recordModelBlockPick(MapType data, World world, CallbackInfo ci)
     {
         try

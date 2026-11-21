@@ -10,7 +10,7 @@ Together Link (mod ID: `bbs_together`) is a multiplayer collaboration extension 
 
 | Build | Minecraft | Java | Fabric Loader | BBS FS | Status |
 |---|---|---|---|---|---|
-| Universal | 1.20.1 – 1.20.4 | 17+ | >= 0.15.6 | >= 2.6 (2.7 recommended) | Primary |
+| Universal | 1.20.1 – 1.20.4 | 17+ | >= 0.15.6 | >= 2.7-1.20.1 | Primary |
 | 1.21.11 compatibility | 1.21.11 | 21+ | >= 0.19.3 | 2.7-1.21.11 | Experimental |
 
 Current version: **2.1**. Fabric API is required; licensed under MIT.

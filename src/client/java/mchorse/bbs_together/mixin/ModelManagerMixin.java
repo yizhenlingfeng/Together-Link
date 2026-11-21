@@ -31,7 +31,7 @@ public class ModelManagerMixin
     /** The file as it stood before the save; null when it didn't exist or couldn't be parsed. */
     private static final ThreadLocal<MapType> together$beforeSave = new ThreadLocal<>();
 
-    @Inject(method = "saveModel", at = @At("HEAD"))
+    @Inject(method = "saveModel", at = @At("HEAD"), remap = false)
     private void together$captureBeforeSave(ModelInstance instance, List<String[]> renames, CallbackInfoReturnable<Boolean> cir)
     {
         together$beforeSave.remove();
@@ -54,7 +54,7 @@ public class ModelManagerMixin
         {}
     }
 
-    @Inject(method = "saveModel", at = @At("RETURN"))
+    @Inject(method = "saveModel", at = @At("RETURN"), remap = false)
     private void together$reportModelSave(ModelInstance instance, List<String[]> renames, CallbackInfoReturnable<Boolean> cir)
     {
         if (!cir.getReturnValueZ() || instance == null)

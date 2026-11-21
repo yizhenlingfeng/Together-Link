@@ -178,13 +178,13 @@ if (javaRelease < 21) {
 }
 
 /* Loom caches the remapped BBS by its Maven coordinates, and BBS's version does not change while
- * it is being worked on 鈥?so a rebuilt BBS is silently ignored. This notices on its own: if the
+ * it is being worked on —so a rebuilt BBS is silently ignored. This notices on its own: if the
  * published jar is newer than the cached remap, the cache goes. */
 def bbsJar = new File(new File(System.getProperty("user.home")), ".m2/repository/mchorse/bbs/${bbsVersion}/bbs-${bbsVersion}.jar")
 def remapCache = file(".gradle/loom-cache/remapped_mods/remapped/mchorse")
 
 if (bbsJar.exists() && remapCache.exists() && bbsJar.lastModified() > remapCache.lastModified()) {
-	logger.lifecycle("BBS was rebuilt since it was last remapped 鈥?clearing ${remapCache}")
+	logger.lifecycle("BBS was rebuilt since it was last remapped —clearing ${remapCache}")
 	delete(remapCache)
 }
 

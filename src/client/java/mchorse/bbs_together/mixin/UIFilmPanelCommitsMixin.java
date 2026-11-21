@@ -59,7 +59,7 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
 
     /* Dock panel, created before the layout is mounted so the layout can place it */
 
-    @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lmchorse/bbs_mod/ui/framework/elements/layout/UIDockLayout;mount()V"))
+    @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lmchorse/bbs_mod/ui/framework/elements/layout/UIDockLayout;mount()V"), remap = false)
     private void bbs$addDockPanel(CallbackInfo ci)
     {
         UIFilmPanel panel = (UIFilmPanel) (Object) this;
@@ -99,7 +99,7 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
 
     /* Top bar button and the commits page, created once the panel is fully built */
 
-    @Inject(method = "<init>", at = @At("TAIL"))
+    @Inject(method = "<init>", at = @At("TAIL"), remap = false)
     private void bbs$addTopButton(CallbackInfo ci)
     {
         UIFilmPanel panel = (UIFilmPanel) (Object) this;
@@ -265,7 +265,7 @@ public class UIFilmPanelCommitsMixin implements ICommitsTabHost
         this.bbs$refreshTopButton();
     }
 
-    @Inject(method = "getTabIcon", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "getTabIcon", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs$getTabIcon(String id, CallbackInfoReturnable<Icon> cir)
     {
         if (CommitUi.isCommitsTab(id))

@@ -20,7 +20,7 @@ public class UIPanelTopBarCommitsMixin
 {
     @Shadow private UIDataTabs tabs;
 
-    @Inject(method = "afterResizeApplied", at = @At("TAIL"))
+    @Inject(method = "afterResizeApplied", at = @At("TAIL"), remap = false)
     private void bbs_together$offsetTabs(CallbackInfo ci)
     {
         if (this.tabs == null)

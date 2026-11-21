@@ -57,7 +57,7 @@ public abstract class UITabListCommitsMixin implements ITabListLayout
      * current tab, which is how the same film could end up in several tabs after pressing
      * "new tab" and choosing it again.
      */
-    @Inject(method = "pick", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "pick", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs$reuseOpenTab(String id, CallbackInfo ci)
     {
         if (id == null || id.isEmpty())
@@ -189,7 +189,7 @@ public abstract class UITabListCommitsMixin implements ITabListLayout
      * into a commits tab. The close path has already saved the document before removing it, so
      * the forced switch only needs to show the surviving tab.
      */
-    @Inject(method = "switchTab(IZ)V", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "switchTab(IZ)V", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs$switchAfterClose(int index, boolean force, CallbackInfo ci)
     {
         if (!force || index < 0 || index >= this.tabs.size())
@@ -203,7 +203,7 @@ public abstract class UITabListCommitsMixin implements ITabListLayout
         ci.cancel();
     }
 
-    @Inject(method = "getTabLabel", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "getTabLabel", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs_together$getTabLabel(int index, CallbackInfoReturnable<IKey> cir)
     {
         if (index >= 0 && index < this.tabs.size() && CommitUi.isCommitsTab(this.tabs.get(index).dataId))

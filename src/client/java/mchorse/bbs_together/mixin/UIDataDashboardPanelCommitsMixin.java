@@ -21,7 +21,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(UIDataDashboardPanel.class)
 public class UIDataDashboardPanelCommitsMixin
 {
-    @Inject(method = "showTab", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "showTab", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs_together$showTab(String id, CallbackInfo ci)
     {
         if (!(((Object) this) instanceof ICommitsTabHost host))
@@ -40,7 +40,7 @@ public class UIDataDashboardPanelCommitsMixin
         }
     }
 
-    @Inject(method = "getOpenId", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "getOpenId", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs_together$getOpenId(CallbackInfoReturnable<String> cir)
     {
         if ((((Object) this) instanceof ICommitsTabHost host) && host.bbs$isCommitsTabActive())
@@ -49,7 +49,7 @@ public class UIDataDashboardPanelCommitsMixin
         }
     }
 
-    @Inject(method = "saveOpen", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "saveOpen", at = @At("HEAD"), cancellable = true, remap = false)
     private void bbs_together$saveOpen(CallbackInfo ci)
     {
         if ((((Object) this) instanceof ICommitsTabHost host) && host.bbs$isCommitsTabActive())
@@ -59,7 +59,7 @@ public class UIDataDashboardPanelCommitsMixin
     }
 
     /** Let the existing film read-only UI follow a per-film lock. */
-    @Inject(method = "fill", at = @At("TAIL"))
+    @Inject(method = "fill", at = @At("TAIL"), remap = false)
     private void bbs_together$trackCurrentFilm(ValueGroup data, CallbackInfo ci)
     {
         UIDataDashboardPanel self = (UIDataDashboardPanel) (Object) this;
